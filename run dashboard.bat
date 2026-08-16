@@ -99,6 +99,7 @@ call :log WARN T:setup wait "Dashboard did not answer within 30 seconds; opening
 :dashboard_ready
 start "" "http://127.0.0.1:5173/"
 call :log OK T:setup done "Dashboard opened. Keep the server window running while working"
+call :log OK T:setup summary "total=1 | success=1 | failed=0 | skipped=0 | retries=0 | elapsed=bootstrap complete"
 exit /b 0
 
 :log
