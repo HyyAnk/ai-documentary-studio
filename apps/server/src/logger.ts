@@ -36,12 +36,16 @@ function shortWallet(wallet: string): string {
 }
 
 export class StudioLogger {
-  private readonly logDirectory: string;
+  private logDirectory: string;
   private readonly debugEnabled: boolean;
 
   constructor(rootDirectory: string, debugEnabled = false) {
     this.logDirectory = path.join(rootDirectory, ".documentary-studio", "logs");
     this.debugEnabled = debugEnabled;
+  }
+
+  setRuntimeRoot(runtimeRoot: string): void {
+    this.logDirectory = path.join(runtimeRoot, "logs");
   }
 
   async init(): Promise<void> {

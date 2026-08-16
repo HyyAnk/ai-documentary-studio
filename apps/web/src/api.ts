@@ -1,4 +1,4 @@
-import type { AppConfig, Channel, Episode, Scene, Task, TaskEvent, TopicCandidate } from "@studio/shared";
+import type { AppConfig, Channel, Episode, Scene, StorageInfo, Task, TaskEvent, TopicCandidate } from "@studio/shared";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { headers: { "content-type": "application/json", ...(init?.headers ?? {}) }, ...init });
@@ -28,6 +28,8 @@ export const api = {
   approve: (id: string, requestId: number, decision: string) => request<Task>(`/api/tasks/${id}/approval`, { method: "POST", body: JSON.stringify({ request_id: requestId, decision }) }),
   git: () => request<{ branch: string | null; dirty: boolean; changed_files: number }>("/api/git"),
   config: () => request<AppConfig>("/api/config"),
+  storage: () => request<StorageInfo>("/api/storage"),
+  setStorage: (path: string) => request<StorageInfo>("/api/storage", { method: "POST", body: JSON.stringify({ path }) }),
   reconnectCodex: () => request<{ status: string; message?: string }>("/api/codex/reconnect", { method: "POST", body: "{}" }),
 };
 

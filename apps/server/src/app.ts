@@ -1,5 +1,5 @@
 import path from "node:path";
-import { access } from "node:fs/promises";
+import { access, mkdir } from "node:fs/promises";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
@@ -11,10 +11,12 @@ import {
   SceneSchema,
   TopicConfirmInputSchema,
   UpdateChannelInputSchema,
+  StoragePathInputSchema,
+  type StorageInfo,
   type TaskEvent,
   type TaskType,
 } from "@studio/shared";
-import { loadConfig } from "./config.js";
+import { loadConfig, loadStorageRoot, saveStorageRoot } from "./config.js";
 import { CodexAppServerClient } from "./codex.js";
 import { ContextEngine } from "./context.js";
 import { StudioLogger } from "./logger.js";
@@ -30,15 +32,24 @@ export type StudioApp = {
 };
 
 export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? process.cwd()): Promise<StudioApp> {
+  const configuredStorageRoot = await loadStorageRoot(rootDirectory);
   const logger = new StudioLogger(rootDirectory, process.env.STUDIO_DEBUG === "1");
+  logger.setRuntimeRoot(path.join(configuredStorageRoot ?? rootDirectory, ".documentary-studio"));
   await logger.init();
-  const repository = new RepositoryService(rootDirectory);
+  let storageConfigured = Boolean(configuredStorageRoot);
+  const repository = new RepositoryService(rootDirectory, configuredStorageRoot ?? rootDirectory);
   await repository.ensureBootstrap();
   const config = await loadConfig(rootDirectory);
   const codex = new CodexAppServerClient(rootDirectory, config, logger);
   const contextEngine = new ContextEngine(repository, logger);
   const tasks = new TaskManager(repository, contextEngine, codex, config.codex.max_concurrent_tasks, config.video_generation.max_scene_duration_seconds, logger);
   await tasks.load();
+  const getStorageInfo = (): StorageInfo => ({
+    path: repository.storageRoot,
+    default_path: path.resolve(rootDirectory),
+    channel_path: repository.roots.channels,
+    configured: storageConfigured,
+  });
   const server = Fastify({ logger: false });
   const clients = new Set<{ send: (payload: string) => void; readyState: number; OPEN: number }>();
 
@@ -63,6 +74,25 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
   server.get("/api/health", async () => ({ ok: true, service: "ai-documentary-studio", codex_status: tasks.getStatus() }));
   server.get("/api/git", async () => repository.getGitInfo());
   server.get("/api/config", async () => config);
+  server.get("/api/storage", async () => getStorageInfo());
+  server.post("/api/storage", async (request) => {
+    const { path: requestedPath } = StoragePathInputSchema.parse(request.body);
+    if (tasks.hasActiveWork()) throw new RepositoryError("Finish active tasks before changing storage", "STORAGE_BUSY");
+    const nextStorageRoot = path.resolve(rootDirectory, requestedPath);
+    const gitDirectory = path.resolve(rootDirectory, ".git");
+    if (nextStorageRoot === gitDirectory || nextStorageRoot.startsWith(`${gitDirectory}${path.sep}`)) {
+      throw new RepositoryError("Storage folder cannot be inside .git", "INVALID_STORAGE_PATH");
+    }
+    await mkdir(nextStorageRoot, { recursive: true });
+    repository.setStorageRoot(nextStorageRoot);
+    await repository.ensureBootstrap();
+    logger.setRuntimeRoot(repository.roots.runtime);
+    await tasks.reload();
+    await saveStorageRoot(rootDirectory, nextStorageRoot);
+    storageConfigured = true;
+    logger.ok("Content storage folder updated", { step: "storage" });
+    return getStorageInfo();
+  });
   server.get("/api/codex/info", async () => codex.detectInstallation());
   server.get("/api/channels", async (request) => {
     const query = request.query as { includeArchived?: string };

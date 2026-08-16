@@ -26,7 +26,7 @@ import {
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import type { AppConfig, Channel, Episode, Scene, Task, TaskEvent, TopicCandidate } from "@studio/shared";
+import type { AppConfig, Channel, Episode, Scene, StorageInfo, Task, TaskEvent, TopicCandidate } from "@studio/shared";
 import { api, subscribeEvents } from "./api";
 
 type Page = "dashboard" | "channels" | "topics" | "episodes" | "tasks" | "settings";
@@ -38,6 +38,7 @@ export function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [git, setGit] = useState<{ branch: string | null; dirty: boolean; changed_files: number }>({ branch: null, dirty: false, changed_files: 0 });
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
+  const [storage, setStorage] = useState<StorageInfo | null>(null);
   const [codexStatus, setCodexStatus] = useState("disconnected");
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
   const [selectedEpisodeId, setSelectedEpisodeId] = useState<string | null>(null);
@@ -46,12 +47,13 @@ export function App() {
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    const [channelResponse, taskResponse, gitResponse, configResponse] = await Promise.all([api.channels(), api.tasks(), api.git(), api.config()]);
+    const [channelResponse, taskResponse, gitResponse, configResponse, storageResponse] = await Promise.all([api.channels(), api.tasks(), api.git(), api.config(), api.storage()]);
     setChannels(channelResponse.channels);
     setTasks(taskResponse.tasks);
     setCodexStatus(taskResponse.codex_status);
     setGit(gitResponse);
     setAppConfig(configResponse);
+    setStorage(storageResponse);
     setLoading(false);
   }, []);
 
@@ -85,6 +87,7 @@ export function App() {
   };
   const showError = (error: unknown) => setNotice({ tone: "bad", message: error instanceof Error ? error.message : "Something went wrong" });
   const showGood = (message: string) => setNotice({ tone: "good", message });
+  const applyStorage = async (nextStorage: StorageInfo) => { setStorage(nextStorage); await refresh(); };
 
   return (
     <div className="app-shell">
@@ -96,8 +99,9 @@ export function App() {
         {!loading && page === "topics" ? <TopicsView channels={channels} openChannel={openChannel} onNotice={setNotice} /> : null}
         {!loading && page === "episodes" ? <EpisodesView channel={selectedChannel} episodeId={selectedEpisodeId} openChannel={openChannel} openEpisode={openEpisode} maxDuration={appConfig?.video_generation.max_scene_duration_seconds ?? 8} onNotice={setNotice} /> : null}
         {!loading && page === "tasks" ? <TasksView tasks={tasks} onRefresh={refresh} onNotice={setNotice} /> : null}
-        {!loading && page === "settings" ? <SettingsView codexStatus={codexStatus} git={git} /> : null}
+        {!loading && page === "settings" ? <SettingsView codexStatus={codexStatus} git={git} storage={storage} onStorageSaved={applyStorage} onNotice={setNotice} /> : null}
       </main>
+      {storage && !storage.configured ? <StorageSetupModal storage={storage} onSaved={async (next) => { await applyStorage(next); showGood("Content storage is ready"); }} onError={showError} /> : null}
       {showCreate ? <CreateChannelModal onClose={() => setShowCreate(false)} onCreated={async (channelId, message) => { setShowCreate(false); await refresh(); openChannel(channelId); setNotice({ tone: "good", message }); }} onError={showError} /> : null}
       {notice ? <NoticeBanner notice={notice} onClose={() => setNotice(null)} /> : null}
     </div>
@@ -206,7 +210,42 @@ function SceneCard({ scene, maxDuration, copied, busy, onCopy, onChange, onRegen
 
 function TasksView({ tasks, onRefresh, onNotice }: { tasks: Task[]; onRefresh: () => Promise<void>; onNotice: (notice: Notice) => void }) { const cancel = async (task: Task) => { try { await api.cancelTask(task.task_id); onNotice({ tone: "good", message: "Task cancelled" }); await onRefresh(); } catch (error) { onNotice({ tone: "bad", message: (error as Error).message }); } }; return <section className="page-wrap"><PageTitle eyebrow="Operations" title="Tasks" copy="A live view of Codex work, approvals, and queue position." action={<button className="quiet-button" onClick={() => void onRefresh()}><ArrowClockwise size={16} />Refresh</button>} />{tasks.length === 0 ? <EmptyState icon={<ListChecks size={26} />} title="No tasks yet" copy="Codex tasks will appear here as you generate DNA, topics, scripts, or scenes." action="Refresh" onAction={() => void onRefresh()} /> : <div className="task-table">{tasks.map((task) => <div className="task-row" key={task.task_id}><div className={`task-status-dot ${task.status.toLowerCase()}`} /><div className="task-main"><strong>{formatTaskType(task.task_type)}</strong><span>{task.progress_message || task.status}</span></div><span className="task-status-label">{task.status}</span>{task.queue_position !== null ? <span className="queue-label">Queue {task.queue_position + 1}</span> : null}{["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(task.status) ? <button className="icon-button" title="Cancel task" onClick={() => void cancel(task)}><X size={16} /></button> : <span className="task-time">{task.completed_at ? formatDate(task.completed_at) : ""}</span>}</div>)}</div>}</section>; }
 
-function SettingsView({ codexStatus, git }: { codexStatus: string; git: { branch: string | null; dirty: boolean; changed_files: number } }) { return <section className="page-wrap"><PageTitle eyebrow="Workspace" title="Settings" copy="Local configuration stays in the repository, close to the work it governs." /><div className="settings-grid"><section className="panel"><div className="panel-heading"><div><p className="eyebrow">Connection</p><h2>Codex App Server</h2></div><TerminalWindow size={22} /></div><StatusLine label="Status" value={codexStatus} /><StatusLine label="Transport" value="stdio://" /><p className="panel-footnote">Credentials stay server-side. The browser only receives task status and plain-language errors.</p></section><section className="panel"><div className="panel-heading"><div><p className="eyebrow">Source of truth</p><h2>Repository</h2></div><GitBranch size={22} /></div><StatusLine label="Branch" value={git.branch ?? "Not a Git repository"} /><StatusLine label="Working tree" value={git.dirty ? `${git.changed_files} changed files` : "Clean"} /><p className="panel-footnote">Artifacts live in channels, templates, shared rules, and .documentary-studio.</p></section></div></section>; }
+function SettingsView({ codexStatus, git, storage, onStorageSaved, onNotice }: { codexStatus: string; git: { branch: string | null; dirty: boolean; changed_files: number }; storage: StorageInfo | null; onStorageSaved: (storage: StorageInfo) => void | Promise<void>; onNotice: (notice: Notice) => void }) {
+  const [storagePath, setStoragePath] = useState(storage?.path ?? "");
+  const [savingStorage, setSavingStorage] = useState(false);
+  useEffect(() => { setStoragePath(storage?.path ?? ""); }, [storage?.path]);
+  const saveStorage = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!storagePath.trim()) return;
+    setSavingStorage(true);
+    try {
+      const next = await api.setStorage(storagePath);
+      await onStorageSaved(next);
+      onNotice({ tone: "good", message: "Content storage folder updated" });
+    } catch (error) {
+      onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Could not update storage folder" });
+    } finally {
+      setSavingStorage(false);
+    }
+  };
+  return <section className="page-wrap"><PageTitle eyebrow="Workspace" title="Settings" copy="Code stays in the project; channel and episode content lives in the folder you choose." /><div className="settings-grid"><section className="panel"><div className="panel-heading"><div><p className="eyebrow">Connection</p><h2>Codex App Server</h2></div><TerminalWindow size={22} /></div><StatusLine label="Status" value={codexStatus} /><StatusLine label="Transport" value="stdio://" /><p className="panel-footnote">Credentials stay server-side. The browser only receives task status and plain-language errors.</p></section><section className="panel"><div className="panel-heading"><div><p className="eyebrow">Source of truth</p><h2>Repository</h2></div><GitBranch size={22} /></div><StatusLine label="Branch" value={git.branch ?? "Not a Git repository"} /><StatusLine label="Working tree" value={git.dirty ? `${git.changed_files} changed files` : "Clean"} /><p className="panel-footnote">Code, templates, shared rules, and documentation remain in the Git project.</p></section><section className="panel storage-panel"><div className="panel-heading"><div><p className="eyebrow">Local content</p><h2>Storage folder</h2></div><FileText size={22} /></div><StatusLine label="Status" value={storage?.configured ? "Configured" : "Using project folder"} /><div className="storage-location"><span>Channel data folder</span><code>{storage?.channel_path ?? "Loading…"}</code></div><p className="panel-footnote">The tool creates <code>channels/</code> inside this folder. This content stays local and is excluded from Git.</p><form className="storage-form" onSubmit={(event) => void saveStorage(event)}><label>Change parent folder<input aria-label="Content storage folder" value={storagePath} onChange={(event) => setStoragePath(event.target.value)} placeholder="D:\\Documentary Studio Data" /></label><button className="primary-button" disabled={savingStorage || !storagePath.trim()}>{savingStorage ? <CircleNotch className="spin" size={16} /> : <FloppyDisk size={16} />}Save folder</button></form><p className="storage-hint">Existing content is not moved automatically. Choose the folder that should contain your channels.</p></section></div></section>;
+}
+
+function StorageSetupModal({ storage, onSaved, onError }: { storage: StorageInfo; onSaved: (storage: StorageInfo) => void | Promise<void>; onError: (error: unknown) => void }) {
+  const [storagePath, setStoragePath] = useState(storage.default_path);
+  const [busy, setBusy] = useState(false);
+  const save = async (path: string) => {
+    setBusy(true);
+    try {
+      await onSaved(await api.setStorage(path));
+    } catch (error) {
+      onError(error);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return <div className="modal-backdrop" role="presentation"><form className="modal storage-setup-modal" onSubmit={(event) => { event.preventDefault(); void save(storagePath); }}><div className="modal-heading"><div><p className="eyebrow">First launch</p><h2>Choose content storage</h2></div></div><p className="modal-copy">Your code remains in the Git project. Channel DNA, topics, episodes, scripts, and scene files will be created in the folder below and kept out of Git.</p><label>Parent folder for local content<input aria-label="First launch storage folder" autoFocus value={storagePath} onChange={(event) => setStoragePath(event.target.value)} placeholder="D:\\Documentary Studio Data" /></label><p className="storage-hint">The tool will create a <code>channels/</code> folder inside this location.</p><div className="modal-actions"><button type="button" className="quiet-button" disabled={busy} onClick={() => void save(storage.default_path)}>Keep project folder</button><button className="primary-button" disabled={busy || !storagePath.trim()}>{busy ? <CircleNotch className="spin" size={16} /> : <FloppyDisk size={16} />}Use this folder</button></div></form></div>;
+}
 
 function CreateChannelModal({ onClose, onCreated, onError }: { onClose: () => void; onCreated: (channelId: string, message: string) => Promise<void>; onError: (error: unknown) => void }) { const [form, setForm] = useState({ name: "", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" }); const [busy, setBusy] = useState(false); const submit = async (event: React.FormEvent) => { event.preventDefault(); setBusy(true); try { const result = await api.createChannel(form); await onCreated(result.channel.channel_id, result.task ? "Channel created and DNA generation queued" : "Channel created with example DNA"); } catch (error) { onError(error); } finally { setBusy(false); } }; return <div className="modal-backdrop" role="presentation"><form className="modal" onSubmit={(event) => void submit(event)}><div className="modal-heading"><div><p className="eyebrow">New workspace</p><h2>Create channel</h2></div><button type="button" className="icon-button" onClick={onClose}><X size={18} /></button></div><label>Channel name<input required autoFocus value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Your channel name" /></label><label>Concept or description<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Describe the documentary territory in one sentence." /></label><div className="form-grid"><label>Audience<input value={form.target_audience} onChange={(event) => setForm({ ...form, target_audience: event.target.value })} placeholder="Curious generalists" /></label><label>Market<input value={form.market} onChange={(event) => setForm({ ...form, market: event.target.value })} placeholder="Global" /></label></div><div className="dna-choice"><span className="field-label">Starting DNA</span><div className="choice-row">{[["example", "Use example"], ["ai", "Create with AI"]].map(([value, label]) => <button type="button" key={value} className={`choice ${form.dna_mode === value ? "is-selected" : ""}`} onClick={() => setForm({ ...form, dna_mode: value })}><span className="choice-radio" />{label}</button>)}</div></div><div className="modal-actions"><button type="button" className="quiet-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy}>{busy ? <CircleNotch className="spin" size={16} /> : <Plus size={16} />}Create channel</button></div></form></div>; }
 

@@ -6,6 +6,7 @@ The project is ready to be placed in a Git repository.
 
 - TypeScript source, shared schemas, templates, rules, tests, documentation, and `pnpm-lock.yaml`.
 - `channels/` as the local production source of truth. Git tracks only `.gitkeep`; channel and episode content stays on the local machine.
+- `.documentary-studio/storage.local.json` as a local-only pointer to the selected content folder.
 - A GitHub Actions workflow that installs dependencies, typechecks, tests, and builds.
 - `.gitattributes` with normalized text line endings.
 

@@ -140,6 +140,18 @@ export const AppConfigSchema = z.object({
 });
 export type AppConfig = z.infer<typeof AppConfigSchema>;
 
+export const StorageInfoSchema = z.object({
+  path: z.string().min(1),
+  default_path: z.string().min(1),
+  channel_path: z.string().min(1),
+  configured: z.boolean(),
+});
+export type StorageInfo = z.infer<typeof StorageInfoSchema>;
+
+export const StoragePathInputSchema = z.object({
+  path: z.string().trim().min(1).max(2000),
+});
+
 export const CreateChannelInputSchema = z.object({
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(1000).default(""),

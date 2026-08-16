@@ -51,9 +51,9 @@ Choose a license before publishing if this will be public. No license is added a
 
 ## Repository layout
 
-`channels/` is the local production source of truth. Each channel contains `channel.json`, `channel_dna.md`, `style_guide.md`, topic history, and episode folders. Episode artifacts are readable Markdown files plus `episode.json`. These generated and authored content files are intentionally not pushed to GitHub.
+The selected storage folder is the local production source of truth. Inside its `channels/` directory, each channel contains `channel.json`, `channel_dna.md`, `style_guide.md`, topic history, and episode folders. Episode artifacts are readable Markdown files plus `episode.json`. These generated and authored content files are intentionally not pushed to GitHub.
 
-`.documentary-studio/` contains local configuration, task records, Codex metadata, and structured logs. It never replaces the content files as the source of truth.
+`.documentary-studio/` contains project configuration, a local-only storage pointer, task records, Codex metadata, and structured logs. The selected storage folder contains the actual channel and episode files; it never replaces those content files as the source of truth.
 
 ## Current scope
 

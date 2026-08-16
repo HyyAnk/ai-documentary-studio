@@ -52,7 +52,7 @@ export class TaskManager extends EventEmitter {
   }
 
   async load(): Promise<void> {
-    const directory = path.join(this.repository.rootDirectory, ".documentary-studio", "tasks");
+    const directory = path.join(this.repository.roots.runtime, "tasks");
     await mkdir(directory, { recursive: true });
     const entries = await readdir(directory, { withFileTypes: true });
     for (const entry of entries.filter((item) => item.isFile() && item.name.endsWith(".json"))) {
@@ -70,6 +70,15 @@ export class TaskManager extends EventEmitter {
     }
   }
 
+  async reload(): Promise<void> {
+    if (this.hasActiveWork()) throw new RepositoryError("Finish active tasks before changing storage", "STORAGE_BUSY");
+    this.tasks.clear();
+    this.approvalRequests.clear();
+    this.locks.clear();
+    this.connectionStatus = this.codex.isConnected ? "connected" : "disconnected";
+    await this.load();
+  }
+
   list(): Task[] {
     return [...this.tasks.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
@@ -82,6 +91,10 @@ export class TaskManager extends EventEmitter {
 
   getStatus(): typeof this.connectionStatus {
     return this.connectionStatus;
+  }
+
+  hasActiveWork(): boolean {
+    return this.active.size > 0 || this.runningCount > 0 || this.list().some((task) => ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(task.status));
   }
 
   submit(taskType: TaskType, channelId: string, episodeId: string | null, sceneNumber?: number): Task {
@@ -277,7 +290,7 @@ export class TaskManager extends EventEmitter {
   }
 
   private async persist(task: Task): Promise<void> {
-    const directory = path.join(this.repository.rootDirectory, ".documentary-studio", "tasks");
+    const directory = path.join(this.repository.roots.runtime, "tasks");
     await mkdir(directory, { recursive: true });
     await writeFile(path.join(directory, `${task.task_id}.json`), `${JSON.stringify(task, null, 2)}\n`, "utf8");
   }

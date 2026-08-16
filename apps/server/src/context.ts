@@ -22,7 +22,7 @@ export class ContextEngine {
     const excluded = ["other channels", "full unrelated episodes", "raw task history", "secrets and credentials"];
     const add = (file: ContextFile) => files.push(file);
     const read = async (relativePath: string, reason: string): Promise<string> => {
-      const absolute = path.join(this.repository.rootDirectory, relativePath);
+      const absolute = this.repository.resolveContextPath(relativePath);
       try {
         const content = await (await import("node:fs/promises")).readFile(absolute, "utf8");
         add({ path: relativePath, reason, content });
@@ -105,7 +105,7 @@ export class ContextEngine {
   private async readSharedRules(names: string[], target: ContextFile[]): Promise<void> {
     for (const name of names) {
       const relative = `shared/${name}`;
-      const absolute = path.join(this.repository.rootDirectory, relative);
+      const absolute = this.repository.resolveContextPath(relative);
       try {
         const content = await (await import("node:fs/promises")).readFile(absolute, "utf8");
         target.push({ path: relative, reason: "shared production rule", content });
@@ -148,7 +148,7 @@ export class ContextEngine {
       approximate_bytes: Buffer.byteLength(prompt),
       prompt,
     });
-    const auditDirectory = path.join(this.repository.rootDirectory, ".documentary-studio", "logs");
+    const auditDirectory = path.join(this.repository.roots.runtime, "logs");
     await mkdir(auditDirectory, { recursive: true });
     await appendFile(path.join(auditDirectory, "context-manifests.jsonl"), `${JSON.stringify({ ...manifest, created_at: new Date().toISOString() })}\n`, "utf8");
     this.logger.debug("Context manifest assembled", { step: "context", profileId: channelId });

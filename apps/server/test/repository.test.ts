@@ -34,6 +34,21 @@ describe("RepositoryService", () => {
     expect(await readFile(path.join(repository.rootDirectory, "channels", first.slug, "channel_dna.md"), "utf8")).toBe("# Updated DNA\n");
   });
 
+  it("keeps channel artifacts in the selected storage root", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "documentary-studio-project-"));
+    const storageRoot = await mkdtemp(path.join(os.tmpdir(), "documentary-studio-storage-"));
+    roots.push(projectRoot, storageRoot);
+    await mkdir(path.join(projectRoot, "templates"), { recursive: true });
+    await writeFile(path.join(projectRoot, "templates", "example_channel_dna.md"), "# Channel DNA\n", "utf8");
+    await writeFile(path.join(projectRoot, "templates", "example_style_guide.md"), "# Style Guide\n", "utf8");
+    const repository = new RepositoryService(projectRoot, storageRoot);
+    const channel = await repository.createChannel({ name: "External Storage", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });
+
+    expect(repository.storageRoot).toBe(storageRoot);
+    expect(await readFile(path.join(storageRoot, "channels", channel.slug, "channel.json"), "utf8")).toContain(channel.channel_id);
+    await expect(readFile(path.join(projectRoot, "channels", channel.slug, "channel.json"), "utf8")).rejects.toThrow();
+  });
+
   it("rejects unsafe path segments and only creates an episode after confirmation", async () => {
     const repository = await fixture();
     const channel = await repository.createChannel({ name: "Channel", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });

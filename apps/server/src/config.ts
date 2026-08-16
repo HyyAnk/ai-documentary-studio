@@ -19,6 +19,12 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
 };
 
+export type StorageSettings = {
+  storage_path: string;
+};
+
+const storageSettingsFilename = "storage.local.json";
+
 export async function loadConfig(rootDirectory: string): Promise<AppConfig> {
   const configPath = path.join(rootDirectory, ".documentary-studio", "config.json");
   try {
@@ -34,4 +40,20 @@ export async function loadConfig(rootDirectory: string): Promise<AppConfig> {
     await writeFile(configPath, `${JSON.stringify(DEFAULT_CONFIG, null, 2)}\n`, "utf8");
     return DEFAULT_CONFIG;
   }
+}
+
+export async function loadStorageRoot(rootDirectory: string): Promise<string | null> {
+  try {
+    const settingsPath = path.join(rootDirectory, ".documentary-studio", storageSettingsFilename);
+    const raw = JSON.parse(await readFile(settingsPath, "utf8")) as Partial<StorageSettings>;
+    return typeof raw.storage_path === "string" && raw.storage_path.trim() ? path.resolve(rootDirectory, raw.storage_path) : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveStorageRoot(rootDirectory: string, storageRoot: string): Promise<void> {
+  const settingsDirectory = path.join(rootDirectory, ".documentary-studio");
+  await mkdir(settingsDirectory, { recursive: true });
+  await writeFile(path.join(settingsDirectory, storageSettingsFilename), `${JSON.stringify({ storage_path: path.resolve(storageRoot) }, null, 2)}\n`, "utf8");
 }

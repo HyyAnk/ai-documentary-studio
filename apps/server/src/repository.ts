@@ -46,15 +46,36 @@ export type RepositoryRoots = {
 };
 
 export class RepositoryService {
-  readonly roots: RepositoryRoots;
+  roots: RepositoryRoots;
 
-  constructor(readonly rootDirectory: string) {
-    this.roots = {
-      channels: path.join(rootDirectory, "channels"),
-      templates: path.join(rootDirectory, "templates"),
-      shared: path.join(rootDirectory, "shared"),
-      runtime: path.join(rootDirectory, ".documentary-studio"),
+  constructor(readonly rootDirectory: string, storageRoot = rootDirectory) {
+    this.roots = this.createRoots(storageRoot);
+  }
+
+  get storageRoot(): string {
+    return path.dirname(this.roots.channels);
+  }
+
+  setStorageRoot(storageRoot: string): void {
+    this.roots = this.createRoots(storageRoot);
+  }
+
+  resolveContextPath(relativePath: string): string {
+    const normalized = relativePath.replaceAll("\\", "/");
+    const [root, ...segments] = normalized.split("/");
+    const roots: Record<string, string> = {
+      channels: this.roots.channels,
+      templates: this.roots.templates,
+      shared: this.roots.shared,
+      ".documentary-studio": this.roots.runtime,
     };
+    const base = roots[root ?? ""];
+    if (!base || segments.some((segment) => !segment || segment === "." || segment === "..")) {
+      throw new RepositoryError("Unsafe context path", "UNSAFE_PATH");
+    }
+    const resolved = path.resolve(base, ...segments);
+    if (!this.isInside(base, resolved)) throw new RepositoryError("Resolved context path escaped its root", "UNSAFE_PATH");
+    return resolved;
   }
 
   async ensureBootstrap(): Promise<void> {
@@ -372,6 +393,16 @@ export class RepositoryService {
     } catch {
       throw new RepositoryError(`Required template is missing: ${filename}`, "TEMPLATE_MISSING");
     }
+  }
+
+  private createRoots(storageRoot: string): RepositoryRoots {
+    const resolvedStorageRoot = path.resolve(storageRoot);
+    return {
+      channels: path.join(resolvedStorageRoot, "channels"),
+      templates: path.join(this.rootDirectory, "templates"),
+      shared: path.join(this.rootDirectory, "shared"),
+      runtime: path.join(resolvedStorageRoot, ".documentary-studio"),
+    };
   }
 
   private async markTopicSelected(channelId: string, topicId: string): Promise<void> {
