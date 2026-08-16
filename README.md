@@ -34,7 +34,7 @@ pnpm test:e2e
 
 ## Publish to GitHub
 
-The repository is prepared for GitHub. Runtime logs, task records, Playwright output, build folders, local environment files, and the cached Codex binary are ignored. Channel artifacts remain trackable because they are the source of truth.
+The repository is prepared for GitHub. Runtime logs, task records, Playwright output, build folders, local environment files, the cached Codex binary, and local channel artifacts are ignored. Channel content remains on the local machine as the production source of truth; `channels/.gitkeep` only preserves the empty folder in Git.
 
 From the project root:
 
@@ -51,7 +51,7 @@ Choose a license before publishing if this will be public. No license is added a
 
 ## Repository layout
 
-`channels/` is the production source of truth. Each channel contains `channel.json`, `channel_dna.md`, `style_guide.md`, topic history, and episode folders. Episode artifacts are readable Markdown files plus `episode.json`.
+`channels/` is the local production source of truth. Each channel contains `channel.json`, `channel_dna.md`, `style_guide.md`, topic history, and episode folders. Episode artifacts are readable Markdown files plus `episode.json`. These generated and authored content files are intentionally not pushed to GitHub.
 
 `.documentary-studio/` contains local configuration, task records, Codex metadata, and structured logs. It never replaces the content files as the source of truth.
 

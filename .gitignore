@@ -28,3 +28,7 @@ Thumbs.db
 *.key
 *.p12
 *.pfx
+
+# Local production content: keep the folder, never publish channel artifacts.
+channels/*
+!channels/.gitkeep
