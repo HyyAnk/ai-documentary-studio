@@ -132,13 +132,54 @@ export const AppConfigSchema = z.object({
   }),
   codex: z.object({
     max_concurrent_tasks: z.number().int().positive().default(3),
+    transport: z.enum(["app_server", "openai_compatible"]).default("app_server"),
     app_server_endpoint: z.string().default("stdio://"),
     command: z.string().default("codex"),
     model: z.string().default(""),
     experimental_api: z.boolean().default(false),
+    api_base_url: z.string().default(""),
+    api_key: z.string().default(""),
   }),
 });
 export type AppConfig = z.infer<typeof AppConfigSchema>;
+
+export const CodexSettingsInputSchema = z.object({
+  transport: z.enum(["app_server", "openai_compatible"]).optional(),
+  model: z.string().trim().max(160).optional(),
+  api_base_url: z.string().trim().max(2000).optional(),
+  api_key: z.string().max(4000).optional(),
+  app_server_endpoint: z.string().trim().max(2000).optional(),
+  command: z.string().trim().max(500).optional(),
+});
+export type CodexSettingsInput = z.infer<typeof CodexSettingsInputSchema>;
+
+export const CodexModelSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+});
+export type CodexModel = z.infer<typeof CodexModelSchema>;
+
+export const CodexSettingsSchema = z.object({
+  transport: z.enum(["app_server", "openai_compatible"]),
+  model: z.string(),
+  api_base_url: z.string(),
+  has_api_key: z.boolean(),
+  app_server_endpoint: z.string(),
+  command: z.string(),
+});
+export type CodexSettings = z.infer<typeof CodexSettingsSchema>;
+
+export const CodexSettingsResponseSchema = z.object({
+  settings: CodexSettingsSchema,
+  models: CodexModelSchema.array(),
+  installation: z.object({
+    installed: z.boolean(),
+    command: z.string(),
+    version: z.string().nullable(),
+    error: z.string().optional(),
+  }),
+});
+export type CodexSettingsResponse = z.infer<typeof CodexSettingsResponseSchema>;
 
 export const StorageInfoSchema = z.object({
   path: z.string().min(1),

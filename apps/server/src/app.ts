@@ -6,6 +6,7 @@ import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
 import {
   ApprovalDecisionSchema,
+  CodexSettingsInputSchema,
   CreateChannelInputSchema,
   SaveTextInputSchema,
   SceneSchema,
@@ -16,7 +17,7 @@ import {
   type TaskEvent,
   type TaskType,
 } from "@studio/shared";
-import { loadConfig, loadStorageRoot, saveStorageRoot } from "./config.js";
+import { loadConfig, loadStorageRoot, saveCodexSettings, saveStorageRoot } from "./config.js";
 import { CodexAppServerClient } from "./codex.js";
 import { ContextEngine } from "./context.js";
 import { StudioLogger } from "./logger.js";
@@ -39,7 +40,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
   let storageConfigured = Boolean(configuredStorageRoot);
   const repository = new RepositoryService(rootDirectory, configuredStorageRoot ?? rootDirectory);
   await repository.ensureBootstrap();
-  const config = await loadConfig(rootDirectory);
+  let config = await loadConfig(rootDirectory);
   const codex = new CodexAppServerClient(rootDirectory, config, logger);
   const contextEngine = new ContextEngine(repository, logger);
   const tasks = new TaskManager(repository, contextEngine, codex, config.codex.max_concurrent_tasks, config.video_generation.max_scene_duration_seconds, logger);
@@ -73,7 +74,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
 
   server.get("/api/health", async () => ({ ok: true, service: "ai-documentary-studio", codex_status: tasks.getStatus() }));
   server.get("/api/git", async () => repository.getGitInfo());
-  server.get("/api/config", async () => config);
+  server.get("/api/config", async () => ({ ...config, codex: { ...config.codex, api_key: "" } }));
   server.get("/api/storage", async () => getStorageInfo());
   server.post("/api/storage", async (request) => {
     const { path: requestedPath } = StoragePathInputSchema.parse(request.body);
@@ -94,6 +95,40 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     return getStorageInfo();
   });
   server.get("/api/codex/info", async () => codex.detectInstallation());
+  server.get("/api/codex/settings", async () => ({
+    settings: {
+      transport: config.codex.transport,
+      model: config.codex.model,
+      api_base_url: config.codex.api_base_url,
+      has_api_key: Boolean(config.codex.api_key),
+      app_server_endpoint: config.codex.app_server_endpoint,
+      command: config.codex.command,
+    },
+    models: await codex.getModels(),
+    installation: await codex.detectInstallation(),
+  }));
+  server.get("/api/codex/models", async () => ({ models: await codex.getModels() }));
+  server.post("/api/codex/settings", async (request) => {
+    const input = CodexSettingsInputSchema.parse(request.body);
+    if (tasks.hasActiveWork()) throw new RepositoryError("Finish active tasks before changing Codex settings", "CODEX_SETTINGS_BUSY");
+    const wasConnected = codex.isConnected;
+    if (wasConnected) await codex.close();
+    config = await saveCodexSettings(rootDirectory, input);
+    codex.updateConfig(config);
+    if (wasConnected) await codex.connect().catch(() => undefined);
+    return {
+      settings: {
+        transport: config.codex.transport,
+        model: config.codex.model,
+        api_base_url: config.codex.api_base_url,
+        has_api_key: Boolean(config.codex.api_key),
+        app_server_endpoint: config.codex.app_server_endpoint,
+        command: config.codex.command,
+      },
+      models: await codex.getModels(),
+      installation: await codex.detectInstallation(),
+    };
+  });
   server.get("/api/channels", async (request) => {
     const query = request.query as { includeArchived?: string };
     return { channels: await repository.listChannels(query.includeArchived !== "false") };

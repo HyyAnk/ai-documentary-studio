@@ -6,7 +6,7 @@ import readline from "node:readline";
 import { EventEmitter } from "node:events";
 import WebSocket from "ws";
 import path from "node:path";
-import type { AppConfig } from "@studio/shared";
+import { makeId, type AppConfig, type CodexModel } from "@studio/shared";
 import { StudioLogger } from "./logger.js";
 
 type RpcMessage = { id?: number; method?: string; params?: Record<string, unknown>; result?: unknown; error?: { code?: number; message?: string } };
@@ -14,6 +14,13 @@ type Pending = { resolve: (value: unknown) => void; reject: (error: Error) => vo
 const execFileAsync = promisify(execFile);
 
 export type CodexServerRequest = { id: number; method: string; params: Record<string, unknown> };
+
+export const DEFAULT_CODEX_MODELS: CodexModel[] = [
+  { id: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
+  { id: "gpt-5.2-codex", label: "GPT-5.2 Codex" },
+  { id: "gpt-5.1-codex", label: "GPT-5.1 Codex" },
+  { id: "codex-mini-latest", label: "Codex Mini" },
+];
 
 export class CodexUnavailableError extends Error {
   constructor(message: string) {
@@ -30,8 +37,9 @@ export class CodexAppServerClient extends EventEmitter {
   private connected = false;
   private initialized = false;
   private resolvedCommand: string | null = null;
+  private readonly apiControllers = new Map<string, AbortController>();
 
-  constructor(private readonly rootDirectory: string, private readonly config: AppConfig, private readonly logger: StudioLogger) {
+  constructor(private readonly rootDirectory: string, private config: AppConfig, private readonly logger: StudioLogger) {
     super();
   }
 
@@ -39,7 +47,33 @@ export class CodexAppServerClient extends EventEmitter {
     return this.connected && this.initialized;
   }
 
+  updateConfig(config: AppConfig): void {
+    this.config = config;
+    this.resolvedCommand = null;
+  }
+
+  async getModels(): Promise<CodexModel[]> {
+    if (this.config.codex.transport !== "openai_compatible") return this.withCurrentModel(DEFAULT_CODEX_MODELS);
+    try {
+      const response = await this.apiRequest("/models");
+      if (!response.ok) return this.withCurrentModel(DEFAULT_CODEX_MODELS);
+      const payload = await response.json() as { data?: Array<{ id?: unknown; name?: unknown }> };
+      const models = (payload.data ?? [])
+        .map((model) => typeof model.id === "string" ? { id: model.id, label: typeof model.name === "string" && model.name.trim() ? model.name : model.id } : null)
+        .filter((model): model is CodexModel => Boolean(model));
+      return this.withCurrentModel(models.length ? models : DEFAULT_CODEX_MODELS);
+    } catch {
+      return this.withCurrentModel(DEFAULT_CODEX_MODELS);
+    }
+  }
+
   async detectInstallation(): Promise<{ installed: boolean; command: string; version: string | null; error?: string }> {
+    if (this.config.codex.transport === "openai_compatible") {
+      const configured = Boolean(this.config.codex.api_base_url.trim() && this.config.codex.api_key.trim());
+      return configured
+        ? { installed: true, command: "Cockpit API", version: "OpenAI-compatible Responses API" }
+        : { installed: false, command: "Cockpit API", version: null, error: "Set the Cockpit Base URL and API key in Settings" };
+    }
     try {
       const command = await this.resolveCommand();
       const result = await execFileAsync(command, ["--version"], { cwd: this.rootDirectory, timeout: 5_000, windowsHide: true });
@@ -53,9 +87,14 @@ export class CodexAppServerClient extends EventEmitter {
   async connect(): Promise<void> {
     if (this.isConnected) return;
     this.emit("status", "connecting");
-    const endpoint = this.config.codex.app_server_endpoint;
-    if (endpoint === "off") throw new CodexUnavailableError("Codex App Server is disabled");
     try {
+      if (this.config.codex.transport === "openai_compatible") {
+        await this.connectOpenAiCompatible();
+        this.emit("status", "connected");
+        return;
+      }
+      const endpoint = this.config.codex.app_server_endpoint;
+      if (endpoint === "off") throw new CodexUnavailableError("Codex App Server is disabled");
       if (endpoint.startsWith("ws://") || endpoint.startsWith("wss://")) await this.connectWebSocket(endpoint);
       else await this.connectStdio();
       await this.initialize();
@@ -70,6 +109,7 @@ export class CodexAppServerClient extends EventEmitter {
 
   async startThread(): Promise<string> {
     await this.ensureConnected();
+    if (this.config.codex.transport === "openai_compatible") return makeId("thread");
     const params: Record<string, unknown> = { cwd: this.rootDirectory };
     if (this.config.codex.model) params.model = this.config.codex.model;
     const result = await this.request("thread/start", params) as { thread?: { id?: string } };
@@ -80,12 +120,18 @@ export class CodexAppServerClient extends EventEmitter {
 
   async resumeThread(threadId: string): Promise<string> {
     await this.ensureConnected();
+    if (this.config.codex.transport === "openai_compatible") return threadId;
     const result = await this.request("thread/resume", { threadId }) as { thread?: { id?: string } };
     return result.thread?.id ?? threadId;
   }
 
   async startTurn(threadId: string, prompt: string): Promise<string> {
     await this.ensureConnected();
+    if (this.config.codex.transport === "openai_compatible") {
+      const turnId = makeId("turn");
+      setTimeout(() => void this.runOpenAiTurn(threadId, turnId, prompt), 0);
+      return turnId;
+    }
     const result = await this.request("turn/start", {
       threadId,
       input: [{ type: "text", text: prompt }],
@@ -98,14 +144,22 @@ export class CodexAppServerClient extends EventEmitter {
 
   async interruptTurn(threadId: string, turnId: string): Promise<void> {
     if (!this.isConnected) return;
+    if (this.config.codex.transport === "openai_compatible") {
+      this.apiControllers.get(turnId)?.abort();
+      this.apiControllers.delete(turnId);
+      this.emit("notification", { method: "turn/completed", params: { threadId, turnId, turn: { id: turnId, threadId, status: "interrupted" } } });
+      return;
+    }
     await this.request("turn/interrupt", { threadId, turnId });
   }
 
   respond(requestId: number, result: unknown): void {
+    if (this.config.codex.transport === "openai_compatible") return;
     this.send({ id: requestId, result });
   }
 
   rejectRequest(requestId: number, message: string): void {
+    if (this.config.codex.transport === "openai_compatible") return;
     this.send({ id: requestId, error: { code: -32000, message } });
   }
 
@@ -119,6 +173,8 @@ export class CodexAppServerClient extends EventEmitter {
     }
     this.socket?.close();
     this.socket = null;
+    for (const controller of this.apiControllers.values()) controller.abort();
+    this.apiControllers.clear();
     if (this.process && !this.process.killed) this.process.kill();
     this.process = null;
   }
@@ -162,6 +218,49 @@ export class CodexAppServerClient extends EventEmitter {
         reject(error);
       }
     });
+  }
+
+  private async connectOpenAiCompatible(): Promise<void> {
+    if (!this.config.codex.api_base_url.trim()) throw new CodexUnavailableError("Cockpit Base URL is not configured");
+    if (!this.config.codex.api_key.trim()) throw new CodexUnavailableError("Cockpit API key is not configured");
+    const response = await this.apiRequest("/models");
+    if (!response.ok && response.status !== 404 && response.status !== 405) {
+      const detail = await response.text().catch(() => "");
+      throw new CodexUnavailableError(`Cockpit API rejected the connection (${response.status})${detail ? `: ${detail.slice(0, 240)}` : ""}`);
+    }
+    this.connected = true;
+    this.initialized = true;
+  }
+
+  private async runOpenAiTurn(threadId: string, turnId: string, prompt: string): Promise<void> {
+    const controller = new AbortController();
+    this.apiControllers.set(turnId, controller);
+    try {
+      const response = await this.apiRequest("/responses", {
+        method: "POST",
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: this.config.codex.model || "gpt-5.3-codex",
+          input: prompt,
+          stream: false,
+        }),
+      });
+      const body = await response.text();
+      if (!response.ok) throw new Error(`Cockpit API request failed (${response.status}): ${body.slice(0, 400)}`);
+      const output = extractOpenAiOutput(JSON.parse(body) as Record<string, unknown>);
+      this.emit("notification", { method: "item/agentMessage/delta", params: { threadId, turnId, delta: output } });
+      this.emit("notification", { method: "turn/completed", params: { threadId, turnId, turn: { id: turnId, threadId, status: "completed" } } });
+    } catch (error) {
+      if (controller.signal.aborted) {
+        this.emit("notification", { method: "turn/completed", params: { threadId, turnId, turn: { id: turnId, threadId, status: "interrupted" } } });
+      } else {
+        const message = error instanceof Error ? error.message : "Cockpit API request failed";
+        this.emit("notification", { method: "error", params: { threadId, turnId, error: { message } } });
+        this.emit("notification", { method: "turn/completed", params: { threadId, turnId, turn: { id: turnId, threadId, status: "failed", error: { message } } } });
+      }
+    } finally {
+      this.apiControllers.delete(turnId);
+    }
   }
 
   private async connectWebSocket(endpoint: string): Promise<void> {
@@ -252,6 +351,24 @@ export class CodexAppServerClient extends EventEmitter {
     }
   }
 
+  private withCurrentModel(models: CodexModel[]): CodexModel[] {
+    if (!this.config.codex.model || models.some((model) => model.id === this.config.codex.model)) return models;
+    return [{ id: this.config.codex.model, label: this.config.codex.model }, ...models];
+  }
+
+  private apiBaseUrl(): string {
+    const base = this.config.codex.api_base_url.trim().replace(/\/+$/, "");
+    if (!base) throw new CodexUnavailableError("Cockpit Base URL is not configured");
+    return /\/v1$/i.test(base) ? base : `${base}/v1`;
+  }
+
+  private apiRequest(endpoint: string, init: RequestInit = {}): Promise<Response> {
+    const headers = new Headers(init.headers);
+    headers.set("content-type", "application/json");
+    headers.set("authorization", `Bearer ${this.config.codex.api_key.trim()}`);
+    return fetch(`${this.apiBaseUrl()}${endpoint}`, { ...init, headers });
+  }
+
   private request(method: string, params: Record<string, unknown>): Promise<unknown> {
     const id = this.requestId++;
     return new Promise((resolve, reject) => {
@@ -301,4 +418,28 @@ export class CodexAppServerClient extends EventEmitter {
     }
     if (message.method) this.emit("notification", { method: message.method, params: message.params ?? {} });
   }
+}
+
+function extractOpenAiOutput(payload: Record<string, unknown>): string {
+  if (typeof payload.output_text === "string") return payload.output_text;
+  const output = payload.output;
+  if (Array.isArray(output)) {
+    const text = output.flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      const content = (item as { content?: unknown }).content;
+      if (!Array.isArray(content)) return [];
+      return content.flatMap((part) => {
+        if (!part || typeof part !== "object") return [];
+        const value = (part as { text?: unknown }).text;
+        return typeof value === "string" ? [value] : [];
+      });
+    });
+    if (text.length) return text.join("");
+  }
+  const choices = payload.choices;
+  if (Array.isArray(choices)) {
+    const content = (choices[0] as { message?: { content?: unknown } } | undefined)?.message?.content;
+    if (typeof content === "string") return content;
+  }
+  throw new Error("Cockpit API returned no text output");
 }

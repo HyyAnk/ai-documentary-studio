@@ -17,6 +17,8 @@ pnpm dev
 
 Open `http://127.0.0.1:5173`. The browser talks to the local Fastify server on port `4310`; credentials and filesystem access stay on the server.
 
+On Windows, double-click [`run dashboard.bat`](run%20dashboard.bat). It checks Node.js, enables pnpm through Corepack, installs the locked dependencies, starts the local services, and opens the dashboard.
+
 Production build:
 
 ```bash
@@ -47,13 +49,15 @@ git remote add origin https://github.com/<your-account>/<your-repository>.git
 git push -u origin main
 ```
 
-Choose a license before publishing if this will be public. No license is added automatically because that is a legal/project decision.
+This repository includes the MIT license in [`LICENSE`](LICENSE). Review it before redistributing the project.
 
 ## Repository layout
 
 The selected storage folder is the local production source of truth. Inside its `channels/` directory, each channel contains `channel.json`, `channel_dna.md`, `style_guide.md`, topic history, and episode folders. Episode artifacts are readable Markdown files plus `episode.json`. These generated and authored content files are intentionally not pushed to GitHub.
 
 `.documentary-studio/` contains project configuration, a local-only storage pointer, task records, Codex metadata, and structured logs. The selected storage folder contains the actual channel and episode files; it never replaces those content files as the source of truth.
+
+The Codex settings panel supports local Codex App Server and Cockpit's OpenAI-compatible API Service. The API key is stored only in the ignored `.documentary-studio/codex.local.json` file.
 
 ## Current scope
 

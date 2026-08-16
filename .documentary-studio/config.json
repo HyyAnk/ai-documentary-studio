@@ -8,9 +8,12 @@
   },
   "codex": {
     "max_concurrent_tasks": 3,
+    "transport": "app_server",
     "app_server_endpoint": "stdio://",
     "command": "codex",
     "model": "",
-    "experimental_api": false
+    "experimental_api": false,
+    "api_base_url": "",
+    "api_key": ""
   }
 }
