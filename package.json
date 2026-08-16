@@ -1,0 +1,19 @@
+{
+  "name": "ai-documentary-studio",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n server,web -c cyan,magenta \"pnpm --filter @studio/server dev\" \"pnpm --filter @studio/web dev\"",
+    "build": "pnpm -r build",
+    "start": "pnpm --filter @studio/server start",
+    "typecheck": "pnpm --filter @studio/shared build && pnpm -r typecheck",
+    "test": "pnpm --filter @studio/shared build && pnpm --filter @studio/server test",
+    "test:e2e": "pnpm --filter @studio/web test:e2e"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.52.0",
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

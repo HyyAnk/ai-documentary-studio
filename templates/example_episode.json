@@ -1,0 +1,17 @@
+{
+  "episode_id": "episode_example",
+  "channel_id": "channel_example",
+  "slug": "example-episode",
+  "topic": {
+    "title": "Example documentary topic",
+    "premise": "A concise premise used only as a template.",
+    "hook": "A question the audience needs answered."
+  },
+  "stage": "SELECTED",
+  "script_path": "script.md",
+  "scene_plan_path": "scene_plan.md",
+  "dialogue_script_path": "dialogue_script.md",
+  "video_prompts_path": "video_prompts.md",
+  "created_at": "2026-01-01T00:00:00.000Z",
+  "updated_at": "2026-01-01T00:00:00.000Z"
+}
