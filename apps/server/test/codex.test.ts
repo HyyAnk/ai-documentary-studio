@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,11 +10,35 @@ import { StudioLogger } from "../src/logger.js";
 describe("Cockpit OpenAI-compatible transport", () => {
   let server: Server | null = null;
   let temporaryRoot = "";
+  const originalCodexHome = process.env.CODEX_HOME;
 
   afterEach(async () => {
     await new Promise<void>((resolve) => server?.close(() => resolve()) ?? resolve());
     server = null;
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
+    if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = originalCodexHome;
+  });
+
+  it("loads visible models from the local Codex catalog", async () => {
+    temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "documentary-studio-codex-"));
+    const codexHome = path.join(temporaryRoot, "codex-home");
+    await mkdir(codexHome, { recursive: true });
+    await writeFile(path.join(codexHome, "config.toml"), 'model = "gpt-5.6-luna"\nmodel_catalog_json = "catalog.json"\n', "utf8");
+    await writeFile(path.join(codexHome, "catalog.json"), JSON.stringify({ models: [
+      { slug: "gpt-5.6-luna", display_name: "GPT-5.6-Luna", visibility: "list" },
+      { slug: "gpt-image-2", display_name: "GPT Image 2", visibility: "hide" },
+      { slug: "gpt-5.3-codex", display_name: "gpt-5.3-codex", visibility: "list" },
+    ] }), "utf8");
+    process.env.CODEX_HOME = codexHome;
+    const logger = new StudioLogger(temporaryRoot);
+    await logger.init();
+    const client = new CodexAppServerClient(temporaryRoot, DEFAULT_CONFIG, logger);
+
+    await expect(client.getModels()).resolves.toEqual([
+      { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
+      { id: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
+    ]);
   });
 
   it("lists models and bridges a Responses API output into Codex notifications", async () => {

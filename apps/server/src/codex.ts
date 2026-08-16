@@ -1,10 +1,11 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { execFile } from "node:child_process";
-import { copyFile, mkdir, readdir, stat } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { promisify } from "node:util";
 import readline from "node:readline";
 import { EventEmitter } from "node:events";
 import WebSocket from "ws";
+import { homedir } from "node:os";
 import path from "node:path";
 import { makeId, type AppConfig, type CodexModel } from "@studio/shared";
 import { StudioLogger } from "./logger.js";
@@ -16,10 +17,14 @@ const execFileAsync = promisify(execFile);
 export type CodexServerRequest = { id: number; method: string; params: Record<string, unknown> };
 
 export const DEFAULT_CODEX_MODELS: CodexModel[] = [
+  { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+  { id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+  { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
+  { id: "gpt-5.5", label: "GPT-5.5" },
+  { id: "gpt-5.4", label: "GPT-5.4" },
+  { id: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
   { id: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
-  { id: "gpt-5.2-codex", label: "GPT-5.2 Codex" },
-  { id: "gpt-5.1-codex", label: "GPT-5.1 Codex" },
-  { id: "codex-mini-latest", label: "Codex Mini" },
+  { id: "gpt-5.3-codex-spark", label: "GPT-5.3 Codex Spark" },
 ];
 
 export class CodexUnavailableError extends Error {
@@ -53,13 +58,16 @@ export class CodexAppServerClient extends EventEmitter {
   }
 
   async getModels(): Promise<CodexModel[]> {
-    if (this.config.codex.transport !== "openai_compatible") return this.withCurrentModel(DEFAULT_CODEX_MODELS);
+    if (this.config.codex.transport !== "openai_compatible") {
+      const catalogModels = await this.getLocalCatalogModels();
+      return this.withCurrentModel(catalogModels.length ? catalogModels : DEFAULT_CODEX_MODELS);
+    }
     try {
       const response = await this.apiRequest("/models");
       if (!response.ok) return this.withCurrentModel(DEFAULT_CODEX_MODELS);
-      const payload = await response.json() as { data?: Array<{ id?: unknown; name?: unknown }> };
+      const payload = await response.json() as { data?: unknown[] };
       const models = (payload.data ?? [])
-        .map((model) => typeof model.id === "string" ? { id: model.id, label: typeof model.name === "string" && model.name.trim() ? model.name : model.id } : null)
+        .map((model) => this.normalizeModel(model))
         .filter((model): model is CodexModel => Boolean(model));
       return this.withCurrentModel(models.length ? models : DEFAULT_CODEX_MODELS);
     } catch {
@@ -240,7 +248,7 @@ export class CodexAppServerClient extends EventEmitter {
         method: "POST",
         signal: controller.signal,
         body: JSON.stringify({
-          model: this.config.codex.model || "gpt-5.3-codex",
+          model: this.config.codex.model || (await this.getModels())[0]?.id || DEFAULT_CODEX_MODELS[0].id,
           input: prompt,
           stream: false,
         }),
@@ -354,6 +362,61 @@ export class CodexAppServerClient extends EventEmitter {
   private withCurrentModel(models: CodexModel[]): CodexModel[] {
     if (!this.config.codex.model || models.some((model) => model.id === this.config.codex.model)) return models;
     return [{ id: this.config.codex.model, label: this.config.codex.model }, ...models];
+  }
+
+  private async getLocalCatalogModels(): Promise<CodexModel[]> {
+    const codexHome = process.env.CODEX_HOME?.trim() || path.join(homedir(), ".codex");
+    const configText = await readFile(path.join(codexHome, "config.toml"), "utf8").catch(() => "");
+    const catalogReference = configText.match(/^\s*model_catalog_json\s*=\s*["']([^"']+)["']/m)?.[1];
+    if (!catalogReference) return [];
+
+    const catalogPath = path.isAbsolute(catalogReference) ? catalogReference : path.resolve(codexHome, catalogReference);
+    try {
+      const payload = JSON.parse(await readFile(catalogPath, "utf8")) as { models?: unknown };
+      if (!Array.isArray(payload.models)) return [];
+      return payload.models
+        .map((model) => this.normalizeCatalogModel(model))
+        .filter((model): model is CodexModel => Boolean(model));
+    } catch {
+      return [];
+    }
+  }
+
+  private normalizeCatalogModel(value: unknown): CodexModel | null {
+    if (!value || typeof value !== "object") return null;
+    const model = value as Record<string, unknown>;
+    if (model.visibility === "hide") return null;
+    const id = typeof model.slug === "string" ? model.slug.trim() : "";
+    if (!id || this.isNonTextModel(id)) return null;
+    const displayName = typeof model.display_name === "string" && model.display_name.trim() ? model.display_name.trim() : undefined;
+    return { id, label: this.modelLabel(id, displayName) };
+  }
+
+  private normalizeModel(value: unknown): CodexModel | null {
+    if (!value || typeof value !== "object") return null;
+    const model = value as Record<string, unknown>;
+    const id = typeof model.id === "string" ? model.id.trim() : "";
+    if (!id || model.visibility === "hide" || this.isNonTextModel(id)) return null;
+    const displayName = [model.name, model.display_name].find((candidate): candidate is string => typeof candidate === "string" && Boolean(candidate.trim()))?.trim();
+    return { id, label: this.modelLabel(id, displayName) };
+  }
+
+  private isNonTextModel(id: string): boolean {
+    return /(^|[-_])(audio|embedding|image|moderation|realtime|transcri(?:be|ption)?|tts|whisper)([-_]|$)/i.test(id);
+  }
+
+  private modelLabel(id: string, fallback?: string): string {
+    const labels: Record<string, string> = {
+      "gpt-5.6-sol": "GPT-5.6 Sol",
+      "gpt-5.6-terra": "GPT-5.6 Terra",
+      "gpt-5.6-luna": "GPT-5.6 Luna",
+      "gpt-5.5": "GPT-5.5",
+      "gpt-5.4": "GPT-5.4",
+      "gpt-5.4-mini": "GPT-5.4 Mini",
+      "gpt-5.3-codex": "GPT-5.3 Codex",
+      "gpt-5.3-codex-spark": "GPT-5.3 Codex Spark",
+    };
+    return labels[id.toLowerCase()] ?? fallback ?? id;
   }
 
   private apiBaseUrl(): string {
