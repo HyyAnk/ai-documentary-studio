@@ -74,6 +74,19 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .status-dot { width: 6px; height: 6px; display: inline-block; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 16%, transparent); }
 .main-column { min-width: 0; }
 .topbar { height: 78px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 0 46px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--paper) 92%, transparent); }
+.task-activity-bar { position: sticky; z-index: 8; top: 0; min-height: 48px; display: grid; grid-template-columns: auto minmax(150px, 1fr) auto minmax(90px, 180px) auto; align-items: center; gap: 14px; padding: 8px 46px; border-bottom: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line)); background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(14px); }
+.task-activity-bar.is-reconnecting { border-bottom-color: color-mix(in srgb, var(--yellow) 34%, var(--line)); }
+.task-activity-signal { display: flex; align-items: center; gap: 8px; color: var(--accent-deep); font: 600 9px "DM Mono", monospace; letter-spacing: .06em; text-transform: uppercase; }
+.task-activity-bar.is-reconnecting .task-activity-signal { color: var(--yellow); }
+.live-pulse { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 38%, transparent); animation: live-pulse 1.7s ease-out infinite; }
+.task-activity-copy { min-width: 0; display: grid; gap: 2px; }
+.task-activity-copy strong, .task-activity-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-activity-copy strong { font-size: 11px; }
+.task-activity-copy span { color: var(--muted); font-size: 9px; }
+.task-activity-time, .task-elapsed { color: var(--muted); font: 500 9px "DM Mono", monospace; font-variant-numeric: tabular-nums; }
+.task-activity-track, .task-row-progress, .inline-task-track { height: 4px; overflow: hidden; border-radius: 999px; background: var(--soft-muted); }
+.task-activity-track > span, .task-row-progress > span, .inline-task-track > span { display: block; width: 34%; height: 100%; border-radius: inherit; background: var(--accent); animation: task-progress-slide 1.35s ease-in-out infinite; }
+@keyframes live-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 40%, transparent); } 70%, 100% { box-shadow: 0 0 0 7px transparent; } }
 .context-trail, .topbar-meta, .git-readout, .codex-pill { display: flex; align-items: center; }
 .context-trail { gap: 12px; }
 .context-kicker, .eyebrow, .metric-label, .topic-number, .block-heading, .field-label { color: var(--muted); font: 500 10px "DM Mono", monospace; letter-spacing: .12em; text-transform: uppercase; }
@@ -141,6 +154,7 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
 .activity-list, .task-table, .episode-list, .topic-channel-list { border-top: 1px solid var(--line); }
 .activity-row, .task-row, .episode-row, .topic-channel-row { min-height: 63px; display: flex; align-items: center; gap: 13px; border-bottom: 1px solid var(--line); }
 .activity-row, .task-row { padding: 0 2px; }
+.activity-row.is-processing, .task-row.is-processing { background: color-mix(in srgb, var(--accent) 3%, transparent); }
 .activity-row > div:nth-child(2), .task-main { display: grid; gap: 4px; min-width: 0; flex: 1; }
 .activity-row strong, .task-main strong { font-size: 12px; }
 .activity-row span, .task-main span, .activity-status, .task-time { color: var(--muted); font-size: 10px; }
@@ -152,6 +166,7 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
 .task-status-dot.completed { background: var(--green); }
 .task-status-dot.failed { background: var(--accent-deep); }
 .task-status-dot.cancelled { background: var(--muted); }
+.task-row-progress { width: min(260px, 100%); margin-top: 4px; }
 .activity-empty { min-height: 64px; display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
 .page-title { align-items: flex-end; margin-bottom: 42px; }
 .page-title h1 { margin-bottom: 13px; font-size: 52px; }
@@ -178,18 +193,20 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
 .status-line strong { max-width: 60%; overflow: hidden; text-overflow: ellipsis; font: 500 10px "DM Mono", monospace; text-transform: uppercase; text-align: right; }
 .topic-heading { align-items: flex-end; margin-top: 59px; }
 .topic-heading .section-copy { margin-top: 9px; }
-.topic-progress { margin: 0 0 18px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
-.topic-progress-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; }
-.topic-progress-title { display: grid; gap: 5px; min-width: 0; }
-.topic-progress-title .eyebrow { margin: 0; }
-.topic-progress-title strong { font-size: 12px; }
-.topic-progress-time { color: var(--muted); font: 500 10px "DM Mono", monospace; }
-.topic-progress-track { height: 5px; margin-top: 12px; overflow: hidden; border-radius: 999px; background: var(--soft-muted); }
-.topic-progress-fill { display: block; height: 100%; width: 100%; border-radius: inherit; background: var(--green); }
-.topic-progress.queued .topic-progress-fill, .topic-progress.running .topic-progress-fill, .topic-progress.waiting_approval .topic-progress-fill { width: 34%; background: var(--accent); animation: topic-progress-slide 1.35s ease-in-out infinite; }
-.topic-progress.failed .topic-progress-fill { background: var(--accent-deep); }
-.topic-progress-copy { margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
-@keyframes topic-progress-slide { 0% { transform: translateX(-110%); } 55%, 100% { transform: translateX(310%); } }
+.task-progress-panel { margin: 0 0 18px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.task-progress-panel.is-compact { margin: 0; border-width: 0 0 1px; border-radius: 0; background: color-mix(in srgb, var(--accent) 3%, transparent); }
+.task-progress-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; }
+.task-progress-title { display: grid; gap: 5px; min-width: 0; }
+.task-progress-title .eyebrow { margin: 0; }
+.task-progress-title strong { font-size: 12px; }
+.task-progress-time { color: var(--muted); font: 500 10px "DM Mono", monospace; font-variant-numeric: tabular-nums; }
+.task-progress-track { height: 5px; margin-top: 12px; overflow: hidden; border-radius: 999px; background: var(--soft-muted); }
+.task-progress-fill { display: block; height: 100%; width: 100%; border-radius: inherit; background: var(--green); }
+.task-progress-panel.queued .task-progress-fill, .task-progress-panel.running .task-progress-fill, .task-progress-panel.waiting_approval .task-progress-fill { width: 34%; background: var(--accent); animation: task-progress-slide 1.35s ease-in-out infinite; }
+.task-progress-panel.failed .task-progress-fill, .inline-task-state.failed .task-status-dot { background: var(--accent-deep); }
+.task-progress-panel.cancelled .task-progress-fill { background: var(--muted); }
+.task-progress-copy { margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+@keyframes task-progress-slide { 0% { transform: translateX(-110%); } 55%, 100% { transform: translateX(310%); } }
 .dna-panel:not(.is-open) .panel-heading { border-bottom-color: transparent; }
 .dna-toggle svg { transition: transform .18s ease; }
 .dna-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
@@ -220,11 +237,20 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
 .script-preview { min-height: 240px; }
 .scene-list { display: grid; gap: 13px; }
 .scene-card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+.scene-card.is-processing { border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); }
 .scene-card-header { min-height: 53px; padding: 0 17px; border-bottom: 1px solid var(--line); }
 .scene-number { color: var(--accent-deep); font: 500 10px "DM Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
 .duration-input { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--muted); font-size: 10px; }
 .duration-input input { width: 44px; padding: 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); color: var(--ink); font: 500 10px "DM Mono", monospace; text-align: center; }
 .scene-tools { width: auto; justify-content: flex-end; }
+.inline-task-state { min-height: 37px; display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 7px 15px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--accent) 4%, var(--surface)); color: var(--muted); font-size: 9px; }
+.inline-task-state strong { color: var(--ink); font-size: 9px; }
+.inline-task-state > span:nth-child(3) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inline-task-state time { font: 500 9px "DM Mono", monospace; font-variant-numeric: tabular-nums; }
+.inline-task-state .inline-task-track { grid-column: 1 / -1; width: 100%; }
+.inline-task-state.running .task-status-dot, .inline-task-state.queued .task-status-dot, .inline-task-state.waiting_approval .task-status-dot { background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent); }
+.inline-task-state.completed .task-status-dot { background: var(--green); }
+.inline-task-state.cancelled .task-status-dot { background: var(--muted); }
 .scene-columns { display: grid; grid-template-columns: 1fr 1fr; }
 .scene-block { min-width: 0; }
 .scene-block + .scene-block { border-left: 1px solid var(--line); }
@@ -233,6 +259,7 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
 .copy-button { padding: 3px 0; border: 0; background: transparent; color: var(--muted); font: 500 9px "DM Mono", monospace; text-transform: uppercase; }
 .copy-button:hover { color: var(--ink); }
 .scene-block textarea { display: block; width: 100%; min-height: 164px; padding: 15px; border: 0; outline: none; resize: vertical; background: transparent; color: var(--ink); font-size: 11px; line-height: 1.65; }
+.scene-block textarea:disabled, .scene-notes input:disabled, .duration-input input:disabled { opacity: .62; cursor: progress; }
 .scene-notes { justify-content: stretch; padding: 10px 14px; border-top: 1px solid var(--line); }
 .scene-notes input { width: 50%; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink); font-size: 10px; }
 .scene-save-row { padding-top: 6px; color: var(--muted); font-size: 10px; }
@@ -302,6 +329,7 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
 @media (max-width: 1100px) {
   .page-wrap { width: min(100% - 48px, 900px); }
   .topbar { padding: 0 24px; }
+  .task-activity-bar { padding: 8px 24px; }
   .channel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .topic-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .topic-card { min-height: 290px; }
@@ -315,6 +343,12 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
   .nav-item span:not(.nav-count) { display: none; }
   .nav-count { position: absolute; transform: translate(10px, -9px); }
   .topbar { height: 65px; padding: 0 18px; }
+  .task-activity-bar { grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; padding: 8px 18px; }
+  .task-activity-signal { display: none; }
+  .task-activity-copy { grid-column: 1; }
+  .task-activity-time { grid-column: 2; }
+  .task-activity-track { grid-column: 1 / -1; grid-row: 2; }
+  .task-activity-bar > .text-button { grid-column: 3; grid-row: 1; }
   .context-kicker, .git-readout { display: none; }
   .topbar-meta { gap: 8px; }
   .model-select > span, .git-readout, .topbar-meta > .link-button { display: none; }
@@ -340,6 +374,8 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
   .scene-columns { grid-template-columns: 1fr; }
   .scene-block + .scene-block { border-top: 1px solid var(--line); border-left: 0; }
   .scene-card-header { flex-wrap: wrap; padding: 12px 14px; }
+  .inline-task-state { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .inline-task-state > span:nth-child(3) { display: none; }
   .duration-input { margin-left: 0; }
   .scene-tools { margin-left: auto; }
   .scene-save-row { align-items: flex-start; flex-direction: column; }

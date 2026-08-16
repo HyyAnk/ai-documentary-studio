@@ -36,11 +36,52 @@ export const api = {
   reconnectCodex: () => request<{ status: string; message?: string }>("/api/codex/reconnect", { method: "POST", body: "{}" }),
 };
 
-export function subscribeEvents(onEvent: (event: TaskEvent) => void): () => void {
+export type RealtimeStatus = "connecting" | "connected" | "reconnecting";
+
+export function subscribeEvents(onEvent: (event: TaskEvent) => void, onStatus: (status: RealtimeStatus) => void = () => undefined): () => void {
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  const socket = new WebSocket(`${protocol}://${window.location.host}/api/events`);
-  socket.addEventListener("message", (event) => {
-    try { onEvent(JSON.parse(event.data as string) as TaskEvent); } catch { /* ignore malformed events */ }
-  });
-  return () => socket.close();
+  let socket: WebSocket | null = null;
+  let retryTimer: number | null = null;
+  let retryCount = 0;
+  let stopped = false;
+
+  const scheduleReconnect = () => {
+    if (stopped || retryTimer !== null) return;
+    onStatus("reconnecting");
+    const delay = Math.min(1000 * (2 ** retryCount), 10_000);
+    retryCount += 1;
+    retryTimer = window.setTimeout(() => {
+      retryTimer = null;
+      connect();
+    }, delay);
+  };
+  const connect = () => {
+    if (stopped) return;
+    if (retryCount === 0) onStatus("connecting");
+    socket = new WebSocket(`${protocol}://${window.location.host}/api/events`);
+    socket.addEventListener("open", () => {
+      retryCount = 0;
+      onStatus("connected");
+    });
+    socket.addEventListener("message", (event) => {
+      try { onEvent(JSON.parse(event.data as string) as TaskEvent); } catch { /* ignore malformed events */ }
+    });
+    socket.addEventListener("close", scheduleReconnect);
+    socket.addEventListener("error", () => socket?.close());
+  };
+  const reconnectWhenOnline = () => {
+    if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
+    if (retryTimer !== null) window.clearTimeout(retryTimer);
+    retryTimer = null;
+    connect();
+  };
+
+  window.addEventListener("online", reconnectWhenOnline);
+  connect();
+  return () => {
+    stopped = true;
+    if (retryTimer !== null) window.clearTimeout(retryTimer);
+    window.removeEventListener("online", reconnectWhenOnline);
+    socket?.close();
+  };
 }
