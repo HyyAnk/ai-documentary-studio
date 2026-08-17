@@ -24,7 +24,7 @@ class FakeCodex extends EventEmitter {
     this.activeTurns += 1;
     this.maxActiveTurns = Math.max(this.maxActiveTurns, this.activeTurns);
     setTimeout(() => {
-      this.emit("notification", { method: "item/agentMessage/delta", params: { threadId, turnId, delta: "# Script\n\nA generated script." } });
+      this.emit("notification", { method: "item/agentMessage/delta", params: { threadId, turnId, delta: "# Research Dossier\n\nC01 https://example.com/1\nC02 https://example.com/2\nC03 https://example.com/3\nC04 https://example.com/4\nC05 https://example.com/5" } });
       this.emit("notification", { method: "turn/completed", params: { turn: { id: turnId, status: "completed" } } });
       this.activeTurns -= 1;
     }, 30);
@@ -68,8 +68,8 @@ describe("TaskManager locks", () => {
     const fake = new FakeCodex();
     const manager = new TaskManager(repository, new ContextEngine(repository, logger), fake as never, 3, 8, logger);
     await manager.load();
-    const first = manager.submit("GENERATE_SCRIPT", channel.channel_id, episode.episode_id);
-    const second = manager.submit("GENERATE_SCRIPT", channel.channel_id, episode.episode_id);
+    const first = manager.submit("GENERATE_RESEARCH", channel.channel_id, episode.episode_id);
+    const second = manager.submit("GENERATE_RESEARCH", channel.channel_id, episode.episode_id);
     expect(second.status).toBe("QUEUED");
     await waitFor(() => manager.get(first.task_id).status === "COMPLETED");
     await waitFor(() => manager.get(second.task_id).status === "COMPLETED");
@@ -77,8 +77,8 @@ describe("TaskManager locks", () => {
     expect(manager.get(second.task_id).status).toBe("COMPLETED");
     expect(fake.deletedThreads).toContain("thread_1");
     const secondEpisode = await repository.confirmTopic(channel.channel_id, topics[1].topic_id);
-    const parallelA = manager.submit("GENERATE_SCRIPT", channel.channel_id, episode.episode_id);
-    const parallelB = manager.submit("GENERATE_SCRIPT", channel.channel_id, secondEpisode.episode_id);
+    const parallelA = manager.submit("GENERATE_RESEARCH", channel.channel_id, episode.episode_id);
+    const parallelB = manager.submit("GENERATE_RESEARCH", channel.channel_id, secondEpisode.episode_id);
     await waitFor(() => manager.get(parallelA.task_id).status === "COMPLETED");
     await waitFor(() => manager.get(parallelB.task_id).status === "COMPLETED");
     expect(fake.maxActiveTurns).toBeGreaterThanOrEqual(2);

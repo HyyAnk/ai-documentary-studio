@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import logging
+import math
 import os
 import threading
 from typing import Optional
@@ -47,6 +48,7 @@ class SynthesizeRequest(BaseModel):
 class MergeRequest(BaseModel):
     paths: list[str] = Field(min_length=1, max_length=128)
     gap_ms: int = Field(default=300, ge=0, le=10_000)
+    target_duration_seconds: Optional[float] = Field(default=None, ge=10.0, le=7_200.0)
 
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -104,7 +106,7 @@ async def synthesize_audio(request: SynthesizeRequest) -> Response:
     return Response(content=audio, media_type="audio/wav", headers={"cache-control": "no-store"})
 
 
-def merge_audio(paths: list[str], gap_ms: int) -> bytes:
+def merge_audio(paths: list[str], gap_ms: int, target_duration_seconds: Optional[float] = None) -> bytes:
     waveforms = []
     sample_rate: Optional[int] = None
     channels: Optional[int] = None
@@ -134,6 +136,23 @@ def merge_audio(paths: list[str], gap_ms: int) -> bytes:
             pieces.append(torch.zeros((waveform.shape[0], gap_frames), dtype=waveform.dtype))
         pieces.append(waveform)
     merged = torch.cat(pieces, dim=1)
+    if target_duration_seconds is not None:
+        target_frames = round(sample_rate * target_duration_seconds)
+        current_frames = merged.shape[1]
+        rate = current_frames / max(1, target_frames)
+        if not 0.72 <= rate <= 1.28:
+            raise ValueError(f"Requested duration change is too large ({rate:.3f}x playback rate)")
+        if abs(target_frames - current_frames) > sample_rate:
+            n_fft = 1024
+            hop_length = 256
+            window = torch.hann_window(n_fft, device=merged.device)
+            spectrum = torch.stft(merged, n_fft=n_fft, hop_length=hop_length, window=window, return_complex=True)
+            phase_advance = torch.linspace(0, math.pi * hop_length, spectrum.shape[-2], device=merged.device)[..., None]
+            stretched = torchaudio.functional.phase_vocoder(spectrum, rate=rate, phase_advance=phase_advance)
+            merged = torch.istft(stretched, n_fft=n_fft, hop_length=hop_length, window=window, length=target_frames)
+            peak = merged.abs().max()
+            if peak > 0.99:
+                merged = merged * (0.99 / peak)
     output = io.BytesIO()
     torchaudio.save(output, merged.cpu(), sample_rate, format="wav")
     return output.getvalue()
@@ -144,11 +163,11 @@ async def merge_audio_files(request: MergeRequest) -> Response:
     if MODEL is None:
         raise HTTPException(status_code=503, detail="Audio service unavailable")
     try:
-        audio = await __import__("asyncio").to_thread(merge_audio, request.paths, request.gap_ms)
+        audio = await __import__("asyncio").to_thread(merge_audio, request.paths, request.gap_ms, request.target_duration_seconds)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except Exception as error:
         logger.error("Merge failed: %s", error, extra={"step": "merge"})
         raise HTTPException(status_code=503, detail="Audio merge failed") from error
-    logger.info("Merged WAV files=%s bytes=%s gap_ms=%s", len(request.paths), len(audio), request.gap_ms, extra={"step": "merge"})
+    logger.info("Merged WAV files=%s bytes=%s gap_ms=%s target_seconds=%s", len(request.paths), len(audio), request.gap_ms, request.target_duration_seconds, extra={"step": "merge"})
     return Response(content=audio, media_type="audio/wav", headers={"cache-control": "no-store"})

@@ -14,6 +14,7 @@ import {
   CreateVoiceInputSchema,
   CreateChannelInputSchema,
   GenerateAllAudioInputSchema,
+  EpisodeSettingsInputSchema,
   SaveTextInputSchema,
   SceneSchema,
   TopicConfirmInputSchema,
@@ -34,7 +35,8 @@ import { RepositoryError, RepositoryService } from "./repository.js";
 import { TaskManager } from "./tasks.js";
 import { synthesizeWav } from "./providers/chatterbox.js";
 import { createStoredZip } from "./zip.js";
-import { composeMergedVisualPrompt } from "./sceneTiming.js";
+import { composeMergedVisualPrompt, optimizeShortScenes } from "./sceneTiming.js";
+import { assessProduction, countWords, extractNarration, extractNarrationChunks, extractNarrationSections } from "./production.js";
 
 const VOICE_PREVIEW_TEXT = "This is a preview of this narrator voice for AI Documentary Studio.";
 
@@ -265,6 +267,11 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     return reply.code(201).send({ episode: await repository.confirmTopic(params.channelId, params.topicId) });
   });
   server.get("/api/channels/:channelId/episodes", async (request) => ({ episodes: await repository.listEpisodes((request.params as { channelId: string }).channelId) }));
+  server.patch("/api/channels/:channelId/episodes/:episodeId", async (request) => {
+    const params = request.params as { channelId: string; episodeId: string };
+    const input = EpisodeSettingsInputSchema.parse(request.body);
+    return repository.updateEpisodeSettings(params.channelId, params.episodeId, input, config.video_generation.narration_words_per_second);
+  });
   server.get("/api/channels/:channelId/episodes/:episodeId/file/:filename", async (request) => {
     const params = request.params as { channelId: string; episodeId: string; filename: string };
     return repository.getEpisodeFile(params.channelId, params.episodeId, params.filename);
@@ -277,6 +284,64 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
   server.get("/api/channels/:channelId/episodes/:episodeId/scenes", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };
     return { scenes: await repository.readScenes(params.channelId, params.episodeId) };
+  });
+  server.get("/api/channels/:channelId/episodes/:episodeId/production-assessment", async (request) => {
+    const params = request.params as { channelId: string; episodeId: string };
+    const [episode, research, treatment, visualBible, script, scenes] = await Promise.all([
+      repository.getEpisode(params.channelId, params.episodeId),
+      repository.getEpisodeFile(params.channelId, params.episodeId, "research.md"),
+      repository.getEpisodeFile(params.channelId, params.episodeId, "treatment.md"),
+      repository.getEpisodeFile(params.channelId, params.episodeId, "visual_bible.md"),
+      repository.getEpisodeFile(params.channelId, params.episodeId, "script.md"),
+      repository.readScenes(params.channelId, params.episodeId),
+    ]);
+    return { assessment: assessProduction({ episode, research: research.content, treatment: treatment.content, visualBible: visualBible.content, script: script.content, scenes, fallbackWordsPerSecond: config.video_generation.narration_words_per_second }) };
+  });
+  server.post("/api/channels/:channelId/episodes/:episodeId/shots/generate", async (request, reply) => {
+    const params = request.params as { channelId: string; episodeId: string };
+    const script = await repository.getEpisodeFile(params.channelId, params.episodeId, "script.md");
+    const sequenceCount = extractNarrationSections(script.content).length;
+    if (sequenceCount < 1) throw new RepositoryError("A completed script is required", "SCRIPT_REQUIRED");
+    await repository.backupEpisodeFile(params.channelId, params.episodeId, "scene_plan.md");
+    await repository.clearSequenceDrafts(params.episodeId);
+    const created = Array.from({ length: sequenceCount }, (_, index) => tasks.submit("GENERATE_SEQUENCE_SCENES", params.channelId, params.episodeId, index + 1));
+    return reply.code(202).send({ tasks: created, sequence_count: sequenceCount });
+  });
+  server.post("/api/channels/:channelId/episodes/:episodeId/shots/optimize", async (request) => {
+    const params = request.params as { channelId: string; episodeId: string };
+    const scenes = await repository.readScenes(params.channelId, params.episodeId);
+    const optimized = optimizeShortScenes(scenes, config.video_generation.max_scene_duration_seconds, params.episodeId);
+    await repository.saveScenes(params.channelId, params.episodeId, optimized);
+    return { scenes: await repository.readScenes(params.channelId, params.episodeId), merged: scenes.length - optimized.length };
+  });
+  server.post("/api/channels/:channelId/episodes/:episodeId/narration/assemble", async (request) => {
+    const params = request.params as { channelId: string; episodeId: string };
+    const [episode, script] = await Promise.all([
+      repository.getEpisode(params.channelId, params.episodeId),
+      repository.getEpisodeFile(params.channelId, params.episodeId, "script.md"),
+    ]);
+    const chunks = extractNarrationChunks(script.content, 60).filter((chunk) => countWords(chunk.text) >= 3);
+    const paths: string[] = [];
+    for (let index = 0; index < chunks.length; index += 1) {
+      paths.push((await repository.getEpisodeAudioFile(params.channelId, params.episodeId, `narration-${String(index + 1).padStart(2, "0")}.wav`)).absolutePath);
+    }
+    let response: Response;
+    try {
+      response = await fetch(`${config.audio_generation.service_url.replace(/\/$/, "")}/merge`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ paths, gap_ms: config.audio_generation.merge_gap_ms, ...(config.audio_generation.match_target_duration ? { target_duration_seconds: episode.target_duration_minutes * 60 } : {}) }),
+        signal: AbortSignal.timeout(15 * 60 * 1000),
+      });
+    } catch {
+      throw new RepositoryError("Audio service unavailable", "AUDIO_SERVICE_UNAVAILABLE");
+    }
+    if (!response.ok) throw new RepositoryError(`Narration assembly failed: ${(await response.text()).slice(0, 240)}`, "AUDIO_MERGE_FAILED");
+    const audio = new Uint8Array(await response.arrayBuffer());
+    const assetPath = await repository.writeNarrationAudio(params.channelId, params.episodeId, audio);
+    const duration = wavDurationSeconds(audio);
+    const updated = await repository.saveNarrationMetadata(params.channelId, params.episodeId, assetPath, duration, chunks.length, countWords(extractNarration(script.content)));
+    return { episode: updated, asset_path: assetPath };
   });
   server.post("/api/channels/:channelId/episodes/:episodeId/scenes/:sceneNumber/audio", async (request, reply) => {
     const params = request.params as { channelId: string; episodeId: string; sceneNumber: string };
@@ -373,7 +438,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
   });
   server.get("/api/channels/:channelId/episodes/:episodeId/assets/:filename", async (request, reply) => {
     const params = request.params as { channelId: string; episodeId: string; filename: string };
-    const file = await repository.getSceneAudioFile(params.channelId, params.episodeId, params.filename);
+    const file = await repository.getEpisodeAudioFile(params.channelId, params.episodeId, params.filename);
     const range = request.headers.range;
     const baseHeaders = { "content-type": "audio/wav", "accept-ranges": "bytes", "last-modified": file.modified_at };
     if (!range) return reply.headers({ ...baseHeaders, "content-length": file.size }).send(createReadStream(file.absolutePath));
@@ -442,4 +507,21 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
       await server.close();
     },
   };
+}
+
+function wavDurationSeconds(buffer: Uint8Array): number {
+  if (buffer.length < 44) throw new RepositoryError("Narration WAV is incomplete", "INVALID_AUDIO");
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  let offset = 12;
+  let byteRate = 0;
+  let dataSize = 0;
+  while (offset + 8 <= buffer.length) {
+    const chunkId = new TextDecoder().decode(buffer.slice(offset, offset + 4));
+    const chunkSize = view.getUint32(offset + 4, true);
+    if (chunkId === "fmt " && chunkSize >= 16 && offset + 24 <= buffer.length) byteRate = view.getUint32(offset + 16, true);
+    if (chunkId === "data") { dataSize = chunkSize; break; }
+    offset += 8 + chunkSize + (chunkSize % 2);
+  }
+  if (!byteRate || !dataSize) throw new RepositoryError("Narration WAV has no duration metadata", "INVALID_AUDIO");
+  return Number((dataSize / byteRate).toFixed(3));
 }

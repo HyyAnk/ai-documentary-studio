@@ -72,17 +72,58 @@ export class ContextEngine {
     const briefFile = await this.repository.getEpisodeFile(channelId, episodeKey, "brief.md");
     add({ path: briefFile.path, reason: "confirmed episode brief", content: briefFile.content });
 
-    if (taskType === "GENERATE_SCRIPT") {
+    const loadArtifact = async (filename: string, required = false) => {
+      const file = await this.repository.getEpisodeFile(channelId, episodeKey, filename);
+      if (required && isPlaceholderArtifact(file.content)) throw new Error(`${filename} must be ready before ${taskType}`);
+      return file;
+    };
+    const artifact = async (filename: string, reason: string, required = false) => {
+      const file = await loadArtifact(filename, required);
+      if (!isPlaceholderArtifact(file.content)) add({ path: file.path, reason, content: file.content });
+      return file.content;
+    };
+    const runtimeConfig = await this.readConfig() as { video_generation?: { max_scene_duration_seconds?: number; narration_words_per_second?: number } };
+    const maxBeatWords = Math.max(1, Math.floor((runtimeConfig.video_generation?.max_scene_duration_seconds ?? 8) * (episode.measured_narration_words_per_second ?? runtimeConfig.video_generation?.narration_words_per_second ?? 2.3)));
+
+    if (taskType === "GENERATE_RESEARCH") {
       await read(stylePath, "channel style guide");
-      await this.readSharedRules(["script_rules.md"], sharedFiles);
-      const research = await this.repository.getEpisodeFile(channelId, episodeKey, "research.md");
-      if (research.content.trim()) add({ path: research.path, reason: "research for this episode", content: research.content });
-    } else if (taskType === "GENERATE_SCENES") {
+      await this.readSharedRules(["production_rules.md", "research_rules.md"], sharedFiles);
+    } else if (taskType === "GENERATE_TREATMENT") {
+      await read(stylePath, "channel style guide");
+      await artifact("research.md", "verified research dossier", true);
+      await this.readSharedRules(["research_rules.md", "treatment_rules.md", "script_rules.md"], sharedFiles);
+    } else if (taskType === "GENERATE_SCRIPT") {
+      await read(stylePath, "channel style guide");
+      await artifact("research.md", "verified research dossier", true);
+      await artifact("treatment.md", "approved documentary treatment", true);
+      await this.readSharedRules(["research_rules.md", "script_rules.md"], sharedFiles);
+    } else if (taskType === "GENERATE_VISUAL_BIBLE") {
+      await read(stylePath, "channel style guide");
+      await artifact("research.md", "verified research dossier", true);
+      await artifact("treatment.md", "approved documentary treatment", true);
+      await artifact("script.md", "confirmed episode script", true);
+      await this.readSharedRules(["visual_bible_rules.md", "visual_rules.md", "prompt_rules.md", "cinematic_prompt_reference.md"], sharedFiles);
+    } else if (taskType === "GENERATE_SEQUENCE_SCENES") {
+      const sequenceNumber = sceneNumber ?? 0;
+      if (sequenceNumber < 1) throw new Error("Sequence number is required for shot generation");
+      const research = await loadArtifact("research.md", true);
+      const treatment = await loadArtifact("treatment.md", true);
+      const script = await loadArtifact("script.md", true);
+      const visualBible = await loadArtifact("visual_bible.md", true);
+      add({ path: research.path, reason: "research claim and source ledger", content: research.content });
+      add({ path: `${treatment.path}#sequence-${sequenceNumber}`, reason: `treatment sequence ${sequenceNumber}`, content: selectMarkdownSection(treatment.content, sequenceNumber, /^##\s+Sequence\s+\d+/i) });
+      add({ path: `${script.path}#sequence-${sequenceNumber}`, reason: `script sequence ${sequenceNumber}`, content: selectMarkdownSection(script.content, sequenceNumber) });
+      add({ path: `${visualBible.path}#CB-${String(sequenceNumber).padStart(2, "0")}`, reason: `continuity bundle ${sequenceNumber}`, content: selectMarkdownSection(visualBible.content, sequenceNumber, /^##\s+Continuity bundle/i) });
       await this.readSharedRules(["visual_rules.md", "prompt_rules.md", "cinematic_prompt_reference.md"], sharedFiles);
-      const script = await this.repository.getEpisodeFile(channelId, episodeKey, "script.md");
-      add({ path: script.path, reason: "confirmed episode script", content: script.content });
-      add({ path: dnaPath, reason: "visual language and scene rules", content: selectSections(dna, ["Visual Language", "Scene Rules", "AI Reconstruction Rules"]) });
-      add({ path: ".documentary-studio/config.json", reason: "scene duration and aspect ratio", content: JSON.stringify(await this.readConfig()) });
+      add({ path: ".documentary-studio/config.json", reason: "shot duration and narration pace", content: JSON.stringify(runtimeConfig) });
+    } else if (taskType === "GENERATE_SCENES") {
+      await artifact("research.md", "research claim and source ledger", true);
+      await artifact("treatment.md", "sequence plan and time budget", true);
+      await artifact("script.md", "confirmed episode script", true);
+      await artifact("visual_bible.md", "episode identity and continuity bundles", true);
+      add({ path: dnaPath, reason: "visual language and reconstruction rules", content: selectSections(dna, ["Visual Style", "Visual Language", "Scene Rules", "AI Reconstruction Rules"]) });
+      await this.readSharedRules(["visual_rules.md", "prompt_rules.md", "cinematic_prompt_reference.md"], sharedFiles);
+      add({ path: ".documentary-studio/config.json", reason: "shot duration, narration pace, and aspect ratio", content: JSON.stringify(runtimeConfig) });
     } else {
       await this.readSharedRules(["visual_rules.md", "prompt_rules.md", "cinematic_prompt_reference.md"], sharedFiles);
       const scenes = await this.repository.readScenes(channelId, episodeKey);
@@ -95,12 +136,25 @@ export class ContextEngine {
       add({ path: dnaPath, reason: "relevant continuity guidance", content: selectSections(dna, ["Visual Language", "Scene Rules", "Narrative Style"]) });
     }
 
-    const outputContract = taskType === "GENERATE_SCRIPT"
-      ? "Return only the completed Markdown script for this confirmed episode. Do not write files."
-      : taskType === "GENERATE_SCENES"
-        ? "Return a JSON array of narrative beats covering the full script, in order — not pre-grouped scenes and not pre-computed durations. Each beat: { dialogue: one self-contained narration idea, visual_prompt: a single shot's CAMERA/ACTION/LIGHTING/ATMOSPHERE description per cinematic_prompt_reference.md (no SHOT PLAN or timecodes — that is assembled automatically), continuity_key: a short slug shared by this beat and any adjacent beats that depict the same visual continuity (same era, place, subjects) and could be shot back-to-back in one generation call, transition_note, continuity_note }. Do not group beats or estimate their duration — the system packs beats into scenes automatically based on estimated narration length and continuity_key. Do not write files."
-        : "Return one JSON object for the requested scene regeneration. Include only the fields being regenerated and preserve continuity. The visual_prompt must use the structured single-shot CAMERA/ACTION/LIGHTING/ATMOSPHERE/CONTINUITY format from cinematic_prompt_reference.md, with no SHOT PLAN or timecodes. Do not write files.";
-    const prompt = this.compose(taskType, channel, episode, [...files, ...sharedFiles], { scene_number: sceneNumber ?? null, output_contract: outputContract });
+    const outputContract = taskType === "GENERATE_RESEARCH"
+      ? "Return only a completed Markdown research dossier. Include: research question, chronological evidence, verified claim ledger with stable IDs C01..., failure factors, what replaced the idea, open uncertainties, and a visual evidence inventory. Every material claim must cite a direct primary or authoritative URL. Use at least 8 independent sources and distinguish fact, inference, and uncertainty."
+      : taskType === "GENERATE_TREATMENT"
+        ? "Return only a completed Markdown documentary treatment. Define the thesis, audience promise, target duration and word count, then 6-10 numbered sequences. Format every sequence as a second-level heading exactly like `## Sequence 1 — Title`. Every sequence must include labeled Purpose, Time budget, Dramatic question, Claim IDs, Evidence/visual modes, Transition, and Changed understanding fields. Time budgets must sum to the target duration."
+        : taskType === "GENERATE_SCRIPT"
+          ? `Return only the completed Markdown narration script. Target ${episode.target_word_count} words for ${episode.target_duration_minutes} minutes; stay within ±7%. Follow the treatment sequence order. Build the argument from dated events, named programs/people/organizations, measurable facts, decisions, and consequences from research. Add an HTML comment after each section listing the claim IDs used. Do not include generic visual directions in the narration.`
+          : taskType === "GENERATE_VISUAL_BIBLE"
+            ? "Return only a completed Markdown Episode Visual Bible. Define fixed channel constants, episode palette, typography/graphic language, reconstruction label, recurring hero objects, evidence treatment, and asset mix. Create one continuity bundle per treatment sequence. Format every bundle as a second-level heading exactly like `## Continuity bundle CB-01 — Title`, incrementing CB-02, CB-03, and so on. Each bundle needs labeled Era, Location, Subjects, Wardrobe/objects, Palette, Lighting, Texture, Anchor-frame prompt, Reference asset slots, and Allowed shot variation fields."
+            : taskType === "GENERATE_SEQUENCE_SCENES"
+              ? `Return a JSON array of shot beats covering only the provided script sequence in exact order without paraphrasing or omission. Every beat must use no more than ${maxBeatWords} words and should end at a sentence or natural clause boundary. Use sequence_id \"sequence-${sceneNumber}\", the provided sequence title, and continuity_bundle_id \"CB-${String(sceneNumber ?? 0).padStart(2, "0")}\". Fields: { dialogue, sequence_id, sequence_title, shot_id, visual_prompt, asset_type: archive|document|map|diagram|ai_reconstruction|contemporary|transition, continuity_key, continuity_bundle_id, reference_asset_ids: string[], source_ids: claim/source IDs[], reconstruction: boolean, sound_cue, transition_note, continuity_note }. Every prompt must be distinct and include CAMERA/ACTION/LIGHTING/ATMOSPHERE/CONTINUITY sections. Repeat the bundle identity locks, link evidence IDs, and do not add durations, SHOT PLAN, or timecodes.`
+              : taskType === "GENERATE_SCENES"
+              ? `Return a JSON array of shot beats covering the script narration in exact order without paraphrasing or omission. Each beat must use no more than ${maxBeatWords} words and should end at a sentence or natural clause boundary. Fields: { dialogue, sequence_id, sequence_title, shot_id, visual_prompt, asset_type: archive|document|map|diagram|ai_reconstruction|contemporary|transition, continuity_key, continuity_bundle_id, reference_asset_ids: string[], source_ids: claim/source IDs[], reconstruction: boolean, sound_cue, transition_note, continuity_note }. The visual_prompt must be a distinct single shot with CAMERA/ACTION/LIGHTING/ATMOSPHERE/CONTINUITY sections and must repeat the relevant visual-bible identity locks. Archive/document/map shots must name visible evidence; AI reconstructions must be physically specific. Do not repeat a prompt. Do not add durations, SHOT PLAN, or timecodes.`
+              : "Return one JSON object for the requested scene regeneration. Include only the fields being regenerated and preserve sequence, sources, references, and continuity bundle. The visual_prompt must use CAMERA/ACTION/LIGHTING/ATMOSPHERE/CONTINUITY sections. Do not write files.";
+    const prompt = this.compose(taskType, channel, episode, [...files, ...sharedFiles], {
+      scene_number: sceneNumber ?? null,
+      target_duration_minutes: episode.target_duration_minutes,
+      target_word_count: episode.target_word_count,
+      output_contract: outputContract,
+    });
     return this.finalize(taskType, channelId, episodeKey, [...files, ...sharedFiles], excluded.concat("other scenes outside immediate neighbors"), prompt);
   }
 
@@ -136,7 +190,9 @@ export class ContextEngine {
       `Channel description: ${channel.description}`,
       `Audience: ${channel.target_audience}; language: ${channel.language}; market: ${channel.market}`,
       episodeLine,
-      "Use only the scoped context below. Do not research, script, or create scenes for an unconfirmed topic.",
+      taskType === "GENERATE_RESEARCH"
+        ? "Use read-only web research to verify this confirmed topic. Prefer primary records, government/university archives, standards bodies, museums, and contemporary reporting. Never invent a source or inaccessible quotation."
+        : "Use only the scoped context below. Treat the research claim ledger as the factual boundary and never invent facts, quotes, people, programs, figures, or sources.",
       `Task instructions: ${JSON.stringify(extra)}`,
       context,
     ].join("\n");
@@ -172,6 +228,20 @@ function excerptForScene(script: string, sceneNumber: number): string {
   return lines.slice(Math.max(0, center - 18), center + 18).join("\n");
 }
 
+function selectMarkdownSection(markdown: string, sectionNumber: number, headingPattern: RegExp = /^##\s+/i): string {
+  const lines = markdown.split(/\r?\n/);
+  const starts = lines.map((line, index) => headingPattern.test(line) ? index : -1).filter((index) => index >= 0);
+  const start = starts[sectionNumber - 1];
+  if (start === undefined) throw new Error(`Sequence ${sectionNumber} was not found in an upstream artifact`);
+  const next = starts[sectionNumber] ?? lines.length;
+  return lines.slice(start, next).join("\n").trim();
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function isPlaceholderArtifact(content: string): boolean {
+  const value = content.trim();
+  return !value || /(?:has not started|generation has not started|breakdown has not started)/i.test(value);
 }

@@ -9,6 +9,7 @@ import {
   type Channel,
   type CreateChannelInput,
   type Episode,
+  type EpisodeSettingsInput,
   type Scene,
   type TopicCandidate,
   type VoiceProfile,
@@ -26,8 +27,10 @@ const allowedEpisodeFiles = new Set([
   "brief.md",
   "research.md",
   "sources.md",
+  "treatment.md",
   "outline.md",
   "script.md",
+  "visual_bible.md",
   "scene_plan.md",
   "dialogue_script.md",
   "video_prompts.md",
@@ -310,7 +313,17 @@ export class RepositoryService {
     const channel = await this.getChannel(channelId);
     const absolutePath = this.resolvePath("channels", channel.slug, "episodes", episode.slug, filename);
     await this.writeTextAtomic(absolutePath, content.endsWith("\n") ? content : `${content}\n`);
-    const updated = EpisodeSchema.parse({ ...episode, updated_at: nowIso() });
+    const updated = EpisodeSchema.parse({
+      ...episode,
+      ...(filename === "script.md" ? {
+        narration_asset_path: null,
+        narration_generated_at: null,
+        narration_duration_seconds: null,
+        narration_segment_count: 0,
+        measured_narration_words_per_second: null,
+      } : {}),
+      updated_at: nowIso(),
+    });
     await this.writeJsonAtomic(path.join(path.dirname(absolutePath), "episode.json"), updated);
     const metadata = await stat(absolutePath);
     return { path: `channels/${channel.slug}/episodes/${episode.slug}/${filename}`, modified_at: metadata.mtime.toISOString() };
@@ -359,16 +372,24 @@ export class RepositoryService {
       topic: { title: candidate.title, premise: candidate.premise, hook: candidate.hook },
       stage: "SELECTED",
       script_path: `channels/${channel.slug}/episodes/${episodeSlug}/script.md`,
+      research_path: `channels/${channel.slug}/episodes/${episodeSlug}/research.md`,
+      treatment_path: `channels/${channel.slug}/episodes/${episodeSlug}/treatment.md`,
+      visual_bible_path: `channels/${channel.slug}/episodes/${episodeSlug}/visual_bible.md`,
       scene_plan_path: `channels/${channel.slug}/episodes/${episodeSlug}/scene_plan.md`,
       dialogue_script_path: `channels/${channel.slug}/episodes/${episodeSlug}/dialogue_script.md`,
       video_prompts_path: `channels/${channel.slug}/episodes/${episodeSlug}/video_prompts.md`,
+      target_duration_minutes: 8,
+      target_word_count: 1050,
       created_at: timestamp,
       updated_at: timestamp,
     });
     await this.writeJsonAtomic(path.join(episodeDirectory, "episode.json"), episode);
     await this.writeTextAtomic(path.join(episodeDirectory, "brief.md"), `# ${candidate.title}\n\n## Premise\n\n${candidate.premise}\n\n## Hook\n\n${candidate.hook}\n`);
     await Promise.all([
+      this.writeTextAtomic(path.join(episodeDirectory, "research.md"), "# Research Dossier\n\nResearch has not started.\n"),
+      this.writeTextAtomic(path.join(episodeDirectory, "treatment.md"), "# Documentary Treatment\n\nTreatment has not started.\n"),
       this.writeTextAtomic(path.join(episodeDirectory, "script.md"), "# Script\n\nScript generation has not started.\n"),
+      this.writeTextAtomic(path.join(episodeDirectory, "visual_bible.md"), "# Episode Visual Bible\n\nVisual development has not started.\n"),
       this.writeTextAtomic(path.join(episodeDirectory, "scene_plan.md"), "# Scene Plan\n\nScene breakdown has not started.\n"),
       this.writeTextAtomic(path.join(episodeDirectory, "dialogue_script.md"), "# Dialogue Script\n\n"),
       this.writeTextAtomic(path.join(episodeDirectory, "video_prompts.md"), "# Video Prompts\n\n"),
@@ -377,6 +398,20 @@ export class RepositoryService {
       (await this.listTopics(channelId)).map(({ title, premise }) => ({ title, premise })));
     await this.updateChannel(channelId, { updated_at: timestamp });
     return episode;
+  }
+
+  async updateEpisodeSettings(channelId: string, episodeId: string, input: EpisodeSettingsInput, wordsPerSecond: number): Promise<Episode> {
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const targetWordCount = Math.round(input.target_duration_minutes * 60 * Math.max(0.1, episode.measured_narration_words_per_second ?? wordsPerSecond) * 0.95);
+    const next = EpisodeSchema.parse({
+      ...episode,
+      target_duration_minutes: input.target_duration_minutes,
+      target_word_count: targetWordCount,
+      updated_at: nowIso(),
+    });
+    await this.writeJsonAtomic(this.resolvePath("channels", channel.slug, "episodes", episode.slug, "episode.json"), next);
+    return next;
   }
 
   async readScenes(channelId: string, episodeId: string): Promise<Scene[]> {
@@ -440,6 +475,89 @@ export class RepositoryService {
     const absolutePath = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets", filename);
     await this.writeBinaryAtomic(absolutePath, content);
     return `channels/${channel.slug}/episodes/${episode.slug}/assets/${filename}`;
+  }
+
+  async writeNarrationAudio(channelId: string, episodeId: string, content: Uint8Array, segmentNumber?: number): Promise<string> {
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const episodeDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug);
+    const assetsDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets");
+    await mkdir(assetsDirectory, { recursive: true });
+    await this.assertRealPathInside(episodeDirectory, assetsDirectory);
+    const filename = segmentNumber ? `narration-${String(segmentNumber).padStart(2, "0")}.wav` : "narration.wav";
+    const absolutePath = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets", filename);
+    await this.writeBinaryAtomic(absolutePath, content);
+    return `channels/${channel.slug}/episodes/${episode.slug}/assets/${filename}`;
+  }
+
+  async getEpisodeAudioFile(channelId: string, episodeId: string, filename: string): Promise<{ absolutePath: string; path: string; size: number; modified_at: string }> {
+    if (!/^(?:scene-\d{2,}|narration(?:-\d{2,})?)\.wav$/i.test(filename)) throw new RepositoryError("Unsupported audio file", "FILE_NOT_ALLOWED");
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const assetsDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets");
+    const absolutePath = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets", filename);
+    try {
+      await this.assertRealPathInside(assetsDirectory, absolutePath);
+      const metadata = await stat(absolutePath);
+      return { absolutePath, path: `channels/${channel.slug}/episodes/${episode.slug}/assets/${filename}`, size: metadata.size, modified_at: metadata.mtime.toISOString() };
+    } catch {
+      throw new RepositoryError("Audio asset not found", "AUDIO_NOT_FOUND");
+    }
+  }
+
+  async saveNarrationMetadata(channelId: string, episodeId: string, assetPath: string, durationSeconds: number, segmentCount: number, narrationWordCount: number): Promise<Episode> {
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const measuredPace = narrationWordCount / Math.max(0.1, durationSeconds);
+    const calibratedWordTarget = Math.round(episode.target_duration_minutes * 60 * measuredPace * 0.95);
+    const next = EpisodeSchema.parse({
+      ...episode,
+      stage: episode.stage === "SCENE_READY" ? "READY_FOR_GENERATION" : "NARRATION_READY",
+      narration_asset_path: assetPath,
+      narration_generated_at: nowIso(),
+      narration_duration_seconds: durationSeconds,
+      narration_segment_count: segmentCount,
+      measured_narration_words_per_second: measuredPace,
+      target_word_count: calibratedWordTarget,
+      updated_at: nowIso(),
+    });
+    await this.writeJsonAtomic(this.resolvePath("channels", channel.slug, "episodes", episode.slug, "episode.json"), next);
+    return next;
+  }
+
+  async clearSequenceDrafts(episodeId: string): Promise<void> {
+    await this.removeTree(this.resolvePath("runtime", "shot-drafts", episodeId));
+  }
+
+  async saveSequenceDraft(episodeId: string, sequenceNumber: number, scenes: Scene[]): Promise<void> {
+    const directory = this.resolvePath("runtime", "shot-drafts", episodeId);
+    await mkdir(directory, { recursive: true });
+    const normalized = scenes.map((scene, index) => SceneSchema.parse({ ...scene, episode_id: episodeId, scene_number: index + 1 }));
+    await this.writeJsonAtomic(path.join(directory, `sequence-${String(sequenceNumber).padStart(2, "0")}.json`), normalized);
+  }
+
+  async readSequenceDrafts(episodeId: string): Promise<Array<{ sequenceNumber: number; scenes: Scene[] }>> {
+    const directory = this.resolvePath("runtime", "shot-drafts", episodeId);
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+    const drafts: Array<{ sequenceNumber: number; scenes: Scene[] }> = [];
+    for (const entry of entries.filter((item) => item.isFile() && /^sequence-\d+\.json$/i.test(item.name))) {
+      const sequenceNumber = Number(entry.name.match(/\d+/)?.[0]);
+      try {
+        const payload = JSON.parse(await readFile(path.join(directory, entry.name), "utf8")) as unknown;
+        drafts.push({ sequenceNumber, scenes: SceneSchema.array().parse(payload) });
+      } catch {
+        // An incomplete draft remains isolated and cannot corrupt the committed scene plan.
+      }
+    }
+    return drafts.sort((a, b) => a.sequenceNumber - b.sequenceNumber);
+  }
+
+  async commitSequenceDrafts(channelId: string, episodeId: string, expectedCount: number): Promise<boolean> {
+    const drafts = await this.readSequenceDrafts(episodeId);
+    if (drafts.length !== expectedCount || drafts.some((draft, index) => draft.sequenceNumber !== index + 1)) return false;
+    await this.saveScenes(channelId, episodeId, drafts.flatMap((draft) => draft.scenes));
+    await this.clearSequenceDrafts(episodeId);
+    return true;
   }
 
   async updateEpisodeStage(channelId: string, episodeId: string, stage: Episode["stage"]): Promise<Episode> {
@@ -622,6 +740,9 @@ export function parseScenes(markdown: string, episodeId: string): Scene[] {
     const notes = block.match(/## Notes\s*\n([\s\S]*?)(?=\n<!--|$)/i)?.[1] ?? "";
     const transition = notes.match(/- Transition:[ \t]*(.*)/i)?.[1]?.trim() ?? "";
     const continuity = notes.match(/- Continuity:[ \t]*(.*)/i)?.[1]?.trim() ?? "";
+    const sequenceLine = notes.match(/- Sequence:[ \t]*(.*)/i)?.[1]?.trim() ?? "sequence-1 | Sequence 1";
+    const [sequenceId, ...sequenceTitleParts] = sequenceLine.split("|").map((value) => value.trim());
+    const listValue = (label: string) => (notes.match(new RegExp(`- ${label}:[ \\t]*(.*)`, "i"))?.[1] ?? "").split(",").map((value) => value.trim()).filter(Boolean);
     const audioAssetPath = block.match(/<!--\s*Audio asset:\s*(.*?)\s*-->/i)?.[1]?.trim() || null;
     const audioGeneratedAt = block.match(/<!--\s*Audio generated at:\s*(.*?)\s*-->/i)?.[1]?.trim() || null;
     const audioDuration = block.match(/<!--\s*Audio duration:\s*([\d.]+)\s*-->/i)?.[1];
@@ -634,6 +755,15 @@ export function parseScenes(markdown: string, episodeId: string): Scene[] {
       visual_prompt: prompt,
       transition_note: transition,
       continuity_note: continuity,
+      sequence_id: sequenceId || "sequence-1",
+      sequence_title: sequenceTitleParts.join(" | ") || "Sequence 1",
+      shot_id: notes.match(/- Shot:[ \t]*(.*)/i)?.[1]?.trim() ?? `shot-${index + 1}`,
+      asset_type: notes.match(/- Asset type:[ \t]*(.*)/i)?.[1]?.trim() || "ai_reconstruction",
+      continuity_bundle_id: notes.match(/- Continuity bundle:[ \t]*(.*)/i)?.[1]?.trim() ?? "",
+      reference_asset_ids: listValue("Reference assets"),
+      source_ids: listValue("Source IDs"),
+      reconstruction: !/^no$/i.test(notes.match(/- Reconstruction:[ \t]*(.*)/i)?.[1]?.trim() ?? "yes"),
+      sound_cue: notes.match(/- Sound:[ \t]*(.*)/i)?.[1]?.trim() ?? "",
       audio_asset_path: audioAssetPath,
       audio_generated_at: audioGeneratedAt,
       audio_duration_seconds: audioDuration ? Number(audioDuration) : null,
@@ -642,6 +772,7 @@ export function parseScenes(markdown: string, episodeId: string): Scene[] {
 }
 
 export function serializeScenes(scenes: Scene[]): string {
+  scenes = scenes.map((scene) => SceneSchema.parse(scene));
   return scenes.map((scene) => `${[
     `# Scene ${scene.scene_number}`,
     `**Duration:** ${scene.duration_seconds} seconds`,
@@ -652,14 +783,24 @@ export function serializeScenes(scenes: Scene[]): string {
     "## Notes",
     `- Transition: ${scene.transition_note.trim()}`,
     `- Continuity: ${scene.continuity_note.trim()}`,
+    `- Sequence: ${scene.sequence_id.trim()} | ${scene.sequence_title.trim()}`,
+    `- Shot: ${scene.shot_id.trim() || `shot-${scene.scene_number}`}`,
+    `- Asset type: ${scene.asset_type}`,
+    `- Continuity bundle: ${scene.continuity_bundle_id.trim()}`,
+    `- Reference assets: ${scene.reference_asset_ids.join(", ")}`,
+    `- Source IDs: ${scene.source_ids.join(", ")}`,
+    `- Reconstruction: ${scene.reconstruction ? "yes" : "no"}`,
+    `- Sound: ${scene.sound_cue.trim()}`,
     scene.audio_asset_path ? `<!-- Audio asset: ${scene.audio_asset_path} -->\n<!-- Audio generated at: ${scene.audio_generated_at ?? ""} -->\n<!-- Audio duration: ${scene.audio_duration_seconds ?? ""} -->` : "",
   ].join("\n\n")}\n`).join("\n");
 }
 
 export function serializeDialogue(scenes: Scene[]): string {
-  return `# Dialogue Script\n\n${scenes.map((scene) => `## Scene ${scene.scene_number}\n\n${scene.dialogue.trim()}`).join("\n\n")}\n`;
+  scenes = scenes.map((scene) => SceneSchema.parse(scene));
+  return `# Narration Timeline\n\n${scenes.map((scene) => `## Shot ${scene.scene_number} — ${scene.sequence_title}\n\n**Duration:** ${scene.duration_seconds}s\n\n${scene.dialogue.trim()}`).join("\n\n")}\n`;
 }
 
 export function serializePrompts(scenes: Scene[]): string {
-  return `# Video Prompts\n\n${scenes.map((scene) => `## Scene ${scene.scene_number}\n\n${scene.visual_prompt.trim()}`).join("\n\n")}\n`;
+  scenes = scenes.map((scene) => SceneSchema.parse(scene));
+  return `# Video Prompts\n\n${scenes.map((scene) => `## Shot ${scene.scene_number} — ${scene.sequence_title}\n\n- Asset type: ${scene.asset_type}\n- Continuity bundle: ${scene.continuity_bundle_id}\n- Reference assets: ${scene.reference_asset_ids.join(", ")}\n- Source IDs: ${scene.source_ids.join(", ")}\n\n${scene.visual_prompt.trim()}`).join("\n\n")}\n`;
 }

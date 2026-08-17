@@ -32,7 +32,19 @@ export function App() {
   const handleTerminalTask = useCallback((task: Task) => { if (task.status === "COMPLETED") setNotice({ tone: "good", message: `${formatTaskType(task.task_type)} completed` }); else if (task.status === "FAILED") setNotice({ tone: "bad", message: task.error || `${formatTaskType(task.task_type)} failed` }); }, []);
   const taskStore = useTasks(handleTerminalTask);
   const { tasks, activeTasks, now: taskClock, codexStatus, realtimeStatus, upsertTask, setCodexStatus, refresh: refreshTasks } = taskStore;
-  const refresh = useCallback(async () => { const [gitResponse, configResponse, storageResponse, codexResponse] = await Promise.all([api.git(), api.config(), api.storage(), api.codexSettings()]); await Promise.all([refreshChannels(), refreshTasks()]); setGit(gitResponse); setAppConfig(configResponse); setStorage(storageResponse); setCodex(codexResponse); setLoading(false); }, [refreshChannels, refreshTasks]);
+  const refreshPeripheralState = useCallback(async () => {
+    const [gitResult, codexResult] = await Promise.allSettled([api.git(), api.codexSettings()]);
+    if (gitResult.status === "fulfilled") setGit(gitResult.value);
+    if (codexResult.status === "fulfilled") setCodex(codexResult.value);
+  }, []);
+  const refresh = useCallback(async () => {
+    void refreshPeripheralState();
+    const [configResponse, storageResponse] = await Promise.all([api.config(), api.storage()]);
+    await Promise.all([refreshChannels(), refreshTasks()]);
+    setAppConfig(configResponse);
+    setStorage(storageResponse);
+    setLoading(false);
+  }, [refreshChannels, refreshPeripheralState, refreshTasks]);
   useEffect(() => { document.documentElement.dataset.theme = theme; window.localStorage.setItem("studio-theme", theme); }, [theme]);
   useEffect(() => { void refresh().catch((error: Error) => { setNotice({ tone: "bad", message: error.message }); setLoading(false); }); }, [refresh]);
   const selectedChannel = channels.find((channel) => channel.channel_id === selectedChannelId) ?? null;

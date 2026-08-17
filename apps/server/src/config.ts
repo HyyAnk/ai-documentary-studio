@@ -30,6 +30,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     cfg_weight: 0.5,
     max_concurrent_tasks: 2,
     merge_gap_ms: 300,
+    match_target_duration: true,
   },
 };
 
@@ -102,7 +103,7 @@ export async function saveAudioSettings(rootDirectory: string, input: AudioSetti
   const currentLocal = await readJsonFile(localPath);
   const currentAudio = currentLocal.audio_generation && typeof currentLocal.audio_generation === "object" ? currentLocal.audio_generation as Record<string, unknown> : {};
   const nextAudio = { ...currentAudio } as Record<string, unknown>;
-  for (const key of ["provider", "service_url", "exaggeration", "cfg_weight", "max_concurrent_tasks", "merge_gap_ms"] as const) {
+  for (const key of ["provider", "service_url", "exaggeration", "cfg_weight", "max_concurrent_tasks", "merge_gap_ms", "match_target_duration"] as const) {
     const value = parsed[key];
     if (value !== undefined) nextAudio[key] = value;
   }

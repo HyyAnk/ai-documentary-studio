@@ -8,10 +8,15 @@ export const EpisodeStageSchema = z.enum([
   "SELECTED",
   "RESEARCH",
   "RESEARCH_READY",
+  "TREATMENT",
+  "TREATMENT_READY",
   "SCRIPT",
   "SCRIPT_READY",
+  "VISUAL_BIBLE",
+  "VISUAL_BIBLE_READY",
   "SCENE_BREAKDOWN",
   "SCENE_READY",
+  "NARRATION_READY",
   "READY_FOR_GENERATION",
 ]);
 export type EpisodeStage = z.infer<typeof EpisodeStageSchema>;
@@ -29,11 +34,16 @@ export type TaskStatus = z.infer<typeof TaskStatusSchema>;
 export const TaskTypeSchema = z.enum([
   "GENERATE_DNA",
   "SUGGEST_TOPICS",
+  "GENERATE_RESEARCH",
+  "GENERATE_TREATMENT",
   "GENERATE_SCRIPT",
+  "GENERATE_VISUAL_BIBLE",
   "GENERATE_SCENES",
+  "GENERATE_SEQUENCE_SCENES",
   "REGENERATE_DIALOGUE",
   "REGENERATE_PROMPT",
   "REGENERATE_BOTH",
+  "GENERATE_NARRATION",
   "GENERATE_AUDIO",
 ]);
 export type TaskType = z.infer<typeof TaskTypeSchema>;
@@ -86,6 +96,15 @@ export const SceneSchema = z.object({
   visual_prompt: z.string(),
   transition_note: z.string().default(""),
   continuity_note: z.string().default(""),
+  sequence_id: z.string().default("sequence-1"),
+  sequence_title: z.string().default("Sequence 1"),
+  shot_id: z.string().default(""),
+  asset_type: z.enum(["archive", "document", "map", "diagram", "ai_reconstruction", "contemporary", "transition"]).default("ai_reconstruction"),
+  continuity_bundle_id: z.string().default(""),
+  reference_asset_ids: z.array(z.string()).default([]),
+  source_ids: z.array(z.string()).default([]),
+  reconstruction: z.boolean().default(true),
+  sound_cue: z.string().default(""),
   audio_asset_path: z.string().nullable().default(null),
   audio_generated_at: IsoDate.nullable().default(null),
   audio_duration_seconds: z.number().nonnegative().nullable().default(null),
@@ -99,13 +118,54 @@ export const EpisodeSchema = z.object({
   topic: EpisodeTopicSchema,
   stage: EpisodeStageSchema,
   script_path: z.string().min(1),
+  research_path: z.string().nullable().default(null),
+  treatment_path: z.string().nullable().default(null),
+  visual_bible_path: z.string().nullable().default(null),
   scene_plan_path: z.string().min(1),
   dialogue_script_path: z.string().min(1),
   video_prompts_path: z.string().min(1),
+  target_duration_minutes: z.number().min(3).max(60).default(8),
+  target_word_count: z.number().int().positive().default(1050),
+  narration_asset_path: z.string().nullable().default(null),
+  narration_generated_at: IsoDate.nullable().default(null),
+  narration_duration_seconds: z.number().positive().nullable().default(null),
+  narration_segment_count: z.number().int().nonnegative().default(0),
+  measured_narration_words_per_second: z.number().positive().nullable().default(null),
   created_at: IsoDate,
   updated_at: IsoDate,
 });
 export type Episode = z.infer<typeof EpisodeSchema>;
+
+export const ProductionIssueSchema = z.object({
+  code: z.string().min(1),
+  severity: z.enum(["blocker", "warning", "info"]),
+  message: z.string().min(1),
+  next_action: z.string().min(1),
+  scene_numbers: z.array(z.number().int().positive()).default([]),
+});
+
+export const ProductionAssessmentSchema = z.object({
+  score: z.number().min(0).max(100),
+  rating: z.enum(["not_ready", "needs_work", "production_ready"]),
+  assessed_at: IsoDate,
+  metrics: z.object({
+    target_duration_seconds: z.number().positive(),
+    estimated_narration_seconds: z.number().nonnegative(),
+    narration_word_count: z.number().int().nonnegative(),
+    target_word_count: z.number().int().positive(),
+    scene_count: z.number().int().nonnegative(),
+    sequence_count: z.number().int().nonnegative(),
+    unique_prompt_ratio: z.number().min(0).max(1),
+    structured_prompt_ratio: z.number().min(0).max(1),
+    continuity_coverage_ratio: z.number().min(0).max(1),
+    source_coverage_ratio: z.number().min(0).max(1),
+    narration_coverage_ratio: z.number().min(0).max(1),
+    factual_anchor_count: z.number().int().nonnegative(),
+    research_source_count: z.number().int().nonnegative(),
+  }),
+  issues: ProductionIssueSchema.array(),
+});
+export type ProductionAssessment = z.infer<typeof ProductionAssessmentSchema>;
 
 export const TaskSchema = z.object({
   task_id: z.string().min(1),
@@ -123,6 +183,7 @@ export const TaskSchema = z.object({
   lock_key: z.string().min(1),
   queue_position: z.number().int().nonnegative().nullable().default(null),
   progress_message: z.string().default(""),
+  progress_percent: z.number().min(0).max(100).nullable().default(null),
   scene_number: z.number().int().positive().nullable().default(null),
 });
 export type Task = z.infer<typeof TaskSchema>;
@@ -155,6 +216,7 @@ export const AppConfigSchema = z.object({
     cfg_weight: z.number().min(0).max(1).default(0.5),
     max_concurrent_tasks: z.number().int().positive().default(2),
     merge_gap_ms: z.number().int().nonnegative().default(300),
+    match_target_duration: z.boolean().default(true),
   }),
 });
 export type AppConfig = z.infer<typeof AppConfigSchema>;
@@ -187,6 +249,7 @@ export const AudioSettingsInputSchema = z.object({
   cfg_weight: z.number().min(0).max(1).optional(),
   max_concurrent_tasks: z.number().int().positive().max(16).optional(),
   merge_gap_ms: z.number().int().nonnegative().max(10_000).optional(),
+  match_target_duration: z.boolean().optional(),
 });
 export type AudioSettingsInput = z.infer<typeof AudioSettingsInputSchema>;
 
@@ -278,6 +341,11 @@ export const UpdateChannelInputSchema = z.object({
 export const SaveTextInputSchema = z.object({ content: z.string() });
 
 export const TopicConfirmInputSchema = z.object({ topic_id: z.string().min(1) });
+
+export const EpisodeSettingsInputSchema = z.object({
+  target_duration_minutes: z.number().min(3).max(60),
+});
+export type EpisodeSettingsInput = z.infer<typeof EpisodeSettingsInputSchema>;
 
 export const SceneUpdateInputSchema = z.object({
   scene_number: z.number().int().positive(),

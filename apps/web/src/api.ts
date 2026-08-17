@@ -1,4 +1,4 @@
-import type { AppConfig, Channel, CodexSettingsInput, CodexSettingsResponse, Episode, Scene, StorageInfo, Task, TaskEvent, TopicCandidate, VoiceProfile } from "@studio/shared";
+import type { AppConfig, Channel, CodexSettingsInput, CodexSettingsResponse, Episode, ProductionAssessment, Scene, StorageInfo, Task, TaskEvent, TopicCandidate, VoiceProfile } from "@studio/shared";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { headers: { "content-type": "application/json", ...(init?.headers ?? {}) }, ...init });
@@ -18,9 +18,14 @@ export const api = {
   suggestTopics: (id: string) => request<{ task: Task }>(`/api/channels/${id}/topics/suggest`, { method: "POST", body: "{}" }),
   confirmTopic: (channelId: string, topicId: string) => request<{ episode: Episode }>(`/api/channels/${channelId}/topics/${topicId}/confirm`, { method: "POST", body: JSON.stringify({ topic_id: topicId }) }),
   episodes: (id: string) => request<{ episodes: Episode[] }>(`/api/channels/${id}/episodes`),
+  updateEpisode: (channelId: string, episodeId: string, targetDurationMinutes: number) => request<Episode>(`/api/channels/${channelId}/episodes/${episodeId}`, { method: "PATCH", body: JSON.stringify({ target_duration_minutes: targetDurationMinutes }) }),
   file: (channelId: string, episodeId: string, filename: string) => request<{ content: string; path: string; modified_at: string }>(`/api/channels/${channelId}/episodes/${episodeId}/file/${filename}`),
   saveFile: (channelId: string, episodeId: string, filename: string, content: string) => request<{ path: string; modified_at: string }>(`/api/channels/${channelId}/episodes/${episodeId}/file/${filename}`, { method: "PUT", body: JSON.stringify({ content }) }),
   scenes: (channelId: string, episodeId: string) => request<{ scenes: Scene[] }>(`/api/channels/${channelId}/episodes/${episodeId}/scenes`),
+  productionAssessment: (channelId: string, episodeId: string) => request<{ assessment: ProductionAssessment }>(`/api/channels/${channelId}/episodes/${episodeId}/production-assessment`),
+  generateShots: (channelId: string, episodeId: string) => request<{ tasks: Task[]; sequence_count: number }>(`/api/channels/${channelId}/episodes/${episodeId}/shots/generate`, { method: "POST", body: "{}" }),
+  optimizeShots: (channelId: string, episodeId: string) => request<{ scenes: Scene[]; merged: number }>(`/api/channels/${channelId}/episodes/${episodeId}/shots/optimize`, { method: "POST", body: "{}" }),
+  assembleNarration: (channelId: string, episodeId: string) => request<{ episode: Episode; asset_path: string }>(`/api/channels/${channelId}/episodes/${episodeId}/narration/assemble`, { method: "POST", body: "{}" }),
   saveScenes: (channelId: string, episodeId: string, scenes: Scene[]) => request<{ scenes: Scene[] }>(`/api/channels/${channelId}/episodes/${episodeId}/scenes`, { method: "PUT", body: JSON.stringify(scenes) }),
   generateAllAudio: (channelId: string, episodeId: string, force = false) => request<{ tasks: Task[] }>(`/api/channels/${channelId}/episodes/${episodeId}/audio/generate-all`, { method: "POST", body: JSON.stringify({ force }) }),
   downloadAudioUrl: (channelId: string, episodeId: string, mode: "separate" | "merged") => `/api/channels/${channelId}/episodes/${episodeId}/audio/download?mode=${mode}`,
@@ -45,6 +50,7 @@ export const api = {
   deleteVoice: (voiceId: string) => request<{ ok: true }>(`/api/voices/${voiceId}`, { method: "DELETE" }),
   assignVoice: (channelId: string, voiceId: string | null) => request<Channel>(`/api/channels/${channelId}/voice`, { method: "PUT", body: JSON.stringify({ voice_id: voiceId }) }),
   voiceSampleUrl: (voiceId: string) => `/api/voices/${voiceId}/sample`,
+  narrationAudioUrl: (channelId: string, episodeId: string) => `/api/channels/${channelId}/episodes/${episodeId}/assets/narration.wav`,
   generateAudio: (channelId: string, episodeId: string, sceneNumber: number) => request<{ task: Task }>(`/api/channels/${channelId}/episodes/${episodeId}/scenes/${sceneNumber}/audio`, { method: "POST", body: "{}" }),
   mergeNextScene: (channelId: string, episodeId: string, sceneNumber: number) => request<{ scenes: Scene[] }>(`/api/channels/${channelId}/episodes/${episodeId}/scenes/${sceneNumber}/merge-next`, { method: "POST", body: "{}" }),
   reconnectCodex: () => request<{ status: string; message?: string }>("/api/codex/reconnect", { method: "POST", body: "{}" }),

@@ -1,4 +1,5 @@
 import type { Scene } from "@studio/shared";
+import { splitAtNarrativeBoundaries } from "./production.js";
 
 export type Beat = {
   dialogue: string;
@@ -6,6 +7,15 @@ export type Beat = {
   continuity_key: string;
   transition_note: string;
   continuity_note: string;
+  sequence_id: string;
+  sequence_title: string;
+  shot_id: string;
+  asset_type: Scene["asset_type"];
+  continuity_bundle_id: string;
+  reference_asset_ids: string[];
+  source_ids: string[];
+  reconstruction: boolean;
+  sound_cue: string;
 };
 
 export type PackedBeat = Beat & { estSeconds: number };
@@ -33,11 +43,14 @@ export function packBeatsIntoScenes(beats: Beat[], maxDuration: number, wordsPer
     const est = estimateSpokenSeconds(beat.dialogue, wordsPerSecond);
     if (est > safeMaxDuration) {
       flush();
-      const chunks = splitDialogue(beat.dialogue, Math.ceil(est / safeMaxDuration));
-      for (const chunk of chunks) {
+      const maxWords = Math.max(1, Math.floor(safeMaxDuration * wordsPerSecond));
+      const chunks = splitAtNarrativeBoundaries(beat.dialogue, maxWords);
+      for (const [chunkIndex, chunk] of chunks.entries()) {
         groups.push([{
           ...beat,
           dialogue: chunk,
+          shot_id: `${beat.shot_id || "shot"}-${chunkIndex + 1}`,
+          visual_prompt: continuationPrompt(beat.visual_prompt, chunkIndex, chunks.length),
           estSeconds: Math.min(safeMaxDuration, estimateSpokenSeconds(chunk, wordsPerSecond)),
         }]);
       }
@@ -101,6 +114,49 @@ export function composeMergedVisualPrompt(first: Scene, second: Scene): string {
   ].join("\n");
 }
 
+export function optimizeShortScenes(scenes: Scene[], maxDuration: number, episodeId: string): Scene[] {
+  const result: Scene[] = [];
+  for (let index = 0; index < scenes.length; index += 1) {
+    const current = scenes[index];
+    const next = scenes[index + 1];
+    const canMergeNext = current.duration_seconds < 2.5 && next
+      && current.sequence_id === next.sequence_id
+      && current.continuity_bundle_id === next.continuity_bundle_id
+      && current.duration_seconds + next.duration_seconds <= maxDuration;
+    if (canMergeNext && next) {
+      result.push(mergeProductionScenes(current, next));
+      index += 1;
+      continue;
+    }
+    const previous = result[result.length - 1];
+    const canMergePrevious = current.duration_seconds < 2.5 && previous
+      && current.sequence_id === previous.sequence_id
+      && current.continuity_bundle_id === previous.continuity_bundle_id
+      && current.duration_seconds + previous.duration_seconds <= maxDuration;
+    if (canMergePrevious && previous) result[result.length - 1] = mergeProductionScenes(previous, current);
+    else result.push(current);
+  }
+  return result.map((scene, index) => ({ ...scene, scene_id: `${episodeId}_scene_${index + 1}`, scene_number: index + 1 }));
+}
+
+function mergeProductionScenes(first: Scene, second: Scene): Scene {
+  return {
+    ...first,
+    duration_seconds: Number((first.duration_seconds + second.duration_seconds).toFixed(1)),
+    dialogue: `${first.dialogue.trim()} ${second.dialogue.trim()}`.trim(),
+    visual_prompt: composeMergedVisualPrompt(first, second),
+    transition_note: second.transition_note,
+    shot_id: [first.shot_id, second.shot_id].filter(Boolean).join("+"),
+    reference_asset_ids: [...new Set([...first.reference_asset_ids, ...second.reference_asset_ids])],
+    source_ids: [...new Set([...first.source_ids, ...second.source_ids])],
+    reconstruction: first.reconstruction || second.reconstruction,
+    sound_cue: [first.sound_cue, second.sound_cue].filter(Boolean).join("; "),
+    audio_asset_path: null,
+    audio_generated_at: null,
+    audio_duration_seconds: null,
+  };
+}
+
 export function splitDialogue(dialogue: string, count: number): string[] {
   const words = dialogue.trim().split(/\s+/).filter(Boolean);
   if (words.length === 0 || count <= 1) return [dialogue];
@@ -124,10 +180,25 @@ function finalizeScene(group: PackedBeat[], sceneNumber: number, episodeId: stri
     visual_prompt: composePackedVisualPrompt(group, duration),
     transition_note: group[group.length - 1].transition_note,
     continuity_note: group[0].continuity_note,
+    sequence_id: group[0].sequence_id,
+    sequence_title: group[0].sequence_title,
+    shot_id: group.map((beat) => beat.shot_id).filter(Boolean).join("+") || `shot-${sceneNumber}`,
+    asset_type: group[0].asset_type,
+    continuity_bundle_id: group[0].continuity_bundle_id,
+    reference_asset_ids: [...new Set(group.flatMap((beat) => beat.reference_asset_ids))],
+    source_ids: [...new Set(group.flatMap((beat) => beat.source_ids))],
+    reconstruction: group.some((beat) => beat.reconstruction),
+    sound_cue: group.map((beat) => beat.sound_cue).filter(Boolean).join("; "),
     audio_asset_path: null,
     audio_generated_at: null,
     audio_duration_seconds: null,
   };
+}
+
+function continuationPrompt(prompt: string, index: number, count: number): string {
+  if (count <= 1) return prompt;
+  const shotSize = ["establishing composition", "medium observational detail", "tight evidence detail"][index % 3];
+  return [`SHOT CONTINUATION ${index + 1}/${count}`, `CAMERA VARIATION: ${shotSize}; preserve the same continuity bundle while showing a new visible action.`, prompt].join("\n");
 }
 
 function formatSeconds(value: number): string {
