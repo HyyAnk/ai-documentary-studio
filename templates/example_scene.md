@@ -1,14 +1,19 @@
 # Scene 1
 
-**Duration:** 6 seconds
+**Duration:** 8 seconds
 
 ## Dialogue
 
-Narration for one coherent visual beat.
+Narration covering two or three adjacent beats, timed to roughly 8 seconds of speech.
 
 ## Video Prompt
 
-Subject, environment, era, action, camera, composition, lighting, atmosphere, motion, style, and continuity.
+Shot 1 description...
+CUT
+Shot 2 description...
+CUT
+Shot 3 description...
+Continuity: same era, place, subject, lighting, and visual style across all shots.
 
 ## Notes
 

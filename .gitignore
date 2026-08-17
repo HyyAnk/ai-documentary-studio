@@ -10,11 +10,13 @@ blob-report/
 .documentary-studio/logs/
 .documentary-studio/tasks/
 .documentary-studio/codex/
+.documentary-studio/voices/
 .documentary-studio/*.local.*
 apps/*/.documentary-studio/
 **/.documentary-studio/logs/
 **/.documentary-studio/tasks/
 **/.documentary-studio/codex/
+**/.documentary-studio/voices/
 services/tts/.venv/
 services/tts/__pycache__/
 *.py[cod]

@@ -133,6 +133,18 @@ export class CodexAppServerClient extends EventEmitter {
     return result.thread?.id ?? threadId;
   }
 
+  async deleteThread(threadId: string): Promise<boolean> {
+    if (!threadId || this.config.codex.transport === "openai_compatible") return true;
+    try {
+      await this.ensureConnected();
+      await this.request("thread/delete", { threadId });
+      return true;
+    } catch (error) {
+      this.logger.debug(`Codex thread cleanup skipped: ${error instanceof Error ? error.message : "unknown error"}`, { step: "codex_thread_cleanup" });
+      return false;
+    }
+  }
+
   async startTurn(threadId: string, prompt: string): Promise<string> {
     await this.ensureConnected();
     if (this.config.codex.transport === "openai_compatible") {

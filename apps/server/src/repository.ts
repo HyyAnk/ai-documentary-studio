@@ -5,11 +5,13 @@ import {
   EpisodeSchema,
   SceneSchema,
   TopicCandidateSchema,
+  VoiceProfileSchema,
   type Channel,
   type CreateChannelInput,
   type Episode,
   type Scene,
   type TopicCandidate,
+  type VoiceProfile,
   makeId,
   nowIso,
 } from "@studio/shared";
@@ -43,6 +45,7 @@ export type RepositoryRoots = {
   templates: string;
   shared: string;
   runtime: string;
+  voices: string;
 };
 
 export class RepositoryService {
@@ -84,6 +87,7 @@ export class RepositoryService {
       mkdir(path.join(this.roots.runtime, "tasks"), { recursive: true }),
       mkdir(path.join(this.roots.runtime, "codex"), { recursive: true }),
       mkdir(path.join(this.roots.runtime, "logs"), { recursive: true }),
+      mkdir(this.roots.voices, { recursive: true }),
     ]);
   }
 
@@ -173,6 +177,68 @@ export class RepositoryService {
     await this.updateChannel(channelId, { voice_reference_path: `channels/${channel.slug}/assets/voice_reference.wav` });
     const metadata = await stat(absolutePath);
     return { path: `channels/${channel.slug}/assets/voice_reference.wav`, modified_at: metadata.mtime.toISOString() };
+  }
+
+  async listVoices(): Promise<VoiceProfile[]> {
+    await this.ensureBootstrap();
+    try {
+      const raw = JSON.parse(await readFile(path.join(this.roots.voices, "voices.json"), "utf8")) as unknown;
+      if (!Array.isArray(raw)) return [];
+      return raw.map((voice) => VoiceProfileSchema.parse(voice)).sort((a, b) => b.created_at.localeCompare(a.created_at));
+    } catch {
+      return [];
+    }
+  }
+
+  async getVoice(voiceId: string): Promise<VoiceProfile> {
+    const voice = (await this.listVoices()).find((item) => item.voice_id === voiceId);
+    if (!voice) throw new RepositoryError("Voice not found", "VOICE_NOT_FOUND");
+    return voice;
+  }
+
+  async createVoiceProfile(name: string, referenceContent: Uint8Array, sampleContent: Uint8Array): Promise<VoiceProfile> {
+    await this.ensureBootstrap();
+    const voiceId = makeId("voice");
+    const directory = this.resolvePath("voices", voiceId);
+    await mkdir(directory, { recursive: true });
+    const referencePath = `.documentary-studio/voices/${voiceId}/reference.wav`;
+    const samplePath = `.documentary-studio/voices/${voiceId}/sample.wav`;
+    await this.writeBinaryAtomic(path.join(directory, "reference.wav"), referenceContent);
+    await this.writeBinaryAtomic(path.join(directory, "sample.wav"), sampleContent);
+    const profile = VoiceProfileSchema.parse({ voice_id: voiceId, name, reference_path: referencePath, sample_path: samplePath, created_at: nowIso() });
+    await this.writeJsonAtomic(path.join(this.roots.voices, "voices.json"), [...(await this.listVoices()), profile]);
+    return profile;
+  }
+
+  async updateVoiceSample(voiceId: string, content: Uint8Array): Promise<VoiceProfile> {
+    const voice = await this.getVoice(voiceId);
+    await this.writeBinaryAtomic(this.resolveContextPath(voice.sample_path), content);
+    return voice;
+  }
+
+  async deleteVoiceProfile(voiceId: string): Promise<void> {
+    const voice = await this.getVoice(voiceId);
+    const inUse = (await this.listChannels(true)).filter((channel) => channel.voice_reference_path === voice.reference_path);
+    if (inUse.length > 0) throw new RepositoryError(`Voice is in use by ${inUse.length} channel(s)`, "VOICE_IN_USE");
+    await this.removeTree(this.resolvePath("voices", voice.voice_id));
+    await this.writeJsonAtomic(path.join(this.roots.voices, "voices.json"), (await this.listVoices()).filter((item) => item.voice_id !== voiceId));
+  }
+
+  async assignVoice(channelId: string, voiceId: string | null): Promise<Channel> {
+    const voice = voiceId ? await this.getVoice(voiceId) : null;
+    return this.updateChannel(channelId, { voice_reference_path: voice?.reference_path ?? null });
+  }
+
+  async getVoiceSampleFile(voiceId: string): Promise<{ absolutePath: string; size: number; modified_at: string }> {
+    const voice = await this.getVoice(voiceId);
+    const absolutePath = this.resolveContextPath(voice.sample_path);
+    try {
+      await this.assertRealPathInside(this.roots.voices, absolutePath);
+      const metadata = await stat(absolutePath);
+      return { absolutePath, size: metadata.size, modified_at: metadata.mtime.toISOString() };
+    } catch {
+      throw new RepositoryError("Voice preview not found", "VOICE_SAMPLE_NOT_FOUND");
+    }
   }
 
   async deleteChannel(channelId: string, confirmed: boolean): Promise<void> {
@@ -462,6 +528,7 @@ export class RepositoryService {
       templates: path.join(this.rootDirectory, "templates"),
       shared: path.join(this.rootDirectory, "shared"),
       runtime: path.join(resolvedStorageRoot, ".documentary-studio"),
+      voices: path.join(resolvedStorageRoot, ".documentary-studio", "voices"),
     };
   }
 

@@ -9,6 +9,7 @@ import {
 } from "@studio/shared";
 import { RepositoryService } from "./repository.js";
 import { StudioLogger } from "./logger.js";
+import { DEFAULT_CONFIG } from "./config.js";
 
 type ContextFile = { path: string; reason: string; content: string };
 
@@ -96,7 +97,7 @@ export class ContextEngine {
     const outputContract = taskType === "GENERATE_SCRIPT"
       ? "Return only the completed Markdown script for this confirmed episode. Do not write files."
       : taskType === "GENERATE_SCENES"
-        ? "Return a JSON array of scenes with duration_seconds, dialogue, visual_prompt, transition_note, and continuity_note. Keep each duration at or below the configured maximum. Do not write files."
+        ? "Return a JSON array of scenes with duration_seconds, dialogue, visual_prompt, transition_note, and continuity_note. Pack adjacent beats into each scene, aiming for target_scene_duration_seconds and never exceeding max_scene_duration_seconds; avoid scenes below min_scene_duration_seconds unless it is the episode's final beat. When a scene covers multiple beats, separate them as shots in visual_prompt using a line containing only CUT, per prompt_rules.md. Do not write files."
         : "Return one JSON object for the requested scene regeneration. Include only the fields being regenerated and preserve continuity. Do not write files.";
     const prompt = this.compose(taskType, channel, episode, [...files, ...sharedFiles], { scene_number: sceneNumber ?? null, output_contract: outputContract });
     return this.finalize(taskType, channelId, episodeKey, [...files, ...sharedFiles], excluded.concat("other scenes outside immediate neighbors"), prompt);
@@ -117,9 +118,10 @@ export class ContextEngine {
 
   private async readConfig(): Promise<unknown> {
     try {
-      return JSON.parse(await (await import("node:fs/promises")).readFile(path.join(this.repository.rootDirectory, ".documentary-studio", "config.json"), "utf8"));
+      const raw = JSON.parse(await (await import("node:fs/promises")).readFile(path.join(this.repository.rootDirectory, ".documentary-studio", "config.json"), "utf8")) as Record<string, unknown>;
+      return { ...raw, video_generation: { ...DEFAULT_CONFIG.video_generation, ...(raw.video_generation as object | undefined) } };
     } catch {
-      return {};
+      return { video_generation: DEFAULT_CONFIG.video_generation };
     }
   }
 

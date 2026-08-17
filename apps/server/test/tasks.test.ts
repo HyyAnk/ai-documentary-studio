@@ -15,6 +15,7 @@ class FakeCodex extends EventEmitter {
   private turnNumber = 0;
   activeTurns = 0;
   maxActiveTurns = 0;
+  deletedThreads: string[] = [];
   async connect(): Promise<void> { this.emit("status", "connected"); }
   async startThread(): Promise<string> { return `thread_${this.turnNumber + 1}`; }
   async resumeThread(threadId: string): Promise<string> { return threadId; }
@@ -30,6 +31,7 @@ class FakeCodex extends EventEmitter {
     return turnId;
   }
   async interruptTurn(): Promise<void> { /* deterministic fake */ }
+  async deleteThread(threadId: string): Promise<boolean> { this.deletedThreads.push(threadId); return true; }
   respond(): void { /* deterministic fake */ }
 }
 
@@ -73,6 +75,7 @@ describe("TaskManager locks", () => {
     await waitFor(() => manager.get(second.task_id).status === "COMPLETED");
     expect(manager.get(first.task_id).status).toBe("COMPLETED");
     expect(manager.get(second.task_id).status).toBe("COMPLETED");
+    expect(fake.deletedThreads).toContain("thread_1");
     const secondEpisode = await repository.confirmTopic(channel.channel_id, topics[1].topic_id);
     const parallelA = manager.submit("GENERATE_SCRIPT", channel.channel_id, episode.episode_id);
     const parallelB = manager.submit("GENERATE_SCRIPT", channel.channel_id, secondEpisode.episode_id);
@@ -120,6 +123,46 @@ describe("TaskManager locks", () => {
     expect(fake.maxActiveTurns).toBe(0);
     expect(manager.get(first.task_id).codex_thread_id).toBeNull();
     expect((await repository.readScenes(channel.channel_id, firstEpisode.episode_id))[0].audio_duration_seconds).toBe(2);
+  });
+
+  it("keeps automatic cleanup off until a manual sweep is requested", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "documentary-thread-cleanup-"));
+    roots.push(root);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await mkdir(path.join(root, "shared"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
+    const repository = new RepositoryService(root);
+    const logger = new StudioLogger(root);
+    await logger.init();
+    const fake = new FakeCodex();
+    const task = {
+      task_id: "task_old_thread",
+      task_type: "GENERATE_SCRIPT",
+      channel_id: "channel_old_thread",
+      episode_id: "episode_old_thread",
+      status: "COMPLETED",
+      created_at: "2026-01-01T00:00:00.000Z",
+      started_at: "2026-01-01T00:00:01.000Z",
+      completed_at: "2026-01-01T00:01:00.000Z",
+      codex_thread_id: "thread_old",
+      codex_turn_id: "turn_old",
+      error: null,
+      output_files: [],
+      lock_key: "episode_old_thread",
+      queue_position: null,
+      progress_message: "Completed",
+      scene_number: null,
+    };
+    await mkdir(path.join(repository.roots.runtime, "tasks"), { recursive: true });
+    await writeFile(path.join(repository.roots.runtime, "tasks", "task_old_thread.json"), `${JSON.stringify(task)}\n`, "utf8");
+    const manager = new TaskManager(repository, new ContextEngine(repository, logger), fake as never, 1, 8, logger, undefined, undefined, { auto_delete_threads: false, failed_thread_retention_days: 7 });
+    await manager.load();
+    expect(fake.deletedThreads).toHaveLength(0);
+    expect(await manager.cleanupCodexThreads()).toEqual({ removed: 0 });
+    expect(await manager.cleanupCodexThreads(true)).toEqual({ removed: 1 });
+    expect(manager.get("task_old_thread").codex_thread_id).toBeNull();
+    expect(fake.deletedThreads).toEqual(["thread_old"]);
   });
 });
 

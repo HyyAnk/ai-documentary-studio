@@ -11,9 +11,11 @@ The app is a local-first modular workspace with a React/Vite frontend, a Fastify
 - `providers`: provider boundaries for Chatterbox audio plus future video, image, and research work;
 - `shared`: the single Zod schema package used by both applications.
 
-No database or cloud backend is required. The TTS process is a local sidecar managed by the Windows launcher rather than a hosted backend. From the user's point of view it is part of the tool startup: the launcher prepares the environment, starts it, and waits for model readiness before opening the dashboard.
+No database or cloud backend is required. The TTS process is a local sidecar managed by the Windows launcher rather than a hosted backend. From the user's point of view it is part of the tool startup: the launcher prepares the environment, starts it, and waits for model readiness before opening the dashboard. Runtime voice profiles live under `.documentary-studio/voices/` and are excluded from Git.
 
 Chatterbox is not imported directly into the Node process because it depends on Python, PyTorch, native audio libraries, and a separately loaded model. Keeping that runtime behind loopback HTTP avoids coupling Fastify to those native dependencies while preserving a fully local, automatic workflow.
+
+The Node server queues one audio task per scene and serializes tasks for the same episode through the existing episode lock. Separate exports are assembled locally as a ZIP; merged exports call the TTS sidecar's `/merge` endpoint, which resamples mismatched WAV formats and inserts the configured silence gap.
 
 ## Audio boundary
 

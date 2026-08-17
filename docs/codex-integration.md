@@ -21,6 +21,8 @@ connect
 
 The app records `task_id`, channel, episode, `codex_thread_id`, `codex_turn_id`, lock key, and output files. A task is allowed to run only when its channel/episode lock is free and the global concurrency cap has capacity.
 
+Codex threads are disposable task execution state: repository files remain the source of truth. Completed threads are deleted automatically by default after their task reaches a terminal state. Failed or cancelled threads remain for the configured retention window, then a periodic sweep removes them. Settings includes `auto_delete_threads`, `failed_thread_retention_days`, and a manual `Clean up old Codex sessions` action for older records. Cleanup is best-effort and never changes task status or repository artifacts.
+
 ## Context contract
 
 `ContextEngine` builds an auditable manifest for every call. Topic suggestions include only channel DNA, style/rules, existing titles/premises, and episode titles. Script and scene tasks include only the confirmed episode plus the required rules. Single-scene regeneration includes that scene, immediate neighbors, a script excerpt, and relevant DNA sections.

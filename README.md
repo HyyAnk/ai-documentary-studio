@@ -72,8 +72,10 @@ The first release covers:
 - script generation/editing;
 - scene breakdown with paired dialogue and video prompts;
 - manual scene edits, copy actions, backups, and single-scene regeneration;
-- per-scene Chatterbox audio generation with inline playback, optional voice reference, duration mismatch warning, and stale-audio invalidation;
+- per-scene and batch Chatterbox audio generation with inline playback, reusable voice library, optional voice reference, duration mismatch warning, and stale-audio invalidation;
+- separate ZIP or merged WAV episode export with configurable silence between scenes;
 - task queueing, per-channel/per-episode locks, progress events, approvals, and reconnect states.
+- automatic cleanup of completed Codex sessions, configurable failed-session retention, and manual cleanup from Settings.
 
 Video generation remains a provider interface for now. Audio generation is implemented locally through the Chatterbox sidecar, which `run dashboard.bat` prepares and starts automatically.
 

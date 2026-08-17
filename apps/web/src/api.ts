@@ -1,4 +1,4 @@
-import type { AppConfig, Channel, CodexSettingsInput, CodexSettingsResponse, Episode, Scene, StorageInfo, Task, TaskEvent, TopicCandidate } from "@studio/shared";
+import type { AppConfig, Channel, CodexSettingsInput, CodexSettingsResponse, Episode, Scene, StorageInfo, Task, TaskEvent, TopicCandidate, VoiceProfile } from "@studio/shared";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { headers: { "content-type": "application/json", ...(init?.headers ?? {}) }, ...init });
@@ -22,6 +22,8 @@ export const api = {
   saveFile: (channelId: string, episodeId: string, filename: string, content: string) => request<{ path: string; modified_at: string }>(`/api/channels/${channelId}/episodes/${episodeId}/file/${filename}`, { method: "PUT", body: JSON.stringify({ content }) }),
   scenes: (channelId: string, episodeId: string) => request<{ scenes: Scene[] }>(`/api/channels/${channelId}/episodes/${episodeId}/scenes`),
   saveScenes: (channelId: string, episodeId: string, scenes: Scene[]) => request<{ scenes: Scene[] }>(`/api/channels/${channelId}/episodes/${episodeId}/scenes`, { method: "PUT", body: JSON.stringify(scenes) }),
+  generateAllAudio: (channelId: string, episodeId: string, force = false) => request<{ tasks: Task[] }>(`/api/channels/${channelId}/episodes/${episodeId}/audio/generate-all`, { method: "POST", body: JSON.stringify({ force }) }),
+  downloadAudioUrl: (channelId: string, episodeId: string, mode: "separate" | "merged") => `/api/channels/${channelId}/episodes/${episodeId}/audio/download?mode=${mode}`,
   tasks: () => request<{ tasks: Task[]; codex_status: string }>("/api/tasks"),
   shutdown: () => request<{ ok: true }>("/api/shutdown", { method: "POST", body: "{}" }),
   createTask: (body: unknown) => request<{ task: Task }>("/api/tasks", { method: "POST", body: JSON.stringify(body) }),
@@ -31,11 +33,18 @@ export const api = {
   config: () => request<AppConfig>("/api/config"),
   codexSettings: () => request<CodexSettingsResponse>("/api/codex/settings"),
   saveCodexSettings: (body: CodexSettingsInput) => request<CodexSettingsResponse>("/api/codex/settings", { method: "POST", body: JSON.stringify(body) }),
+  cleanupCodex: () => request<{ removed: number }>("/api/codex/cleanup", { method: "POST", body: "{}" }),
   saveAudioSettings: (body: AppConfig["audio_generation"]) => request<{ audio_generation: AppConfig["audio_generation"] }>("/api/audio/settings", { method: "POST", body: JSON.stringify(body) }),
+  saveVideoSettings: (body: Pick<AppConfig["video_generation"], "target_scene_duration_seconds" | "min_scene_duration_seconds">) => request<{ video_generation: AppConfig["video_generation"] }>("/api/video/settings", { method: "POST", body: JSON.stringify(body) }),
   codexModels: () => request<{ models: CodexSettingsResponse["models"] }>("/api/codex/models"),
   storage: () => request<StorageInfo>("/api/storage"),
   setStorage: (path: string) => request<StorageInfo>("/api/storage", { method: "POST", body: JSON.stringify({ path }) }),
   saveVoiceReference: (channelId: string, data: string) => request<{ path: string; modified_at: string }>(`/api/channels/${channelId}/voice-reference`, { method: "PUT", body: JSON.stringify({ data }) }),
+  voices: () => request<{ voices: VoiceProfile[] }>("/api/voices"),
+  createVoice: (name: string, data: string) => request<VoiceProfile>("/api/voices", { method: "POST", body: JSON.stringify({ name, data }) }),
+  deleteVoice: (voiceId: string) => request<{ ok: true }>(`/api/voices/${voiceId}`, { method: "DELETE" }),
+  assignVoice: (channelId: string, voiceId: string | null) => request<Channel>(`/api/channels/${channelId}/voice`, { method: "PUT", body: JSON.stringify({ voice_id: voiceId }) }),
+  voiceSampleUrl: (voiceId: string) => `/api/voices/${voiceId}/sample`,
   generateAudio: (channelId: string, episodeId: string, sceneNumber: number) => request<{ task: Task }>(`/api/channels/${channelId}/episodes/${episodeId}/scenes/${sceneNumber}/audio`, { method: "POST", body: "{}" }),
   reconnectCodex: () => request<{ status: string; message?: string }>("/api/codex/reconnect", { method: "POST", body: "{}" }),
 };

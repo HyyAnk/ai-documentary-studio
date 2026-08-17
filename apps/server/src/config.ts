@@ -1,12 +1,14 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
-import { AppConfigSchema, AudioSettingsInputSchema, CodexSettingsInputSchema, type AppConfig, type AudioSettingsInput, type CodexSettingsInput } from "@studio/shared";
+import { AppConfigSchema, AudioSettingsInputSchema, CodexSettingsInputSchema, VideoSettingsInputSchema, type AppConfig, type AudioSettingsInput, type CodexSettingsInput, type VideoSettingsInput } from "@studio/shared";
 
 export const DEFAULT_CONFIG: AppConfig = {
   video_generation: {
     provider: "none",
     model: "",
     max_scene_duration_seconds: 8,
+    target_scene_duration_seconds: 8,
+    min_scene_duration_seconds: 4,
     default_scene_duration_seconds: 6,
     aspect_ratio: "16:9",
   },
@@ -19,6 +21,8 @@ export const DEFAULT_CONFIG: AppConfig = {
     experimental_api: false,
     api_base_url: "",
     api_key: "",
+    auto_delete_threads: true,
+    failed_thread_retention_days: 7,
   },
   audio_generation: {
     provider: "chatterbox",
@@ -26,6 +30,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     exaggeration: 0.5,
     cfg_weight: 0.5,
     max_concurrent_tasks: 2,
+    merge_gap_ms: 300,
   },
 };
 
@@ -82,7 +87,7 @@ export async function saveCodexSettings(rootDirectory: string, input: CodexSetti
   const currentLocal = await readJsonFile(localPath);
   const currentCodex = currentLocal.codex && typeof currentLocal.codex === "object" ? currentLocal.codex as Record<string, unknown> : {};
   const nextCodex = { ...currentCodex } as Record<string, unknown>;
-  for (const key of ["transport", "model", "api_base_url", "api_key", "app_server_endpoint", "command"] as const) {
+  for (const key of ["transport", "model", "api_base_url", "api_key", "app_server_endpoint", "command", "auto_delete_threads", "failed_thread_retention_days"] as const) {
     const value = parsed[key];
     if (value !== undefined) nextCodex[key] = value;
   }
@@ -98,12 +103,25 @@ export async function saveAudioSettings(rootDirectory: string, input: AudioSetti
   const currentLocal = await readJsonFile(localPath);
   const currentAudio = currentLocal.audio_generation && typeof currentLocal.audio_generation === "object" ? currentLocal.audio_generation as Record<string, unknown> : {};
   const nextAudio = { ...currentAudio } as Record<string, unknown>;
-  for (const key of ["provider", "service_url", "exaggeration", "cfg_weight", "max_concurrent_tasks"] as const) {
+  for (const key of ["provider", "service_url", "exaggeration", "cfg_weight", "max_concurrent_tasks", "merge_gap_ms"] as const) {
     const value = parsed[key];
     if (value !== undefined) nextAudio[key] = value;
   }
   await mkdir(settingsDirectory, { recursive: true });
   await writeFile(localPath, `${JSON.stringify({ audio_generation: nextAudio }, null, 2)}\n`, "utf8");
+  return loadConfig(rootDirectory);
+}
+
+export async function saveVideoSettings(rootDirectory: string, input: VideoSettingsInput): Promise<AppConfig> {
+  const parsed = VideoSettingsInputSchema.parse(input);
+  const current = await loadConfig(rootDirectory);
+  const next = { ...current.video_generation, ...parsed };
+  if (next.min_scene_duration_seconds > next.max_scene_duration_seconds) throw new Error("Minimum scene duration cannot exceed the maximum");
+  if (next.target_scene_duration_seconds > next.max_scene_duration_seconds) throw new Error("Target scene duration cannot exceed the maximum");
+  const configPath = path.join(rootDirectory, ".documentary-studio", "config.json");
+  await mkdir(path.dirname(configPath), { recursive: true });
+  const raw = await readJsonFile(configPath);
+  await writeFile(configPath, `${JSON.stringify({ ...raw, video_generation: next }, null, 2)}\n`, "utf8");
   return loadConfig(rootDirectory);
 }
 

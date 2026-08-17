@@ -7,6 +7,11 @@ test("workspace opens with an actionable empty state", async ({ page }) => {
   await expect(page.getByRole("combobox", { name: "Codex model" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Stop dashboard" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByRole("heading", { name: "Scene packing" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Voices" })).toBeVisible();
+  await expect(page.getByLabel("Merge gap (ms)")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Clean up old Codex sessions" })).toBeVisible();
 });
 
 test("channel creation exposes uploaded DNA mode", async ({ page }) => {
@@ -94,7 +99,7 @@ test("episode generation stays visible and refreshes completed work without F5",
 test("scene audio updates inline and exposes the duration match action", async ({ page }) => {
   const channel = { channel_id: "ch_audio", slug: "audio-demo", display_name: "Audio demo", description: "A demo channel", target_audience: "Viewers", language: "English", market: "Global", channel_dna_path: "channels/audio-demo/channel_dna.md", style_guide_path: null, status: "ACTIVE", created_at: "2026-08-16T00:00:00.000Z", updated_at: "2026-08-16T00:00:00.000Z", episode_count: 1, voice_reference_path: null };
   const episode = { episode_id: "ep_audio", channel_id: channel.channel_id, slug: "audio-story", topic: { title: "The Audio Story", premise: "A story used to verify scene audio updates.", hook: "Can the voice keep up?" }, stage: "SCENE_READY", script_path: "channels/audio-demo/episodes/audio-story/script.md", scene_plan_path: "channels/audio-demo/episodes/audio-story/scene_plan.md", dialogue_script_path: "channels/audio-demo/episodes/audio-story/dialogue_script.md", video_prompts_path: "channels/audio-demo/episodes/audio-story/video_prompts.md", created_at: channel.created_at, updated_at: channel.updated_at };
-  const scene = { scene_id: "scene_audio_1", episode_id: episode.episode_id, scene_number: 1, duration_seconds: 6, dialogue: "A line ready for local narration.", visual_prompt: "A quiet documentary shot.", transition_note: "", continuity_note: "", audio_asset_path: null as string | null, audio_generated_at: null as string | null, audio_duration_seconds: null as number | null };
+  const scene = { scene_id: "scene_audio_1", episode_id: episode.episode_id, scene_number: 1, duration_seconds: 6, dialogue: "A line ready for local narration.", visual_prompt: "A wide documentary shot.\nCUT\nA close-up detail.", transition_note: "", continuity_note: "", audio_asset_path: null as string | null, audio_generated_at: null as string | null, audio_duration_seconds: null as number | null };
   const completedScene = { ...scene, audio_asset_path: "channels/audio-demo/episodes/audio-story/assets/scene-01.wav", audio_generated_at: "2026-08-16T00:02:00.000Z", audio_duration_seconds: 8 };
   let scenes = [scene];
   let audioTask = null as Record<string, unknown> | null;
@@ -135,6 +140,9 @@ test("scene audio updates inline and exposes the duration match action", async (
   await page.getByRole("button", { name: /Audio demo/ }).click();
   await page.getByRole("button", { name: /The Audio Story/ }).click();
   await expect(page.getByRole("button", { name: "Generate Audio", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Generate all audio", exact: true })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Audio download mode" })).toHaveValue("separate");
+  await expect(page.getByText("6s · 2 cuts", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Generate Audio", exact: true }).click();
   await expect(page.locator(".scene-card .inline-task-state").filter({ hasText: "Synthesizing dialogue" })).toBeVisible();

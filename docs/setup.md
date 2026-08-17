@@ -38,6 +38,10 @@ Check `http://127.0.0.1:8890/health`. It returns ready only after the model is l
 
 Audio settings are available in Settings. The service URL, Chatterbox controls, and optional per-channel WAV voice reference are stored locally. Voice references and generated WAV files stay in the selected content storage folder, which is ignored by Git.
 
+Settings also contains a shared voice library. Adding a voice creates a reusable reference and a cached preview under `.documentary-studio/voices/`; assigning it to a channel controls the next audio generation task. Episode audio can be queued with Generate all audio and downloaded as separate scene files or one merged WAV.
+
+The Codex settings panel also controls session cleanup. Completed sessions are auto-deleted by default; failed/cancelled sessions are retained for seven days by default. The cleanup action is safe to run manually and only removes Codex transcripts, never channel or episode files.
+
 On the first launch, the dashboard asks for a local content storage folder. It creates `channels/`, `.documentary-studio/tasks/`, `.documentary-studio/codex/`, and `.documentary-studio/logs/` inside that folder. The code, templates, and shared rules remain in the Git project.
 
 The selected folder is saved locally in `.documentary-studio/storage.local.json`, which is ignored by Git. Change it later from Settings → Storage folder. Existing content is not moved automatically when switching folders. To use a different code project root, set `STUDIO_ROOT` before starting the server. To enable extra structured diagnostics, set `STUDIO_DEBUG=1`.

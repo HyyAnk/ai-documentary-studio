@@ -49,6 +49,20 @@ describe("RepositoryService", () => {
     await expect(readFile(path.join(projectRoot, "channels", channel.slug, "channel.json"), "utf8")).rejects.toThrow();
   });
 
+  it("stores reusable voices, protects assigned voices, and supports reset", async () => {
+    const repository = await fixture();
+    const channel = await repository.createChannel({ name: "Voice Channel", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });
+    const profile = await repository.createVoiceProfile("Documentary narrator", new Uint8Array([1, 2]), new Uint8Array([3, 4]));
+    expect((await repository.listVoices()).map((voice) => voice.voice_id)).toContain(profile.voice_id);
+    const assigned = await repository.assignVoice(channel.channel_id, profile.voice_id);
+    expect(assigned.voice_reference_path).toBe(profile.reference_path);
+    await expect(repository.deleteVoiceProfile(profile.voice_id)).rejects.toThrow("Voice is in use by 1 channel(s)");
+    const reset = await repository.assignVoice(channel.channel_id, null);
+    expect(reset.voice_reference_path).toBeNull();
+    await repository.deleteVoiceProfile(profile.voice_id);
+    expect(await repository.listVoices()).toHaveLength(0);
+  });
+
   it("rejects unsafe path segments and only creates an episode after confirmation", async () => {
     const repository = await fixture();
     const channel = await repository.createChannel({ name: "Channel", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });

@@ -44,6 +44,11 @@ class SynthesizeRequest(BaseModel):
     cfg_weight: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
+class MergeRequest(BaseModel):
+    paths: list[str] = Field(min_length=1, max_length=128)
+    gap_ms: int = Field(default=300, ge=0, le=10_000)
+
+
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MODEL: Optional[ChatterboxTTS] = None
 MODEL_ERROR: Optional[str] = None
@@ -96,4 +101,54 @@ async def synthesize_audio(request: SynthesizeRequest) -> Response:
         logger.error("Synthesis failed: %s", error, extra={"step": "synthesize"})
         raise HTTPException(status_code=503, detail="Audio service unavailable") from error
     logger.info("Generated WAV bytes=%s", len(audio), extra={"step": "synthesize"})
+    return Response(content=audio, media_type="audio/wav", headers={"cache-control": "no-store"})
+
+
+def merge_audio(paths: list[str], gap_ms: int) -> bytes:
+    waveforms = []
+    sample_rate: Optional[int] = None
+    channels: Optional[int] = None
+    for path in paths:
+        if not os.path.isabs(path) or not os.path.isfile(path):
+            raise ValueError("Audio file does not exist")
+        waveform, current_rate = torchaudio.load(path)
+        if sample_rate is None:
+            sample_rate = current_rate
+            channels = waveform.shape[0]
+        elif current_rate != sample_rate:
+            waveform = torchaudio.functional.resample(waveform, current_rate, sample_rate)
+        if channels is not None and waveform.shape[0] != channels:
+            if waveform.shape[0] == 1:
+                waveform = waveform.repeat(channels, 1)
+            elif channels == 1:
+                waveform = waveform.mean(dim=0, keepdim=True)
+            else:
+                waveform = waveform.mean(dim=0, keepdim=True).repeat(channels, 1)
+        waveforms.append(waveform)
+    if not waveforms or sample_rate is None:
+        raise ValueError("At least one audio file is required")
+    gap_frames = round(sample_rate * gap_ms / 1000)
+    pieces = []
+    for index, waveform in enumerate(waveforms):
+        if index > 0 and gap_frames > 0:
+            pieces.append(torch.zeros((waveform.shape[0], gap_frames), dtype=waveform.dtype))
+        pieces.append(waveform)
+    merged = torch.cat(pieces, dim=1)
+    output = io.BytesIO()
+    torchaudio.save(output, merged.cpu(), sample_rate, format="wav")
+    return output.getvalue()
+
+
+@app.post("/merge")
+async def merge_audio_files(request: MergeRequest) -> Response:
+    if MODEL is None:
+        raise HTTPException(status_code=503, detail="Audio service unavailable")
+    try:
+        audio = await __import__("asyncio").to_thread(merge_audio, request.paths, request.gap_ms)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except Exception as error:
+        logger.error("Merge failed: %s", error, extra={"step": "merge"})
+        raise HTTPException(status_code=503, detail="Audio merge failed") from error
+    logger.info("Merged WAV files=%s bytes=%s gap_ms=%s", len(request.paths), len(audio), request.gap_ms, extra={"step": "merge"})
     return Response(content=audio, media_type="audio/wav", headers={"cache-control": "no-store"})

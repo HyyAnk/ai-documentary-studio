@@ -132,6 +132,8 @@ export const AppConfigSchema = z.object({
     provider: z.string().default("none"),
     model: z.string().default(""),
     max_scene_duration_seconds: z.number().positive().default(8),
+    target_scene_duration_seconds: z.number().positive().default(8),
+    min_scene_duration_seconds: z.number().positive().default(4),
     default_scene_duration_seconds: z.number().positive().default(6),
     aspect_ratio: z.string().default("16:9"),
   }),
@@ -144,6 +146,8 @@ export const AppConfigSchema = z.object({
     experimental_api: z.boolean().default(false),
     api_base_url: z.string().default(""),
     api_key: z.string().default(""),
+    auto_delete_threads: z.boolean().default(true),
+    failed_thread_retention_days: z.number().int().nonnegative().default(7),
   }),
   audio_generation: z.object({
     provider: z.string().default("chatterbox"),
@@ -151,9 +155,31 @@ export const AppConfigSchema = z.object({
     exaggeration: z.number().min(0).max(1).default(0.5),
     cfg_weight: z.number().min(0).max(1).default(0.5),
     max_concurrent_tasks: z.number().int().positive().default(2),
+    merge_gap_ms: z.number().int().nonnegative().default(300),
   }),
 });
 export type AppConfig = z.infer<typeof AppConfigSchema>;
+
+export const VoiceProfileSchema = z.object({
+  voice_id: z.string().min(1),
+  name: z.string().min(1).max(80),
+  reference_path: z.string().min(1),
+  sample_path: z.string().min(1),
+  created_at: IsoDate,
+});
+export type VoiceProfile = z.infer<typeof VoiceProfileSchema>;
+
+export const CreateVoiceInputSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  data: z.string().min(1).max(50_000_000),
+});
+export type CreateVoiceInput = z.infer<typeof CreateVoiceInputSchema>;
+
+export const AssignVoiceInputSchema = z.object({ voice_id: z.string().trim().min(1).nullable() });
+export type AssignVoiceInput = z.infer<typeof AssignVoiceInputSchema>;
+
+export const GenerateAllAudioInputSchema = z.object({ force: z.boolean().default(false) });
+export type GenerateAllAudioInput = z.infer<typeof GenerateAllAudioInputSchema>;
 
 export const AudioSettingsInputSchema = z.object({
   provider: z.string().trim().max(80).optional(),
@@ -161,8 +187,15 @@ export const AudioSettingsInputSchema = z.object({
   exaggeration: z.number().min(0).max(1).optional(),
   cfg_weight: z.number().min(0).max(1).optional(),
   max_concurrent_tasks: z.number().int().positive().max(16).optional(),
+  merge_gap_ms: z.number().int().nonnegative().max(10_000).optional(),
 });
 export type AudioSettingsInput = z.infer<typeof AudioSettingsInputSchema>;
+
+export const VideoSettingsInputSchema = z.object({
+  target_scene_duration_seconds: z.number().positive().max(120).optional(),
+  min_scene_duration_seconds: z.number().positive().max(120).optional(),
+});
+export type VideoSettingsInput = z.infer<typeof VideoSettingsInputSchema>;
 
 export const VoiceReferenceUploadSchema = z.object({
   data: z.string().min(1).max(50_000_000),
@@ -176,6 +209,8 @@ export const CodexSettingsInputSchema = z.object({
   api_key: z.string().max(4000).optional(),
   app_server_endpoint: z.string().trim().max(2000).optional(),
   command: z.string().trim().max(500).optional(),
+  auto_delete_threads: z.boolean().optional(),
+  failed_thread_retention_days: z.number().int().nonnegative().max(3650).optional(),
 });
 export type CodexSettingsInput = z.infer<typeof CodexSettingsInputSchema>;
 
@@ -192,6 +227,8 @@ export const CodexSettingsSchema = z.object({
   has_api_key: z.boolean(),
   app_server_endpoint: z.string(),
   command: z.string(),
+  auto_delete_threads: z.boolean().default(true),
+  failed_thread_retention_days: z.number().int().nonnegative().default(7),
 });
 export type CodexSettings = z.infer<typeof CodexSettingsSchema>;
 

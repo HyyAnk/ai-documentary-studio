@@ -1,32 +1,54 @@
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { access, mkdir } from "node:fs/promises";
+import { access, mkdir, readFile } from "node:fs/promises";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import websocket from "@fastify/websocket";
 import {
   ApprovalDecisionSchema,
+  AssignVoiceInputSchema,
   AudioSettingsInputSchema,
   CodexSettingsInputSchema,
+  CreateVoiceInputSchema,
   CreateChannelInputSchema,
+  GenerateAllAudioInputSchema,
   SaveTextInputSchema,
   SceneSchema,
   TopicConfirmInputSchema,
   UpdateChannelInputSchema,
   StoragePathInputSchema,
   VoiceReferenceUploadSchema,
+  VideoSettingsInputSchema,
+  type AppConfig,
   type StorageInfo,
   type TaskEvent,
   type TaskType,
 } from "@studio/shared";
-import { loadConfig, loadStorageRoot, saveAudioSettings, saveCodexSettings, saveStorageRoot } from "./config.js";
+import { loadConfig, loadStorageRoot, saveAudioSettings, saveCodexSettings, saveStorageRoot, saveVideoSettings } from "./config.js";
 import { CodexAppServerClient } from "./codex.js";
 import { ContextEngine } from "./context.js";
 import { StudioLogger } from "./logger.js";
 import { RepositoryError, RepositoryService } from "./repository.js";
 import { TaskManager } from "./tasks.js";
+import { synthesizeWav } from "./providers/chatterbox.js";
+import { createStoredZip } from "./zip.js";
+
+const VOICE_PREVIEW_TEXT = "This is a preview of this narrator voice for AI Documentary Studio.";
+
+async function createVoiceWithPreview(repository: RepositoryService, name: string, reference: Uint8Array, audioConfig: AppConfig["audio_generation"]) {
+  let profile: Awaited<ReturnType<RepositoryService["createVoiceProfile"]>> | null = null;
+  try {
+    profile = await repository.createVoiceProfile(name, reference, new Uint8Array());
+    const sample = await synthesizeWav(audioConfig, VOICE_PREVIEW_TEXT, repository.resolveContextPath(profile.reference_path));
+    await repository.updateVoiceSample(profile.voice_id, sample);
+    return repository.getVoice(profile.voice_id);
+  } catch (error) {
+    if (profile) await repository.deleteVoiceProfile(profile.voice_id).catch(() => undefined);
+    throw error;
+  }
+}
 
 export type StudioApp = {
   server: FastifyInstance;
@@ -47,7 +69,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
   let config = await loadConfig(rootDirectory);
   const codex = new CodexAppServerClient(rootDirectory, config, logger);
   const contextEngine = new ContextEngine(repository, logger);
-  const tasks = new TaskManager(repository, contextEngine, codex, config.codex.max_concurrent_tasks, config.video_generation.max_scene_duration_seconds, logger, config.audio_generation);
+  const tasks = new TaskManager(repository, contextEngine, codex, config.codex.max_concurrent_tasks, config.video_generation.max_scene_duration_seconds, logger, config.audio_generation, undefined, config.codex);
   await tasks.load();
   const getStorageInfo = (): StorageInfo => ({
     path: repository.storageRoot,
@@ -124,6 +146,8 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
       has_api_key: Boolean(config.codex.api_key),
       app_server_endpoint: config.codex.app_server_endpoint,
       command: config.codex.command,
+      auto_delete_threads: config.codex.auto_delete_threads,
+      failed_thread_retention_days: config.codex.failed_thread_retention_days,
     },
     models: await codex.getModels(),
     installation: await codex.detectInstallation(),
@@ -136,6 +160,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     if (wasConnected) await codex.close();
     config = await saveCodexSettings(rootDirectory, input);
     codex.updateConfig(config);
+    tasks.updateCodexConfig(config.codex);
     if (wasConnected) await codex.connect().catch(() => undefined);
     return {
       settings: {
@@ -145,17 +170,43 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
         has_api_key: Boolean(config.codex.api_key),
         app_server_endpoint: config.codex.app_server_endpoint,
         command: config.codex.command,
+        auto_delete_threads: config.codex.auto_delete_threads,
+        failed_thread_retention_days: config.codex.failed_thread_retention_days,
       },
       models: await codex.getModels(),
       installation: await codex.detectInstallation(),
     };
   });
+  server.post("/api/codex/cleanup", async () => tasks.cleanupCodexThreads(true));
   server.post("/api/audio/settings", async (request) => {
     const input = AudioSettingsInputSchema.parse(request.body);
     if (tasks.hasActiveWork()) throw new RepositoryError("Finish active tasks before changing audio settings", "AUDIO_SETTINGS_BUSY");
     config = await saveAudioSettings(rootDirectory, input);
     tasks.updateAudioConfig(config.audio_generation);
     return { audio_generation: config.audio_generation };
+  });
+  server.post("/api/video/settings", async (request) => {
+    const input = VideoSettingsInputSchema.parse(request.body);
+    if (tasks.hasActiveWork()) throw new RepositoryError("Finish active tasks before changing video settings", "VIDEO_SETTINGS_BUSY");
+    config = await saveVideoSettings(rootDirectory, input);
+    return { video_generation: config.video_generation };
+  });
+  server.get("/api/voices", async () => ({ voices: await repository.listVoices() }));
+  server.get("/api/voices/:voiceId/sample", async (request, reply) => {
+    const file = await repository.getVoiceSampleFile((request.params as { voiceId: string }).voiceId);
+    return reply.headers({ "content-type": "audio/wav", "content-length": file.size, "cache-control": "no-store" }).send(createReadStream(file.absolutePath));
+  });
+  server.post("/api/voices", async (request) => {
+    const input = CreateVoiceInputSchema.parse(request.body);
+    const audio = Buffer.from(input.data, "base64");
+    if (audio.length < 12 || audio.toString("ascii", 0, 4) !== "RIFF" || audio.toString("ascii", 8, 12) !== "WAVE") {
+      throw new RepositoryError("Voice reference must be a WAV file", "INVALID_AUDIO");
+    }
+    return createVoiceWithPreview(repository, input.name, audio, config.audio_generation);
+  });
+  server.delete("/api/voices/:voiceId", async (request) => {
+    await repository.deleteVoiceProfile((request.params as { voiceId: string }).voiceId);
+    return { ok: true };
   });
   server.get("/api/channels", async (request) => {
     const query = request.query as { includeArchived?: string };
@@ -172,13 +223,22 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     const patch = UpdateChannelInputSchema.parse(request.body);
     return repository.updateChannel(params.channelId, patch);
   });
+  server.put("/api/channels/:channelId/voice", async (request) => {
+    const channelId = (request.params as { channelId: string }).channelId;
+    const { voice_id: voiceId } = AssignVoiceInputSchema.parse(request.body);
+    return repository.assignVoice(channelId, voiceId);
+  });
   server.put("/api/channels/:channelId/voice-reference", async (request) => {
     const { data } = VoiceReferenceUploadSchema.parse(request.body);
     const audio = Buffer.from(data, "base64");
     if (audio.length < 12 || audio.toString("ascii", 0, 4) !== "RIFF" || audio.toString("ascii", 8, 12) !== "WAVE") {
       throw new RepositoryError("Voice reference must be a WAV file", "INVALID_AUDIO");
     }
-    return repository.saveVoiceReference((request.params as { channelId: string }).channelId, audio);
+    const channelId = (request.params as { channelId: string }).channelId;
+    const channel = await repository.getChannel(channelId);
+    const voice = await createVoiceWithPreview(repository, `${channel.display_name} (uploaded)`, audio, config.audio_generation);
+    const assigned = await repository.assignVoice(channelId, voice.voice_id);
+    return { path: assigned.voice_reference_path, modified_at: new Date().toISOString(), voice, channel: assigned };
   });
   server.delete("/api/channels/:channelId", async (request) => {
     const params = request.params as { channelId: string };
@@ -222,6 +282,61 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     if (!Number.isInteger(sceneNumber) || sceneNumber < 1) throw new RepositoryError("Scene number is required", "SCENE_REQUIRED");
     const task = tasks.submit("GENERATE_AUDIO", params.channelId, params.episodeId, sceneNumber);
     return reply.code(202).send({ task });
+  });
+  server.post("/api/channels/:channelId/episodes/:episodeId/audio/generate-all", async (request, reply) => {
+    const params = request.params as { channelId: string; episodeId: string };
+    const { force } = GenerateAllAudioInputSchema.parse(request.body ?? {});
+    const scenes = await repository.readScenes(params.channelId, params.episodeId);
+    const created = scenes
+      .filter((scene) => force || !scene.audio_asset_path)
+      .map((scene) => tasks.submit("GENERATE_AUDIO", params.channelId, params.episodeId, scene.scene_number));
+    return reply.code(202).send({ tasks: created });
+  });
+  server.get("/api/channels/:channelId/episodes/:episodeId/audio/download", async (request, reply) => {
+    const params = request.params as { channelId: string; episodeId: string };
+    const mode = (request.query as { mode?: string }).mode ?? "separate";
+    if (mode !== "separate" && mode !== "merged") throw new RepositoryError("Download mode must be separate or merged", "INVALID_DOWNLOAD_MODE");
+    const episode = await repository.getEpisode(params.channelId, params.episodeId);
+    const scenes = (await repository.readScenes(params.channelId, params.episodeId)).sort((a, b) => a.scene_number - b.scene_number);
+    const assets: Array<{ sceneNumber: number; absolutePath: string; filename: string }> = [];
+    const missing: number[] = [];
+    for (const scene of scenes) {
+      if (!scene.audio_asset_path) {
+        missing.push(scene.scene_number);
+        continue;
+      }
+      try {
+        const filename = path.basename(scene.audio_asset_path);
+        const file = await repository.getSceneAudioFile(params.channelId, params.episodeId, filename);
+        assets.push({ sceneNumber: scene.scene_number, absolutePath: file.absolutePath, filename });
+      } catch {
+        missing.push(scene.scene_number);
+      }
+    }
+    if (mode === "separate") {
+      const zip = createStoredZip(await Promise.all(assets.map(async (asset) => ({ name: `scene-${String(asset.sceneNumber).padStart(2, "0")}.wav`, data: await readFile(asset.absolutePath) }))));
+      return reply.headers({ "content-type": "application/zip", "content-disposition": `attachment; filename="${episode.slug}-audio-scenes.zip"` }).send(zip);
+    }
+    if (scenes.length === 0) {
+      return reply.code(409).send({ error: "This episode has no scenes", missing_scene_numbers: [] });
+    }
+    if (missing.length > 0) {
+      return reply.code(409).send({ error: `Scenes ${missing.join(", ")} have no audio yet`, missing_scene_numbers: missing });
+    }
+    let response: Response;
+    try {
+      response = await fetch(`${config.audio_generation.service_url.replace(/\/$/, "")}/merge`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ paths: assets.map((asset) => asset.absolutePath), gap_ms: config.audio_generation.merge_gap_ms }),
+        signal: AbortSignal.timeout(15 * 60 * 1000),
+      });
+    } catch {
+      throw new RepositoryError("Audio service unavailable", "AUDIO_SERVICE_UNAVAILABLE");
+    }
+    if (!response.ok) throw new RepositoryError("Audio merge failed", "AUDIO_MERGE_FAILED");
+    const merged = Buffer.from(await response.arrayBuffer());
+    return reply.headers({ "content-type": "audio/wav", "content-length": merged.length, "content-disposition": `attachment; filename="${episode.slug}-audio-full.wav"` }).send(merged);
   });
   server.get("/api/channels/:channelId/episodes/:episodeId/assets/:filename", async (request, reply) => {
     const params = request.params as { channelId: string; episodeId: string; filename: string };

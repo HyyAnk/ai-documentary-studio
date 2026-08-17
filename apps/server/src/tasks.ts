@@ -21,6 +21,7 @@ import { ChatterboxProvider, type ChatterboxTarget } from "./providers/chatterbo
 import type { AudioProvider } from "./providers/index.js";
 
 type ActiveRun = { task: Task; threadId: string; turnId: string; output: string; manifest: ContextManifest };
+type CodexCleanupConfig = { auto_delete_threads: boolean; failed_thread_retention_days: number };
 
 const channelTaskTypes = new Set<TaskType>(["GENERATE_DNA", "SUGGEST_TOPICS"]);
 
@@ -35,6 +36,8 @@ export class TaskManager extends EventEmitter {
   private readonly activeAudio = new Set<string>();
   private audioConfig: AppConfig["audio_generation"];
   private readonly audioProviderFactory: (target: ChatterboxTarget, config: AppConfig["audio_generation"]) => AudioProvider;
+  private codexCleanupConfig: CodexCleanupConfig;
+  private cleanupTimer: NodeJS.Timeout | null = null;
   private connectionStatus: "connected" | "disconnected" | "unavailable" | "connecting" = "disconnected";
 
   constructor(
@@ -50,12 +53,15 @@ export class TaskManager extends EventEmitter {
       exaggeration: 0.5,
       cfg_weight: 0.5,
       max_concurrent_tasks: 2,
+      merge_gap_ms: 300,
     },
     audioProviderFactory?: (target: ChatterboxTarget, config: AppConfig["audio_generation"]) => AudioProvider,
+    codexConfig: CodexCleanupConfig = { auto_delete_threads: true, failed_thread_retention_days: 7 },
   ) {
     super();
     this.audioConfig = audioConfig;
     this.audioProviderFactory = audioProviderFactory ?? ((target, config) => new ChatterboxProvider(repository, config, target));
+    this.codexCleanupConfig = { auto_delete_threads: codexConfig.auto_delete_threads, failed_thread_retention_days: codexConfig.failed_thread_retention_days };
     codex.on("status", (status: typeof this.connectionStatus) => {
       this.connectionStatus = status;
       this.emitEvent({ type: "codex.status", status });
@@ -85,6 +91,8 @@ export class TaskManager extends EventEmitter {
         // Ignore a single corrupt operational record; repository artifacts remain safe.
       }
     }
+    this.startCleanupTimer();
+    void this.cleanupCodexThreads();
   }
 
   async reload(): Promise<void> {
@@ -98,6 +106,10 @@ export class TaskManager extends EventEmitter {
 
   updateAudioConfig(config: AppConfig["audio_generation"]): void {
     this.audioConfig = config;
+  }
+
+  updateCodexConfig(config: AppConfig["codex"]): void {
+    this.codexCleanupConfig = { auto_delete_threads: config.auto_delete_threads, failed_thread_retention_days: config.failed_thread_retention_days };
   }
 
   list(): Task[] {
@@ -340,10 +352,49 @@ export class TaskManager extends EventEmitter {
   }
 
   private async finish(taskId: string, status: TaskStatus, error: string | null, outputFiles: string[] = []): Promise<void> {
+    const threadId = this.get(taskId).codex_thread_id;
     this.active.delete(taskId);
     this.completionWaiters.get(taskId)?.();
     this.completionWaiters.delete(taskId);
     await this.update(taskId, { status, error, completed_at: nowIso(), output_files: outputFiles.length ? outputFiles : this.get(taskId).output_files, progress_message: status === "COMPLETED" ? "Completed" : error ?? status });
+    const shouldDelete = Boolean(threadId && this.codexCleanupConfig.auto_delete_threads && (status === "COMPLETED" || ((status === "FAILED" || status === "CANCELLED") && this.codexCleanupConfig.failed_thread_retention_days === 0)));
+    if (shouldDelete && threadId && await this.tryDeleteThread(threadId)) await this.update(taskId, { codex_thread_id: null });
+  }
+
+  async cleanupCodexThreads(force = false): Promise<{ removed: number }> {
+    if (!force && !this.codexCleanupConfig.auto_delete_threads) return { removed: 0 };
+    const now = Date.now();
+    const retentionMs = this.codexCleanupConfig.failed_thread_retention_days * 24 * 60 * 60 * 1000;
+    const candidates = this.list().filter((task) => {
+      if (!task.codex_thread_id || !["COMPLETED", "FAILED", "CANCELLED"].includes(task.status)) return false;
+      if (force) return true;
+      if (task.status !== "FAILED" && task.status !== "CANCELLED") return false;
+      return Boolean(task.completed_at && now - Date.parse(task.completed_at) >= retentionMs);
+    });
+    let removed = 0;
+    for (const task of candidates) {
+      if (!task.codex_thread_id || !(await this.tryDeleteThread(task.codex_thread_id))) continue;
+      await this.update(task.task_id, { codex_thread_id: null });
+      removed += 1;
+    }
+    return { removed };
+  }
+
+  private startCleanupTimer(): void {
+    if (this.cleanupTimer) return;
+    this.cleanupTimer = setInterval(() => void this.cleanupCodexThreads(), 3 * 60 * 60 * 1000);
+    this.cleanupTimer.unref?.();
+  }
+
+  private async tryDeleteThread(threadId: string): Promise<boolean> {
+    const client = this.codex as unknown as { deleteThread?: (id: string) => Promise<boolean> };
+    if (!client.deleteThread) return false;
+    try {
+      return await client.deleteThread.call(this.codex, threadId);
+    } catch (error) {
+      this.logger.debug(`Codex thread cleanup skipped: ${error instanceof Error ? error.message : "unknown error"}`, { step: "codex_thread_cleanup" });
+      return false;
+    }
   }
 
   private async update(taskId: string, patch: Partial<Task>): Promise<void> {
