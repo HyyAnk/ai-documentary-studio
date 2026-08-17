@@ -2,6 +2,7 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 set "ROOT=%~dp0"
+if "!ROOT:~-1!"=="\" set "ROOT=!ROOT:~0,-1!"
 cd /d "%ROOT%"
 
 for /f "delims=" %%A in ('echo prompt $E^| cmd') do set "ESC=%%A"
@@ -63,15 +64,24 @@ if errorlevel 1 (
 for /f "delims=" %%V in ('node --version 2^>nul') do set "NODE_VERSION=%%V"
 call :log OK T:setup node "Node.js !NODE_VERSION! ready"
 
-call :log STEP T:setup pnpm "Enabling pnpm through Corepack"
-call corepack enable >nul 2>nul
+call :log STEP T:setup pnpm "Checking pnpm installation"
+where pnpm >nul 2>nul
 if errorlevel 1 (
-  call :log ERROR T:setup pnpm "Corepack could not be enabled"
-  exit /b 1
+  call :log STEP T:setup pnpm "pnpm was not found; enabling it through Corepack"
+  call corepack enable >nul 2>nul
+  if errorlevel 1 (
+    call :log ERROR T:setup pnpm "pnpm is unavailable and Corepack could not be enabled"
+    exit /b 1
+  )
+  call corepack prepare pnpm@11.0.0 --activate >nul 2>nul
+  if errorlevel 1 (
+    call :log ERROR T:setup pnpm "pnpm could not be activated"
+    exit /b 1
+  )
 )
-call corepack prepare pnpm@11.0.0 --activate >nul 2>nul
+where pnpm >nul 2>nul
 if errorlevel 1 (
-  call :log ERROR T:setup pnpm "pnpm could not be activated"
+  call :log ERROR T:setup pnpm "pnpm is unavailable"
   exit /b 1
 )
 for /f "delims=" %%V in ('pnpm --version 2^>nul') do set "PNPM_VERSION=%%V"
@@ -86,23 +96,34 @@ if errorlevel 1 (
 call :log OK T:setup install "Workspace dependencies ready"
 
 call :log STEP T:setup audio "Preparing Chatterbox TTS runtime and waiting for model readiness"
-powershell -NoProfile -ExecutionPolicy Bypass -File "!ROOT!scripts\ensure-tts.ps1" -ProjectRoot "!ROOT!"
+powershell -NoProfile -ExecutionPolicy Bypass -File "!ROOT!\scripts\ensure-tts.ps1" -ProjectRoot "!ROOT!"
 if errorlevel 1 (
   call :log ERROR T:setup audio "Chatterbox could not be prepared. Dashboard startup stopped so Generate Audio is not silently unavailable"
   exit /b 1
 )
 call :log OK T:setup audio "Chatterbox sidecar is ready"
 
-call :log STEP T:setup launch "Checking local server version"
+call :log STEP T:setup launch "Checking local server and web app versions"
+set "SERVER_READY=0"
+set "WEB_READY=0"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $config = Invoke-RestMethod -UseBasicParsing -Uri 'http://127.0.0.1:4310/api/config' -TimeoutSec 2; if ($null -ne $config.audio_generation) { exit 0 }; exit 2 } catch { exit 1 }" >nul 2>nul
-if not errorlevel 1 (
-  call :log OK T:setup launch "Local server with audio integration is already running"
+if not errorlevel 1 set "SERVER_READY=1"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $page = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:5173/' -TimeoutSec 2; if ($page.Content -match '<title>AI Documentary Studio</title>') { exit 0 }; exit 2 } catch { exit 1 }" >nul 2>nul
+if not errorlevel 1 set "WEB_READY=1"
+
+if "!SERVER_READY!"=="1" if "!WEB_READY!"=="1" (
+  call :log OK T:setup launch "Local server and web app are already running"
   goto wait_for_dashboard
 )
 
-call :log STEP T:setup launch "Stopping stale local server before starting the current version"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$connections = Get-NetTCPConnection -LocalPort 4310 -State Listen -ErrorAction SilentlyContinue; foreach ($connection in $connections) { Stop-Process -Id $connection.OwningProcess -Force -ErrorAction SilentlyContinue }" >nul 2>nul
-start "AI Documentary Studio" /D "%ROOT%" cmd /k "pnpm dev"
+if "!SERVER_READY!"=="0" (
+  call :log STEP T:setup launch "Stopping stale local server before starting the current version"
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "$connections = Get-NetTCPConnection -LocalPort 4310 -State Listen -ErrorAction SilentlyContinue; foreach ($connection in $connections) { Stop-Process -Id $connection.OwningProcess -Force -ErrorAction SilentlyContinue }" >nul 2>nul
+  start "AI Documentary Studio" /D "%ROOT%" cmd /k "pnpm dev"
+) else if "!WEB_READY!"=="0" (
+  call :log STEP T:setup launch "Local server is running; starting the web app"
+  start "AI Documentary Studio Web" /D "%ROOT%" cmd /k "pnpm --filter @studio/web dev"
+)
 
 :wait_for_dashboard
 call :log STEP T:setup wait "Waiting for http://127.0.0.1:5173"

@@ -132,9 +132,8 @@ export const AppConfigSchema = z.object({
     provider: z.string().default("none"),
     model: z.string().default(""),
     max_scene_duration_seconds: z.number().positive().default(8),
-    target_scene_duration_seconds: z.number().positive().default(8),
-    min_scene_duration_seconds: z.number().positive().default(4),
     default_scene_duration_seconds: z.number().positive().default(6),
+    narration_words_per_second: z.number().positive().default(2.3),
     aspect_ratio: z.string().default("16:9"),
   }),
   codex: z.object({
@@ -192,8 +191,8 @@ export const AudioSettingsInputSchema = z.object({
 export type AudioSettingsInput = z.infer<typeof AudioSettingsInputSchema>;
 
 export const VideoSettingsInputSchema = z.object({
-  target_scene_duration_seconds: z.number().positive().max(120).optional(),
-  min_scene_duration_seconds: z.number().positive().max(120).optional(),
+  max_scene_duration_seconds: z.number().positive().max(120).optional(),
+  narration_words_per_second: z.number().positive().max(20).optional(),
 });
 export type VideoSettingsInput = z.infer<typeof VideoSettingsInputSchema>;
 

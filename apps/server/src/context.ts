@@ -78,12 +78,13 @@ export class ContextEngine {
       const research = await this.repository.getEpisodeFile(channelId, episodeKey, "research.md");
       if (research.content.trim()) add({ path: research.path, reason: "research for this episode", content: research.content });
     } else if (taskType === "GENERATE_SCENES") {
-      await this.readSharedRules(["visual_rules.md", "prompt_rules.md"], sharedFiles);
+      await this.readSharedRules(["visual_rules.md", "prompt_rules.md", "cinematic_prompt_reference.md"], sharedFiles);
       const script = await this.repository.getEpisodeFile(channelId, episodeKey, "script.md");
       add({ path: script.path, reason: "confirmed episode script", content: script.content });
       add({ path: dnaPath, reason: "visual language and scene rules", content: selectSections(dna, ["Visual Language", "Scene Rules", "AI Reconstruction Rules"]) });
       add({ path: ".documentary-studio/config.json", reason: "scene duration and aspect ratio", content: JSON.stringify(await this.readConfig()) });
     } else {
+      await this.readSharedRules(["visual_rules.md", "prompt_rules.md", "cinematic_prompt_reference.md"], sharedFiles);
       const scenes = await this.repository.readScenes(channelId, episodeKey);
       const current = scenes.find((scene) => scene.scene_number === sceneNumber);
       if (!current) throw new Error("Scene is required for regeneration");
@@ -97,8 +98,8 @@ export class ContextEngine {
     const outputContract = taskType === "GENERATE_SCRIPT"
       ? "Return only the completed Markdown script for this confirmed episode. Do not write files."
       : taskType === "GENERATE_SCENES"
-        ? "Return a JSON array of scenes with duration_seconds, dialogue, visual_prompt, transition_note, and continuity_note. Pack adjacent beats into each scene, aiming for target_scene_duration_seconds and never exceeding max_scene_duration_seconds; avoid scenes below min_scene_duration_seconds unless it is the episode's final beat. When a scene covers multiple beats, separate them as shots in visual_prompt using a line containing only CUT, per prompt_rules.md. Do not write files."
-        : "Return one JSON object for the requested scene regeneration. Include only the fields being regenerated and preserve continuity. Do not write files.";
+        ? "Return a JSON array of narrative beats covering the full script, in order — not pre-grouped scenes and not pre-computed durations. Each beat: { dialogue: one self-contained narration idea, visual_prompt: a single shot's CAMERA/ACTION/LIGHTING/ATMOSPHERE description per cinematic_prompt_reference.md (no SHOT PLAN or timecodes — that is assembled automatically), continuity_key: a short slug shared by this beat and any adjacent beats that depict the same visual continuity (same era, place, subjects) and could be shot back-to-back in one generation call, transition_note, continuity_note }. Do not group beats or estimate their duration — the system packs beats into scenes automatically based on estimated narration length and continuity_key. Do not write files."
+        : "Return one JSON object for the requested scene regeneration. Include only the fields being regenerated and preserve continuity. The visual_prompt must use the structured single-shot CAMERA/ACTION/LIGHTING/ATMOSPHERE/CONTINUITY format from cinematic_prompt_reference.md, with no SHOT PLAN or timecodes. Do not write files.";
     const prompt = this.compose(taskType, channel, episode, [...files, ...sharedFiles], { scene_number: sceneNumber ?? null, output_contract: outputContract });
     return this.finalize(taskType, channelId, episodeKey, [...files, ...sharedFiles], excluded.concat("other scenes outside immediate neighbors"), prompt);
   }

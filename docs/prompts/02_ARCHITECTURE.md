@@ -77,6 +77,7 @@ video_generation:
   model:
   max_scene_duration_seconds:
   default_scene_duration_seconds:
+  narration_words_per_second:
   aspect_ratio:
 ```
 

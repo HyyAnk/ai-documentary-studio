@@ -1,16 +1,10 @@
 # Prompt Rules
 
-- A scene's Video Prompt may describe more than one shot when several beats are packed into it. Separate shots with a line containing only `CUT`.
-- Each shot describes: subject, environment, era, action, camera, composition, lighting, atmosphere, motion, style.
-- End the prompt with one shared continuity line covering era/style/lighting consistency across all shots in the scene, if more than one shot is present.
-- Keep API parameters out of natural-language prompts.
-- Do not combine genuinely unrelated events (different era, different location, different subject) into one shot or one scene — pack only beats that belong together.
+Write `visual_prompt` following the full structure in `cinematic_prompt_reference.md` (shot plan/timecodes when packed, CAMERA, ACTION, LIGHTING, ATMOSPHERE, CONTINUITY sections). This is required, not optional — a single unstructured paragraph is not an acceptable output.
 
-Example (one ~8s scene containing three quick shots):
-
-Wide shot of a 1970s research lab at night, fluorescent lights humming, engineers hunched over blueprints, 35mm film grain, slow dolly in.
-CUT
-Close-up of hands adjusting a prototype circuit board, warm desk lamp light, shallow depth of field, static camera.
-CUT
-Medium shot of an engineer stepping back, exhaling, glancing at a wall clock reading 3 AM, same lighting, slight handheld sway.
-Continuity: same lab, same 1970s color palette and film grain across all three shots.
+- If the scene packs more than one beat, open with a `SHOT PLAN` block: timecoded ranges ending in a stated `HARD CUT`, summing exactly to the scene's duration.
+- Describe subject, environment, era, action, camera (shot size + FOV°), composition, lighting (with Kelvin white balance), atmosphere (grain/haze in %), and continuity for every shot.
+- State camera motion and subject motion separately — never conflate them.
+- Keep API parameters, model names, and platform-specific syntax out of the prompt text (no `@tag` references, no voice-lock instructions, no v2v/i2v directives) — this text must be paste-ready for Seedance, Veo Omni Flash, or any comparable model without editing.
+- Do not combine genuinely unrelated events (different era, different location, different subject) into one shot or one scene — pack only beats that truly belong together, per `visual_rules.md`.
+- Run the checklist in `cinematic_prompt_reference.md` before finalizing each scene's prompt.

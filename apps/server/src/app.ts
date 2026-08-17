@@ -34,6 +34,7 @@ import { RepositoryError, RepositoryService } from "./repository.js";
 import { TaskManager } from "./tasks.js";
 import { synthesizeWav } from "./providers/chatterbox.js";
 import { createStoredZip } from "./zip.js";
+import { composeMergedVisualPrompt } from "./sceneTiming.js";
 
 const VOICE_PREVIEW_TEXT = "This is a preview of this narrator voice for AI Documentary Studio.";
 
@@ -69,7 +70,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
   let config = await loadConfig(rootDirectory);
   const codex = new CodexAppServerClient(rootDirectory, config, logger);
   const contextEngine = new ContextEngine(repository, logger);
-  const tasks = new TaskManager(repository, contextEngine, codex, config.codex.max_concurrent_tasks, config.video_generation.max_scene_duration_seconds, logger, config.audio_generation, undefined, config.codex);
+  const tasks = new TaskManager(repository, contextEngine, codex, config.codex.max_concurrent_tasks, config.video_generation, logger, config.audio_generation, undefined, config.codex);
   await tasks.load();
   const getStorageInfo = (): StorageInfo => ({
     path: repository.storageRoot,
@@ -189,6 +190,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     const input = VideoSettingsInputSchema.parse(request.body);
     if (tasks.hasActiveWork()) throw new RepositoryError("Finish active tasks before changing video settings", "VIDEO_SETTINGS_BUSY");
     config = await saveVideoSettings(rootDirectory, input);
+    tasks.updateVideoConfig(config.video_generation);
     return { video_generation: config.video_generation };
   });
   server.get("/api/voices", async () => ({ voices: await repository.listVoices() }));
@@ -282,6 +284,37 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     if (!Number.isInteger(sceneNumber) || sceneNumber < 1) throw new RepositoryError("Scene number is required", "SCENE_REQUIRED");
     const task = tasks.submit("GENERATE_AUDIO", params.channelId, params.episodeId, sceneNumber);
     return reply.code(202).send({ task });
+  });
+  server.post("/api/channels/:channelId/episodes/:episodeId/scenes/:sceneNumber/merge-next", async (request, reply) => {
+    const params = request.params as { channelId: string; episodeId: string; sceneNumber: string };
+    const sceneNumber = Number(params.sceneNumber);
+    if (!Number.isInteger(sceneNumber) || sceneNumber < 1) throw new RepositoryError("Scene number is required", "SCENE_REQUIRED");
+
+    const scenes = await repository.readScenes(params.channelId, params.episodeId);
+    const index = scenes.findIndex((scene) => scene.scene_number === sceneNumber);
+    const next = index < 0 ? null : scenes[index + 1];
+    if (index < 0 || !next) return reply.code(409).send({ error: "There is no next scene to combine" });
+
+    const current = scenes[index];
+    const mergedDuration = current.duration_seconds + next.duration_seconds;
+    const maxDuration = config.video_generation.max_scene_duration_seconds;
+    if (mergedDuration > maxDuration) {
+      return reply.code(409).send({ error: `Merged duration would exceed the ${maxDuration}s scene limit.` });
+    }
+
+    const merged = {
+      ...current,
+      duration_seconds: mergedDuration,
+      dialogue: `${current.dialogue.trim()} ${next.dialogue.trim()}`.trim(),
+      visual_prompt: composeMergedVisualPrompt(current, next),
+      transition_note: next.transition_note,
+      continuity_note: current.continuity_note,
+      audio_asset_path: null,
+      audio_generated_at: null,
+      audio_duration_seconds: null,
+    };
+    await repository.saveScenes(params.channelId, params.episodeId, [...scenes.slice(0, index), merged, ...scenes.slice(index + 2)]);
+    return { scenes: await repository.readScenes(params.channelId, params.episodeId) };
   });
   server.post("/api/channels/:channelId/episodes/:episodeId/audio/generate-all", async (request, reply) => {
     const params = request.params as { channelId: string; episodeId: string };

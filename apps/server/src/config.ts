@@ -7,9 +7,8 @@ export const DEFAULT_CONFIG: AppConfig = {
     provider: "none",
     model: "",
     max_scene_duration_seconds: 8,
-    target_scene_duration_seconds: 8,
-    min_scene_duration_seconds: 4,
     default_scene_duration_seconds: 6,
+    narration_words_per_second: 2.3,
     aspect_ratio: "16:9",
   },
   codex: {
@@ -116,8 +115,6 @@ export async function saveVideoSettings(rootDirectory: string, input: VideoSetti
   const parsed = VideoSettingsInputSchema.parse(input);
   const current = await loadConfig(rootDirectory);
   const next = { ...current.video_generation, ...parsed };
-  if (next.min_scene_duration_seconds > next.max_scene_duration_seconds) throw new Error("Minimum scene duration cannot exceed the maximum");
-  if (next.target_scene_duration_seconds > next.max_scene_duration_seconds) throw new Error("Target scene duration cannot exceed the maximum");
   const configPath = path.join(rootDirectory, ".documentary-studio", "config.json");
   await mkdir(path.dirname(configPath), { recursive: true });
   const raw = await readJsonFile(configPath);

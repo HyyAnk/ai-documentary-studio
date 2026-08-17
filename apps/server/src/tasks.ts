@@ -19,6 +19,7 @@ import { StudioLogger } from "./logger.js";
 import { RepositoryError, RepositoryService } from "./repository.js";
 import { ChatterboxProvider, type ChatterboxTarget } from "./providers/chatterbox.js";
 import type { AudioProvider } from "./providers/index.js";
+import { packBeatsIntoScenes, type Beat } from "./sceneTiming.js";
 
 type ActiveRun = { task: Task; threadId: string; turnId: string; output: string; manifest: ContextManifest };
 type CodexCleanupConfig = { auto_delete_threads: boolean; failed_thread_retention_days: number };
@@ -35,6 +36,7 @@ export class TaskManager extends EventEmitter {
   private runningAudioCount = 0;
   private readonly activeAudio = new Set<string>();
   private audioConfig: AppConfig["audio_generation"];
+  private videoConfig: Pick<AppConfig["video_generation"], "max_scene_duration_seconds" | "narration_words_per_second">;
   private readonly audioProviderFactory: (target: ChatterboxTarget, config: AppConfig["audio_generation"]) => AudioProvider;
   private codexCleanupConfig: CodexCleanupConfig;
   private cleanupTimer: NodeJS.Timeout | null = null;
@@ -45,7 +47,7 @@ export class TaskManager extends EventEmitter {
     private readonly contextEngine: ContextEngine,
     private readonly codex: CodexAppServerClient,
     private readonly maxConcurrent: number,
-    private readonly maxSceneDuration: number,
+    videoConfigOrMaxSceneDuration: AppConfig["video_generation"] | number,
     private readonly logger: StudioLogger,
     audioConfig: AppConfig["audio_generation"] = {
       provider: "chatterbox",
@@ -59,6 +61,9 @@ export class TaskManager extends EventEmitter {
     codexConfig: CodexCleanupConfig = { auto_delete_threads: true, failed_thread_retention_days: 7 },
   ) {
     super();
+    this.videoConfig = typeof videoConfigOrMaxSceneDuration === "number"
+      ? { max_scene_duration_seconds: videoConfigOrMaxSceneDuration, narration_words_per_second: 2.3 }
+      : videoConfigOrMaxSceneDuration;
     this.audioConfig = audioConfig;
     this.audioProviderFactory = audioProviderFactory ?? ((target, config) => new ChatterboxProvider(repository, config, target));
     this.codexCleanupConfig = { auto_delete_threads: codexConfig.auto_delete_threads, failed_thread_retention_days: codexConfig.failed_thread_retention_days };
@@ -106,6 +111,13 @@ export class TaskManager extends EventEmitter {
 
   updateAudioConfig(config: AppConfig["audio_generation"]): void {
     this.audioConfig = config;
+  }
+
+  updateVideoConfig(config: AppConfig["video_generation"]): void {
+    this.videoConfig = {
+      max_scene_duration_seconds: config.max_scene_duration_seconds,
+      narration_words_per_second: config.narration_words_per_second,
+    };
   }
 
   updateCodexConfig(config: AppConfig["codex"]): void {
@@ -319,7 +331,13 @@ export class TaskManager extends EventEmitter {
         await this.repository.updateEpisodeStage(task.channel_id, task.episode_id!, "SCRIPT_READY");
         outputFiles = [`${(await this.repository.getEpisodeFile(task.channel_id, task.episode_id!, "script.md")).path}`];
       } else if (task.task_type === "GENERATE_SCENES") {
-        const scenes = normalizeSceneDurations(parseScenesOutput(output, task.episode_id!), this.maxSceneDuration);
+        const beats = parseBeatsOutput(output);
+        const scenes = packBeatsIntoScenes(
+          beats,
+          this.videoConfig.max_scene_duration_seconds,
+          this.videoConfig.narration_words_per_second,
+          task.episode_id!,
+        );
         await this.repository.saveScenes(task.channel_id, task.episode_id!, scenes);
         const episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
         const channel = await this.repository.getChannel(task.channel_id);
@@ -455,57 +473,29 @@ function parseTopicCandidates(output: string, channelId: string) {
   });
 }
 
-function parseScenesOutput(output: string, episodeId: string): Scene[] {
+export function parseBeatsOutput(output: string): Beat[] {
   const raw = parseJson(output);
-  const list = Array.isArray(raw) ? raw : (raw as { scenes?: unknown[] }).scenes;
-  if (!Array.isArray(list) || list.length === 0) throw new Error("Codex scene output must contain scenes");
+  const list = Array.isArray(raw) ? raw : (raw as { beats?: unknown[] }).beats;
+  if (!Array.isArray(list) || list.length === 0) throw new Error("Codex beat output must contain beats");
   return list.map((item, index) => {
-    const scene = item as Record<string, unknown>;
+    const beat = item as Record<string, unknown>;
+    const dialogue = String(beat.dialogue ?? "").trim();
+    const visualPrompt = String(beat.visual_prompt ?? beat.video_prompt ?? "").trim();
+    if (!dialogue) throw new Error(`Codex beat ${index + 1} is missing dialogue`);
+    if (!visualPrompt) throw new Error(`Codex beat ${index + 1} is missing visual_prompt`);
     return {
-      scene_id: `${episodeId}_scene_${index + 1}`,
-      episode_id: episodeId,
-      scene_number: index + 1,
-      duration_seconds: Number(scene.duration_seconds ?? scene.duration ?? 6),
-      dialogue: String(scene.dialogue ?? "").trim(),
-      visual_prompt: String(scene.visual_prompt ?? scene.video_prompt ?? "").trim(),
-      transition_note: String(scene.transition_note ?? "").trim(),
-      continuity_note: String(scene.continuity_note ?? "").trim(),
-      audio_asset_path: null,
-      audio_generated_at: null,
-      audio_duration_seconds: null,
+      dialogue,
+      visual_prompt: visualPrompt,
+      continuity_key: normalizeContinuityKey(String(beat.continuity_key ?? ""), index),
+      transition_note: String(beat.transition_note ?? "").trim(),
+      continuity_note: String(beat.continuity_note ?? "").trim(),
     };
   });
 }
 
-function normalizeSceneDurations(scenes: Scene[], maxDuration: number): Scene[] {
-  const normalized: Scene[] = [];
-  for (const scene of scenes) {
-    if (scene.duration_seconds <= maxDuration) {
-      normalized.push({ ...scene, scene_number: normalized.length + 1, scene_id: `${scene.episode_id}_scene_${normalized.length + 1}` });
-      continue;
-    }
-    const chunks = splitDialogue(scene.dialogue, Math.max(1, Math.ceil(scene.duration_seconds / maxDuration)));
-    const chunkDuration = Math.min(maxDuration, Math.max(1, scene.duration_seconds / chunks.length));
-    chunks.forEach((dialogue, index) => normalized.push({
-      ...scene,
-      scene_id: `${scene.episode_id}_scene_${normalized.length + 1}`,
-      scene_number: normalized.length + 1,
-      duration_seconds: chunkDuration,
-      dialogue,
-      continuity_note: index === 0 ? scene.continuity_note : `Continuation of scene ${scene.scene_number}`,
-      transition_note: index === chunks.length - 1 ? scene.transition_note : "Continue into the next shot",
-    }));
-  }
-  return normalized;
-}
-
-function splitDialogue(dialogue: string, count: number): string[] {
-  const words = dialogue.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0 || count <= 1) return [dialogue];
-  const size = Math.ceil(words.length / count);
-  const chunks: string[] = [];
-  for (let index = 0; index < words.length; index += size) chunks.push(words.slice(index, index + size).join(" "));
-  return chunks;
+function normalizeContinuityKey(value: string, index: number): string {
+  const slug = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return slug || `beat-${index + 1}`;
 }
 
 function parseRegeneration(output: string): Partial<Scene> {

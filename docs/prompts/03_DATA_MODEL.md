@@ -83,7 +83,8 @@ thread_id, channel_id, episode_id (nullable), created_at, last_used_at, status
 **ProviderConfig / AppSettings**
 ```
 video_generation: { provider, model, max_scene_duration_seconds,
-                     default_scene_duration_seconds, aspect_ratio }
+                     default_scene_duration_seconds, narration_words_per_second,
+                     aspect_ratio }
 codex: { max_concurrent_tasks, app_server_endpoint, ... }
 ```
 
