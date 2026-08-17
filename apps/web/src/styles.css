@@ -131,6 +131,8 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
 .icon-button { width: 34px; height: 34px; padding: 0; border-color: var(--line); border-radius: 8px; background: var(--surface); color: var(--muted); }
 .icon-button:hover { color: var(--ink); border-color: var(--line-dark); }
 .icon-button.danger:hover { color: var(--accent-deep); border-color: var(--accent-deep); background: var(--danger-surface); }
+.shutdown-button { color: var(--accent-deep); }
+.shutdown-button:hover { transform: translateY(-1px); box-shadow: 0 5px 14px color-mix(in srgb, var(--accent-deep) 24%, transparent); }
 .back-button { margin-bottom: 34px; padding: 0; color: var(--muted); background: transparent; font-size: 11px; font-weight: 700; }
 .back-button:hover { color: var(--ink); }
 .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
@@ -348,6 +350,12 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
 .notice-banner > span:nth-child(2) { flex: 1; }
 .notice-banner button { display: grid; place-items: center; padding: 0; border: 0; background: transparent; color: currentColor; opacity: .78; }
 .notice-banner button:hover { opacity: 1; }
+.shutdown-screen { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: var(--paper); color: var(--ink); }
+.shutdown-card { width: min(100%, 420px); padding: 34px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: 0 18px 45px color-mix(in srgb, var(--ink) 16%, transparent); }
+.shutdown-card > svg { margin-bottom: 24px; color: var(--accent-deep); }
+.shutdown-card h1 { margin: 8px 0 12px; font-size: 38px; }
+.shutdown-card p:last-child { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.shutdown-card strong { color: var(--ink); font-family: "DM Mono", monospace; font-size: 11px; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 

@@ -5,6 +5,7 @@ test("workspace opens with an actionable empty state", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
   await expect(page.getByRole("button", { name: /new channel/i }).first()).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Codex model" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Stop dashboard" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 });
 

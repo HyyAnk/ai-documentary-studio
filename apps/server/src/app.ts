@@ -1,4 +1,5 @@
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { access, mkdir } from "node:fs/promises";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
@@ -76,6 +77,23 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
   });
 
   server.get("/api/health", async () => ({ ok: true, service: "ai-documentary-studio", codex_status: tasks.getStatus() }));
+  server.post("/api/shutdown", async (_request, reply) => {
+    if (process.platform === "win32") {
+      const script = path.join(rootDirectory, "scripts", "stop-dashboard.ps1");
+      spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-ProjectRoot", rootDirectory, "-DelayMilliseconds", "900"], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      }).unref();
+    }
+
+    await reply.code(202).send({ ok: true });
+    setTimeout(() => {
+      void codex.close().catch(() => undefined).finally(() => {
+        void server.close().finally(() => process.exit(0));
+      });
+    }, 500);
+  });
   server.get("/api/git", async () => repository.getGitInfo());
   server.get("/api/config", async () => ({ ...config, codex: { ...config.codex, api_key: "" } }));
   server.get("/api/storage", async () => getStorageInfo());

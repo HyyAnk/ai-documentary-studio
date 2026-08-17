@@ -10,6 +10,8 @@ Use [`run dashboard.bat`](../run%20dashboard.bat) as the normal launcher. It che
 4. waits for the model to finish loading;
 5. starts the dashboard only after audio is ready.
 
+Use the Power button in the dashboard top bar to stop the local services when you are finished. The same action is available from [`stop dashboard.bat`](../stop%20dashboard.bat); it leaves the selected content storage folder and all channel files untouched.
+
 The first startup can take several minutes and uses substantial disk space because PyTorch and the Chatterbox model are downloaded. Later startups reuse the ignored virtual environment and cached model. If installation or model loading fails, the launcher stops with a readable error and points to `.documentary-studio/logs/tts.stderr.log` instead of opening a dashboard that cannot generate audio.
 
 The current Chatterbox package requires Python 3.10 or newer and is tested upstream on Python 3.11. The launcher prefers Python 3.11, then 3.10, then 3.13. If no suitable Python is installed, it attempts to install Python 3.11 through winget.

@@ -21,6 +21,8 @@ For the complete one-click startup, use [`run dashboard.bat`](run%20dashboard.ba
 
 On Windows, double-click [`run dashboard.bat`](run%20dashboard.bat). It checks Node.js, Python, Corepack, pnpm, and workspace packages, starts the local services, and opens the dashboard.
 
+When finished, use the Power button in the dashboard top bar or [`stop dashboard.bat`](stop%20dashboard.bat) to stop the local services. Channel and episode files remain in the selected local storage folder.
+
 Production build:
 
 ```bash
