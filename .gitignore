@@ -15,6 +15,9 @@ apps/*/.documentary-studio/
 **/.documentary-studio/logs/
 **/.documentary-studio/tasks/
 **/.documentary-studio/codex/
+services/tts/.venv/
+services/tts/__pycache__/
+*.py[cod]
 .env
 .env.*
 !.env.example

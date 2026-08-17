@@ -34,6 +34,7 @@ export const TaskTypeSchema = z.enum([
   "REGENERATE_DIALOGUE",
   "REGENERATE_PROMPT",
   "REGENERATE_BOTH",
+  "GENERATE_AUDIO",
 ]);
 export type TaskType = z.infer<typeof TaskTypeSchema>;
 
@@ -53,6 +54,7 @@ export const ChannelSchema = z.object({
   created_at: IsoDate,
   updated_at: IsoDate,
   episode_count: z.number().int().nonnegative().default(0),
+  voice_reference_path: z.string().nullable().default(null),
 });
 export type Channel = z.infer<typeof ChannelSchema>;
 
@@ -84,6 +86,9 @@ export const SceneSchema = z.object({
   visual_prompt: z.string(),
   transition_note: z.string().default(""),
   continuity_note: z.string().default(""),
+  audio_asset_path: z.string().nullable().default(null),
+  audio_generated_at: IsoDate.nullable().default(null),
+  audio_duration_seconds: z.number().nonnegative().nullable().default(null),
 });
 export type Scene = z.infer<typeof SceneSchema>;
 
@@ -140,8 +145,29 @@ export const AppConfigSchema = z.object({
     api_base_url: z.string().default(""),
     api_key: z.string().default(""),
   }),
+  audio_generation: z.object({
+    provider: z.string().default("chatterbox"),
+    service_url: z.string().default("http://127.0.0.1:8890"),
+    exaggeration: z.number().min(0).max(1).default(0.5),
+    cfg_weight: z.number().min(0).max(1).default(0.5),
+    max_concurrent_tasks: z.number().int().positive().default(2),
+  }),
 });
 export type AppConfig = z.infer<typeof AppConfigSchema>;
+
+export const AudioSettingsInputSchema = z.object({
+  provider: z.string().trim().max(80).optional(),
+  service_url: z.string().trim().url().max(2000).optional(),
+  exaggeration: z.number().min(0).max(1).optional(),
+  cfg_weight: z.number().min(0).max(1).optional(),
+  max_concurrent_tasks: z.number().int().positive().max(16).optional(),
+});
+export type AudioSettingsInput = z.infer<typeof AudioSettingsInputSchema>;
+
+export const VoiceReferenceUploadSchema = z.object({
+  data: z.string().min(1).max(50_000_000),
+});
+export type VoiceReferenceUpload = z.infer<typeof VoiceReferenceUploadSchema>;
 
 export const CodexSettingsInputSchema = z.object({
   transport: z.enum(["app_server", "openai_compatible"]).optional(),

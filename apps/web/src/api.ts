@@ -30,9 +30,12 @@ export const api = {
   config: () => request<AppConfig>("/api/config"),
   codexSettings: () => request<CodexSettingsResponse>("/api/codex/settings"),
   saveCodexSettings: (body: CodexSettingsInput) => request<CodexSettingsResponse>("/api/codex/settings", { method: "POST", body: JSON.stringify(body) }),
+  saveAudioSettings: (body: AppConfig["audio_generation"]) => request<{ audio_generation: AppConfig["audio_generation"] }>("/api/audio/settings", { method: "POST", body: JSON.stringify(body) }),
   codexModels: () => request<{ models: CodexSettingsResponse["models"] }>("/api/codex/models"),
   storage: () => request<StorageInfo>("/api/storage"),
   setStorage: (path: string) => request<StorageInfo>("/api/storage", { method: "POST", body: JSON.stringify({ path }) }),
+  saveVoiceReference: (channelId: string, data: string) => request<{ path: string; modified_at: string }>(`/api/channels/${channelId}/voice-reference`, { method: "PUT", body: JSON.stringify({ data }) }),
+  generateAudio: (channelId: string, episodeId: string, sceneNumber: number) => request<{ task: Task }>(`/api/channels/${channelId}/episodes/${episodeId}/scenes/${sceneNumber}/audio`, { method: "POST", body: "{}" }),
   reconnectCodex: () => request<{ status: string; message?: string }>("/api/codex/reconnect", { method: "POST", body: "{}" }),
 };
 

@@ -1,0 +1,24 @@
+import { Broadcast, CaretDown, FilmSlate, Gear, GitBranch, House, Lightbulb, ListChecks, MoonStars, Sun, TerminalWindow, X, CheckCircle, Sparkle, WarningCircle } from "@phosphor-icons/react";
+import type { Channel, CodexSettingsResponse } from "@studio/shared";
+import type { GitInfo, Notice, Page, Theme } from "./types";
+
+export function Sidebar({ page, setPage, activeTaskCount }: { page: Page; setPage: (page: Page) => void; activeTaskCount: number }) {
+  const items: Array<{ page: Page; label: string; icon: typeof House }> = [
+    { page: "dashboard", label: "Dashboard", icon: House },
+    { page: "channels", label: "Channels", icon: Broadcast },
+    { page: "topics", label: "Topics", icon: Lightbulb },
+    { page: "episodes", label: "Episodes", icon: FilmSlate },
+    { page: "tasks", label: "Tasks", icon: ListChecks },
+  ];
+  return <aside className="sidebar"><div className="brand-lockup"><div className="brand-mark">AD</div><div><span className="brand-name">Documentary</span><span className="brand-subtitle">Studio</span></div></div><div className="sidebar-rule" /><nav className="primary-nav" aria-label="Primary navigation">{items.map(({ page: itemPage, label, icon: Icon }) => <button key={itemPage} className={`nav-item ${page === itemPage ? "is-active" : ""}`} onClick={() => setPage(itemPage)}><Icon size={18} weight={page === itemPage ? "fill" : "regular"} /><span>{label}</span>{itemPage === "tasks" && activeTaskCount > 0 ? <span className="nav-count">{activeTaskCount}</span> : null}</button>)}</nav><div className="sidebar-bottom"><button className={`nav-item ${page === "settings" ? "is-active" : ""}`} onClick={() => setPage("settings")}><Gear size={18} /><span>Settings</span></button><div className="local-badge"><span className="status-dot" />Local workspace</div></div></aside>;
+}
+
+export function Topbar({ channel, codexStatus, git, codex, theme, onThemeToggle, onModelChange, onReconnect }: { channel: Channel | null; codexStatus: string; git: GitInfo; codex: CodexSettingsResponse | null; theme: Theme; onThemeToggle: () => void; onModelChange: (model: string) => Promise<void>; onReconnect: () => void }) {
+  return <header className="topbar"><div className="context-trail"><span className="context-kicker">Workspace</span><span className="context-title">{channel?.display_name ?? "Overview"}</span></div><div className="topbar-meta"><label className="model-select"><span>Model</span><CaretDown size={13} /><select aria-label="Codex model" value={codex?.settings.model ?? ""} onChange={(event) => void onModelChange(event.target.value)} disabled={!codex}><option value="">Codex default</option>{codex?.models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select></label><span className={`codex-pill ${codexStatus === "connected" ? "is-connected" : ""}`}><span className="status-dot" />{codexStatus === "connected" ? "Ready" : codexStatus === "connecting" ? "Connecting" : "Unavailable"}</span>{codexStatus !== "connected" ? <button className="link-button" onClick={onReconnect}>Reconnect</button> : null}<span className="git-readout"><GitBranch size={14} />{git.branch ?? "No Git"}{git.dirty ? <span className="dirty-dot" title={`${git.changed_files} changed files`} /> : null}</span><button className="icon-button theme-toggle" title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`} onClick={onThemeToggle}>{theme === "dark" ? <Sun size={16} /> : <MoonStars size={16} />}</button></div></header>;
+}
+
+export function PageTitle({ eyebrow, title, copy, action }: { eyebrow: string; title: string; copy?: string; action?: React.ReactNode }) { return <div className="page-title"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1>{copy ? <p className="page-copy">{copy}</p> : null}</div>{action ? <div>{action}</div> : null}</div>; }
+export function StatusLine({ label, value }: { label: string; value: string }) { return <div className="status-line"><span>{label}</span><strong>{value}</strong></div>; }
+export function StatusBadge({ status }: { status: string }) { return <span className={`status-badge ${status.toLowerCase()}`}>{status.toLowerCase()}</span>; }
+export function StageBadge({ stage }: { stage: string }) { return <span className="stage-badge">{stage.replaceAll("_", " ").toLowerCase()}</span>; }
+export function NoticeBanner({ notice, onClose }: { notice: NonNullable<Notice>; onClose: () => void }) { return <div className={`notice-banner ${notice.tone}`} role={notice.tone === "bad" ? "alert" : "status"} aria-live={notice.tone === "bad" ? "assertive" : "polite"}><span>{notice.tone === "good" ? <CheckCircle size={18} /> : notice.tone === "bad" ? <WarningCircle size={18} /> : <Sparkle size={18} />}</span><span>{notice.message}</span><button aria-label="Close notification" onClick={onClose}><X size={15} /></button></div>; }

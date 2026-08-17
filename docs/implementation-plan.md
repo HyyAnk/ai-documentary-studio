@@ -16,7 +16,7 @@ Implementation follows the milestones in `docs/prompts/05_MILESTONES.md` in orde
 6. Scene breakdown and per-scene regeneration
 7. Polish, tests, and documentation
 
-The first phase deliberately does not implement audio or video generation. Provider interfaces will exist as typed extension points only.
+The original application phase deliberately did not implement audio or video generation. The follow-up audio integration now implements scene-level Chatterbox audio behind the existing provider boundary; video remains a typed extension point.
 
 Non-negotiable invariants are enforced in server code and tested directly:
 
@@ -249,7 +249,7 @@ Every test should use deterministic fixtures and avoid mutating the user's real 
 
 ## 12. Future extension strategy
 
-The provider interfaces remain independent of episode/scene models so Google Veo or other video providers can be added without changing the UI contract. Audio, image references, research providers, remote deployment, and a durable database can be layered behind existing service interfaces later. The repository format, task records, context engine, and App Server adapter are the stable seams for those additions. No future feature may bypass the path resolver, context scope, or task lock scheduler.
+The provider interfaces remain independent of episode/scene models so Google Veo or other video providers can be added without changing the UI contract. Chatterbox audio is implemented as a local sidecar and separate task pool; image references, research providers, remote deployment, and a durable database can still be layered behind existing service interfaces later. The repository format, task records, context engine, and App Server adapter are the stable seams for those additions. No future feature may bypass the path resolver, context scope, or task lock scheduler.
 
 ## 13. Official references consulted
 

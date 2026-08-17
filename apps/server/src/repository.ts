@@ -155,11 +155,24 @@ export class RepositoryService {
     return channel;
   }
 
-  async updateChannel(channelId: string, patch: Partial<Pick<Channel, "display_name" | "description" | "target_audience" | "language" | "market" | "status" | "updated_at">>): Promise<Channel> {
+  async updateChannel(channelId: string, patch: Partial<Pick<Channel, "display_name" | "description" | "target_audience" | "language" | "market" | "status" | "updated_at" | "voice_reference_path">>): Promise<Channel> {
     const current = await this.getChannel(channelId);
     const next = ChannelSchema.parse({ ...current, ...patch, updated_at: nowIso() });
     await this.writeJsonAtomic(this.resolvePath("channels", current.slug, "channel.json"), next);
     return next;
+  }
+
+  async saveVoiceReference(channelId: string, content: Uint8Array): Promise<{ path: string; modified_at: string }> {
+    const channel = await this.getChannel(channelId);
+    const channelDirectory = this.resolvePath("channels", channel.slug);
+    const assetsDirectory = this.resolvePath("channels", channel.slug, "assets");
+    await mkdir(assetsDirectory, { recursive: true });
+    await this.assertRealPathInside(channelDirectory, assetsDirectory);
+    const absolutePath = this.resolvePath("channels", channel.slug, "assets", "voice_reference.wav");
+    await this.writeBinaryAtomic(absolutePath, content);
+    await this.updateChannel(channelId, { voice_reference_path: `channels/${channel.slug}/assets/voice_reference.wav` });
+    const metadata = await stat(absolutePath);
+    return { path: `channels/${channel.slug}/assets/voice_reference.wav`, modified_at: metadata.mtime.toISOString() };
   }
 
   async deleteChannel(channelId: string, confirmed: boolean): Promise<void> {
@@ -308,12 +321,59 @@ export class RepositoryService {
   async saveScenes(channelId: string, episodeId: string, scenes: Scene[]): Promise<void> {
     const episode = await this.getEpisode(channelId, episodeId);
     const channel = await this.getChannel(channelId);
+    const previousScenes = await this.readScenes(channelId, episodeId);
     const normalized = scenes.map((scene, index) => SceneSchema.parse({ ...scene, scene_number: index + 1, episode_id: episodeId }));
+    const withFreshAudio = normalized.map((scene) => {
+      const previous = previousScenes.find((item) => item.scene_number === scene.scene_number);
+      if (previous && previous.dialogue !== scene.dialogue) return clearSceneAudio(scene);
+      return scene;
+    });
     const episodeDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug);
-    await this.writeTextAtomic(path.join(episodeDirectory, "scene_plan.md"), serializeScenes(normalized));
-    await this.writeTextAtomic(path.join(episodeDirectory, "dialogue_script.md"), serializeDialogue(normalized));
-    await this.writeTextAtomic(path.join(episodeDirectory, "video_prompts.md"), serializePrompts(normalized));
+    await this.writeTextAtomic(path.join(episodeDirectory, "scene_plan.md"), serializeScenes(withFreshAudio));
+    await this.writeTextAtomic(path.join(episodeDirectory, "dialogue_script.md"), serializeDialogue(withFreshAudio));
+    await this.writeTextAtomic(path.join(episodeDirectory, "video_prompts.md"), serializePrompts(withFreshAudio));
     await this.writeJsonAtomic(path.join(episodeDirectory, "episode.json"), EpisodeSchema.parse({ ...episode, stage: "SCENE_READY", updated_at: nowIso() }));
+  }
+
+  async saveSceneAudio(channelId: string, episodeId: string, sceneNumber: number, audioAssetPath: string, durationSeconds: number): Promise<void> {
+    const scenes = await this.readScenes(channelId, episodeId);
+    const target = scenes.find((scene) => scene.scene_number === sceneNumber);
+    if (!target) throw new RepositoryError("Audio target scene not found", "SCENE_NOT_FOUND");
+    const next = scenes.map((scene) => scene.scene_number === sceneNumber ? SceneSchema.parse({
+      ...scene,
+      audio_asset_path: audioAssetPath,
+      audio_generated_at: nowIso(),
+      audio_duration_seconds: durationSeconds,
+    }) : scene);
+    await this.saveScenes(channelId, episodeId, next);
+  }
+
+  async getSceneAudioFile(channelId: string, episodeId: string, filename: string): Promise<{ absolutePath: string; path: string; size: number; modified_at: string }> {
+    if (!/^scene-\d{2,}\.wav$/i.test(filename)) throw new RepositoryError("Unsupported audio file", "FILE_NOT_ALLOWED");
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const assetsDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets");
+    const absolutePath = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets", filename);
+    try {
+      await this.assertRealPathInside(assetsDirectory, absolutePath);
+      const metadata = await stat(absolutePath);
+      return { absolutePath, path: `channels/${channel.slug}/episodes/${episode.slug}/assets/${filename}`, size: metadata.size, modified_at: metadata.mtime.toISOString() };
+    } catch {
+      throw new RepositoryError("Audio asset not found", "AUDIO_NOT_FOUND");
+    }
+  }
+
+  async writeSceneAudio(channelId: string, episodeId: string, sceneNumber: number, content: Uint8Array): Promise<string> {
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const episodeDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug);
+    const assetsDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets");
+    await mkdir(assetsDirectory, { recursive: true });
+    await this.assertRealPathInside(episodeDirectory, assetsDirectory);
+    const filename = `scene-${String(sceneNumber).padStart(2, "0")}.wav`;
+    const absolutePath = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets", filename);
+    await this.writeBinaryAtomic(absolutePath, content);
+    return `channels/${channel.slug}/episodes/${episode.slug}/assets/${filename}`;
   }
 
   async updateEpisodeStage(channelId: string, episodeId: string, stage: Episode["stage"]): Promise<Episode> {
@@ -470,9 +530,20 @@ export class RepositoryService {
     await rename(temporary, target);
   }
 
+  private async writeBinaryAtomic(target: string, content: Uint8Array): Promise<void> {
+    await mkdir(path.dirname(target), { recursive: true });
+    const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(temporary, content);
+    await rename(temporary, target);
+  }
+
   private async removeTree(target: string): Promise<void> {
     await rm(target, { recursive: true, force: true });
   }
+}
+
+function clearSceneAudio(scene: Scene): Scene {
+  return { ...scene, audio_asset_path: null, audio_generated_at: null, audio_duration_seconds: null };
 }
 
 export function parseScenes(markdown: string, episodeId: string): Scene[] {
@@ -481,9 +552,12 @@ export function parseScenes(markdown: string, episodeId: string): Scene[] {
     const duration = Number(block.match(/\*\*Duration:\*\*\s*([\d.]+)/i)?.[1] ?? 6);
     const dialogue = block.match(/## Dialogue\s*\n([\s\S]*?)(?=\n## Video Prompt|$)/i)?.[1]?.trim() ?? "";
     const prompt = block.match(/## Video Prompt\s*\n([\s\S]*?)(?=\n## Notes|$)/i)?.[1]?.trim() ?? "";
-    const notes = block.match(/## Notes\s*\n([\s\S]*)/i)?.[1] ?? "";
-    const transition = notes.match(/- Transition:\s*(.*)/i)?.[1]?.trim() ?? "";
-    const continuity = notes.match(/- Continuity:\s*(.*)/i)?.[1]?.trim() ?? "";
+    const notes = block.match(/## Notes\s*\n([\s\S]*?)(?=\n<!--|$)/i)?.[1] ?? "";
+    const transition = notes.match(/- Transition:[ \t]*(.*)/i)?.[1]?.trim() ?? "";
+    const continuity = notes.match(/- Continuity:[ \t]*(.*)/i)?.[1]?.trim() ?? "";
+    const audioAssetPath = block.match(/<!--\s*Audio asset:\s*(.*?)\s*-->/i)?.[1]?.trim() || null;
+    const audioGeneratedAt = block.match(/<!--\s*Audio generated at:\s*(.*?)\s*-->/i)?.[1]?.trim() || null;
+    const audioDuration = block.match(/<!--\s*Audio duration:\s*([\d.]+)\s*-->/i)?.[1];
     return SceneSchema.parse({
       scene_id: `${episodeId}_scene_${index + 1}`,
       episode_id: episodeId,
@@ -493,12 +567,26 @@ export function parseScenes(markdown: string, episodeId: string): Scene[] {
       visual_prompt: prompt,
       transition_note: transition,
       continuity_note: continuity,
+      audio_asset_path: audioAssetPath,
+      audio_generated_at: audioGeneratedAt,
+      audio_duration_seconds: audioDuration ? Number(audioDuration) : null,
     });
   });
 }
 
 export function serializeScenes(scenes: Scene[]): string {
-  return scenes.map((scene) => `# Scene ${scene.scene_number}\n\n**Duration:** ${scene.duration_seconds} seconds\n\n## Dialogue\n\n${scene.dialogue.trim()}\n\n## Video Prompt\n\n${scene.visual_prompt.trim()}\n\n## Notes\n\n- Transition: ${scene.transition_note.trim()}\n- Continuity: ${scene.continuity_note.trim()}\n`).join("\n");
+  return scenes.map((scene) => `${[
+    `# Scene ${scene.scene_number}`,
+    `**Duration:** ${scene.duration_seconds} seconds`,
+    "## Dialogue",
+    scene.dialogue.trim(),
+    "## Video Prompt",
+    scene.visual_prompt.trim(),
+    "## Notes",
+    `- Transition: ${scene.transition_note.trim()}`,
+    `- Continuity: ${scene.continuity_note.trim()}`,
+    scene.audio_asset_path ? `<!-- Audio asset: ${scene.audio_asset_path} -->\n<!-- Audio generated at: ${scene.audio_generated_at ?? ""} -->\n<!-- Audio duration: ${scene.audio_duration_seconds ?? ""} -->` : "",
+  ].join("\n\n")}\n`).join("\n");
 }
 
 export function serializeDialogue(scenes: Scene[]): string {

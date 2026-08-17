@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
-import { AppConfigSchema, CodexSettingsInputSchema, type AppConfig, type CodexSettingsInput } from "@studio/shared";
+import { AppConfigSchema, AudioSettingsInputSchema, CodexSettingsInputSchema, type AppConfig, type AudioSettingsInput, type CodexSettingsInput } from "@studio/shared";
 
 export const DEFAULT_CONFIG: AppConfig = {
   video_generation: {
@@ -20,6 +20,13 @@ export const DEFAULT_CONFIG: AppConfig = {
     api_base_url: "",
     api_key: "",
   },
+  audio_generation: {
+    provider: "chatterbox",
+    service_url: "http://127.0.0.1:8890",
+    exaggeration: 0.5,
+    cfg_weight: 0.5,
+    max_concurrent_tasks: 2,
+  },
 };
 
 export type StorageSettings = {
@@ -28,6 +35,7 @@ export type StorageSettings = {
 
 const storageSettingsFilename = "storage.local.json";
 const codexSettingsFilename = "codex.local.json";
+const audioSettingsFilename = "audio.local.json";
 
 async function readJsonFile(filePath: string): Promise<Record<string, unknown>> {
   try {
@@ -44,20 +52,26 @@ export async function loadConfig(rootDirectory: string): Promise<AppConfig> {
   try {
     const raw = await readJsonFile(configPath);
     const local = await readJsonFile(localConfigPath);
+    const localAudio = await readJsonFile(path.join(rootDirectory, ".documentary-studio", audioSettingsFilename));
     const trackedCodex = raw.codex && typeof raw.codex === "object" ? raw.codex as Record<string, unknown> : {};
     const localCodex = local.codex && typeof local.codex === "object" ? local.codex as Record<string, unknown> : {};
+    const trackedAudio = raw.audio_generation && typeof raw.audio_generation === "object" ? raw.audio_generation as Record<string, unknown> : {};
+    const localAudioSettings = localAudio.audio_generation && typeof localAudio.audio_generation === "object" ? localAudio.audio_generation as Record<string, unknown> : {};
     return AppConfigSchema.parse({
       ...DEFAULT_CONFIG,
       ...raw,
       video_generation: { ...DEFAULT_CONFIG.video_generation, ...(raw.video_generation as object | undefined) },
       codex: { ...DEFAULT_CONFIG.codex, ...trackedCodex, api_key: "", ...localCodex },
+      audio_generation: { ...DEFAULT_CONFIG.audio_generation, ...trackedAudio, ...localAudioSettings },
     });
   } catch {
     await mkdir(path.dirname(configPath), { recursive: true });
     await writeFile(configPath, `${JSON.stringify(DEFAULT_CONFIG, null, 2)}\n`, "utf8");
     const local = await readJsonFile(localConfigPath);
     const localCodex = local.codex && typeof local.codex === "object" ? local.codex as Record<string, unknown> : {};
-    return AppConfigSchema.parse({ ...DEFAULT_CONFIG, codex: { ...DEFAULT_CONFIG.codex, ...localCodex } });
+    const localAudio = await readJsonFile(path.join(rootDirectory, ".documentary-studio", audioSettingsFilename));
+    const localAudioSettings = localAudio.audio_generation && typeof localAudio.audio_generation === "object" ? localAudio.audio_generation as Record<string, unknown> : {};
+    return AppConfigSchema.parse({ ...DEFAULT_CONFIG, codex: { ...DEFAULT_CONFIG.codex, ...localCodex }, audio_generation: { ...DEFAULT_CONFIG.audio_generation, ...localAudioSettings } });
   }
 }
 
@@ -74,6 +88,22 @@ export async function saveCodexSettings(rootDirectory: string, input: CodexSetti
   }
   await mkdir(settingsDirectory, { recursive: true });
   await writeFile(localPath, `${JSON.stringify({ codex: nextCodex }, null, 2)}\n`, "utf8");
+  return loadConfig(rootDirectory);
+}
+
+export async function saveAudioSettings(rootDirectory: string, input: AudioSettingsInput): Promise<AppConfig> {
+  const parsed = AudioSettingsInputSchema.parse(input);
+  const settingsDirectory = path.join(rootDirectory, ".documentary-studio");
+  const localPath = path.join(settingsDirectory, audioSettingsFilename);
+  const currentLocal = await readJsonFile(localPath);
+  const currentAudio = currentLocal.audio_generation && typeof currentLocal.audio_generation === "object" ? currentLocal.audio_generation as Record<string, unknown> : {};
+  const nextAudio = { ...currentAudio } as Record<string, unknown>;
+  for (const key of ["provider", "service_url", "exaggeration", "cfg_weight", "max_concurrent_tasks"] as const) {
+    const value = parsed[key];
+    if (value !== undefined) nextAudio[key] = value;
+  }
+  await mkdir(settingsDirectory, { recursive: true });
+  await writeFile(localPath, `${JSON.stringify({ audio_generation: nextAudio }, null, 2)}\n`, "utf8");
   return loadConfig(rootDirectory);
 }
 

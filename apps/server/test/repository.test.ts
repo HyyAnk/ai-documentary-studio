@@ -87,4 +87,19 @@ describe("scene markdown", () => {
     const scenes = parseScenes(markdown, "episode_1");
     expect(scenes[0]).toMatchObject({ duration_seconds: 6, dialogue: "A clear line.", visual_prompt: "A specific shot.", continuity_note: "Same room." });
   });
+
+  it("invalidates audio only when dialogue changes", async () => {
+    const repository = await fixture();
+    const channel = await repository.createChannel({ name: "Audio Channel", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });
+    const topics = Array.from({ length: 5 }, (_, index) => ({ topic_id: `audio_topic_${index}`, channel_id: channel.channel_id, title: `Audio Topic ${index}`, premise: "Premise", why_it_fits: "Fits", hook: "Hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false }));
+    await repository.saveTopicRun(channel.channel_id, topics);
+    const episode = await repository.confirmTopic(channel.channel_id, topics[0].topic_id);
+    const audio = { audio_asset_path: "channels/audio-channel/episodes/audio-topic-0/assets/scene-01.wav", audio_generated_at: new Date().toISOString(), audio_duration_seconds: 4.2 };
+    await repository.saveScenes(channel.channel_id, episode.episode_id, [{ scene_id: "scene_1", episode_id: episode.episode_id, scene_number: 1, duration_seconds: 6, dialogue: "Original dialogue", visual_prompt: "Original shot", transition_note: "", continuity_note: "", ...audio }]);
+    const kept = (await repository.readScenes(channel.channel_id, episode.episode_id))[0];
+    await repository.saveScenes(channel.channel_id, episode.episode_id, [{ ...kept, visual_prompt: "New shot" }]);
+    expect((await repository.readScenes(channel.channel_id, episode.episode_id))[0]).toMatchObject(audio);
+    await repository.saveScenes(channel.channel_id, episode.episode_id, [{ ...kept, dialogue: "Changed dialogue" }]);
+    expect((await repository.readScenes(channel.channel_id, episode.episode_id))[0]).toMatchObject({ audio_asset_path: null, audio_generated_at: null, audio_duration_seconds: null });
+  });
 });

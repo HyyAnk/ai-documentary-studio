@@ -17,7 +17,9 @@ pnpm dev
 
 Open `http://127.0.0.1:5173`. The browser talks to the local Fastify server on port `4310`; credentials and filesystem access stay on the server.
 
-On Windows, double-click [`run dashboard.bat`](run%20dashboard.bat). It checks Node.js, enables pnpm through Corepack, installs the locked dependencies, starts the local services, and opens the dashboard.
+For the complete one-click startup, use [`run dashboard.bat`](run%20dashboard.bat). It prepares the local Chatterbox environment on first run, starts the sidecar, waits for the model to be ready, and only then opens the dashboard. `pnpm dev` is intended for frontend/backend development and does not perform the heavy Python setup.
+
+On Windows, double-click [`run dashboard.bat`](run%20dashboard.bat). It checks Node.js, Python, Corepack, pnpm, and workspace packages, starts the local services, and opens the dashboard.
 
 Production build:
 
@@ -68,9 +70,10 @@ The first release covers:
 - script generation/editing;
 - scene breakdown with paired dialogue and video prompts;
 - manual scene edits, copy actions, backups, and single-scene regeneration;
+- per-scene Chatterbox audio generation with inline playback, optional voice reference, duration mismatch warning, and stale-audio invalidation;
 - task queueing, per-channel/per-episode locks, progress events, approvals, and reconnect states.
 
-Audio and video generation are intentionally provider interfaces only.
+Video generation remains a provider interface for now. Audio generation is implemented locally through the Chatterbox sidecar, which `run dashboard.bat` prepares and starts automatically.
 
 ## Notes
 

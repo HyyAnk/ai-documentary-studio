@@ -85,12 +85,29 @@ if errorlevel 1 (
 )
 call :log OK T:setup install "Workspace dependencies ready"
 
-call :log STEP T:setup launch "Starting local server and dashboard"
+call :log STEP T:setup audio "Preparing Chatterbox TTS runtime and waiting for model readiness"
+powershell -NoProfile -ExecutionPolicy Bypass -File "!ROOT!scripts\ensure-tts.ps1" -ProjectRoot "!ROOT!"
+if errorlevel 1 (
+  call :log ERROR T:setup audio "Chatterbox could not be prepared. Dashboard startup stopped so Generate Audio is not silently unavailable"
+  exit /b 1
+)
+call :log OK T:setup audio "Chatterbox sidecar is ready"
+
+call :log STEP T:setup launch "Checking local server version"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $config = Invoke-RestMethod -UseBasicParsing -Uri 'http://127.0.0.1:4310/api/config' -TimeoutSec 2; if ($null -ne $config.audio_generation) { exit 0 }; exit 2 } catch { exit 1 }" >nul 2>nul
+if not errorlevel 1 (
+  call :log OK T:setup launch "Local server with audio integration is already running"
+  goto wait_for_dashboard
+)
+
+call :log STEP T:setup launch "Stopping stale local server before starting the current version"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$connections = Get-NetTCPConnection -LocalPort 4310 -State Listen -ErrorAction SilentlyContinue; foreach ($connection in $connections) { Stop-Process -Id $connection.OwningProcess -Force -ErrorAction SilentlyContinue }" >nul 2>nul
 start "AI Documentary Studio" /D "%ROOT%" cmd /k "pnpm dev"
 
+:wait_for_dashboard
 call :log STEP T:setup wait "Waiting for http://127.0.0.1:5173"
 for /l %%I in (1,1,30) do (
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:5173/' -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }" >nul 2>nul
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $config = Invoke-RestMethod -UseBasicParsing -Uri 'http://127.0.0.1:4310/api/config' -TimeoutSec 2; if ($null -eq $config.audio_generation) { exit 1 }; Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:5173/' -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }" >nul 2>nul
   if not errorlevel 1 goto dashboard_ready
   timeout /t 1 /nobreak >nul
 )

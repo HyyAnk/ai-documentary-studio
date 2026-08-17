@@ -3,6 +3,7 @@ import path from "node:path";
 import { EventEmitter } from "node:events";
 import {
   TaskSchema,
+  type AppConfig,
   type ContextManifest,
   type Scene,
   type Task,
@@ -16,6 +17,8 @@ import { ContextEngine } from "./context.js";
 import { CodexAppServerClient, type CodexServerRequest } from "./codex.js";
 import { StudioLogger } from "./logger.js";
 import { RepositoryError, RepositoryService } from "./repository.js";
+import { ChatterboxProvider, type ChatterboxTarget } from "./providers/chatterbox.js";
+import type { AudioProvider } from "./providers/index.js";
 
 type ActiveRun = { task: Task; threadId: string; turnId: string; output: string; manifest: ContextManifest };
 
@@ -28,6 +31,10 @@ export class TaskManager extends EventEmitter {
   private readonly completionWaiters = new Map<string, () => void>();
   private readonly locks = new Set<string>();
   private runningCount = 0;
+  private runningAudioCount = 0;
+  private readonly activeAudio = new Set<string>();
+  private audioConfig: AppConfig["audio_generation"];
+  private readonly audioProviderFactory: (target: ChatterboxTarget, config: AppConfig["audio_generation"]) => AudioProvider;
   private connectionStatus: "connected" | "disconnected" | "unavailable" | "connecting" = "disconnected";
 
   constructor(
@@ -37,8 +44,18 @@ export class TaskManager extends EventEmitter {
     private readonly maxConcurrent: number,
     private readonly maxSceneDuration: number,
     private readonly logger: StudioLogger,
+    audioConfig: AppConfig["audio_generation"] = {
+      provider: "chatterbox",
+      service_url: "http://127.0.0.1:8890",
+      exaggeration: 0.5,
+      cfg_weight: 0.5,
+      max_concurrent_tasks: 2,
+    },
+    audioProviderFactory?: (target: ChatterboxTarget, config: AppConfig["audio_generation"]) => AudioProvider,
   ) {
     super();
+    this.audioConfig = audioConfig;
+    this.audioProviderFactory = audioProviderFactory ?? ((target, config) => new ChatterboxProvider(repository, config, target));
     codex.on("status", (status: typeof this.connectionStatus) => {
       this.connectionStatus = status;
       this.emitEvent({ type: "codex.status", status });
@@ -79,6 +96,10 @@ export class TaskManager extends EventEmitter {
     await this.load();
   }
 
+  updateAudioConfig(config: AppConfig["audio_generation"]): void {
+    this.audioConfig = config;
+  }
+
   list(): Task[] {
     return [...this.tasks.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
@@ -94,7 +115,7 @@ export class TaskManager extends EventEmitter {
   }
 
   hasActiveWork(): boolean {
-    return this.active.size > 0 || this.runningCount > 0 || this.list().some((task) => ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(task.status));
+    return this.active.size > 0 || this.activeAudio.size > 0 || this.runningCount > 0 || this.runningAudioCount > 0 || this.list().some((task) => ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(task.status));
   }
 
   submit(taskType: TaskType, channelId: string, episodeId: string | null, sceneNumber?: number): Task {
@@ -138,6 +159,8 @@ export class TaskManager extends EventEmitter {
       await this.update(taskId, { progress_message: "Interrupting task" });
       await this.codex.interruptTurn(active.threadId, active.turnId).catch(() => undefined);
       await this.finish(taskId, "CANCELLED", "Cancelled by user");
+    } else if (this.activeAudio.has(taskId)) {
+      await this.finish(taskId, "CANCELLED", "Cancelled by user");
     }
     return this.get(taskId);
   }
@@ -154,13 +177,24 @@ export class TaskManager extends EventEmitter {
 
   private async pump(): Promise<void> {
     while (this.runningCount < this.maxConcurrent) {
-      const next = this.list().reverse().find((task) => task.status === "QUEUED" && !this.locks.has(task.lock_key));
-      if (!next) return;
+      const next = this.list().reverse().find((task) => task.status === "QUEUED" && task.task_type !== "GENERATE_AUDIO" && !this.locks.has(task.lock_key));
+      if (!next) break;
       this.locks.add(next.lock_key);
       this.runningCount += 1;
       void this.run(next).finally(() => {
         this.locks.delete(next.lock_key);
         this.runningCount -= 1;
+        void this.pump();
+      });
+    }
+    while (this.runningAudioCount < this.audioConfig.max_concurrent_tasks) {
+      const next = this.list().reverse().find((task) => task.status === "QUEUED" && task.task_type === "GENERATE_AUDIO" && !this.locks.has(task.lock_key));
+      if (!next) break;
+      this.locks.add(next.lock_key);
+      this.runningAudioCount += 1;
+      void this.runAudioTask(next).finally(() => {
+        this.locks.delete(next.lock_key);
+        this.runningAudioCount -= 1;
         void this.pump();
       });
     }
@@ -183,6 +217,37 @@ export class TaskManager extends EventEmitter {
     } catch (error) {
       await this.finish(task.task_id, "FAILED", error instanceof Error ? error.message : "Task failed");
       this.logger.error("Codex task failed", { ...context, step: "run_task" });
+    }
+  }
+
+  private async runAudioTask(task: Task): Promise<void> {
+    const context = { profileId: task.channel_id, workerId: task.task_id, step: "run_audio" };
+    this.activeAudio.add(task.task_id);
+    try {
+      await this.update(task.task_id, { status: "RUNNING", started_at: nowIso(), queue_position: null, progress_message: "Preparing audio" });
+      const sceneNumber = this.findSceneNumber(task.task_id);
+      if (!task.episode_id || !sceneNumber) throw new RepositoryError("Audio scene is required", "SCENE_REQUIRED");
+      const scenes = await this.repository.readScenes(task.channel_id, task.episode_id);
+      const scene = scenes.find((item) => item.scene_number === sceneNumber);
+      if (!scene) throw new RepositoryError("Audio target scene not found", "SCENE_NOT_FOUND");
+      const channel = await this.repository.getChannel(task.channel_id);
+      const voice = channel.voice_reference_path ? this.repository.resolveContextPath(channel.voice_reference_path) : "default";
+      await this.update(task.task_id, { progress_message: "Synthesizing dialogue" });
+      const provider = this.audioProviderFactory({ channelId: task.channel_id, episodeId: task.episode_id, sceneNumber }, this.audioConfig);
+      const result = await provider.generateDialogue(scene.dialogue, voice);
+      if (this.get(task.task_id).status === "CANCELLED") return;
+      const audioFile = await this.repository.getSceneAudioFile(task.channel_id, task.episode_id, path.basename(result.asset_path));
+      const audioBuffer = await readFile(audioFile.absolutePath);
+      await this.repository.saveSceneAudio(task.channel_id, task.episode_id, sceneNumber, result.asset_path, parseWavDuration(audioBuffer));
+      await this.finish(task.task_id, "COMPLETED", null, [result.asset_path]);
+    } catch (error) {
+      const message = error instanceof Error && "code" in error && (error as { code?: string }).code === "AUDIO_SERVICE_UNAVAILABLE"
+        ? "Audio service unavailable"
+        : error instanceof Error ? error.message : "Audio generation failed";
+      await this.finish(task.task_id, "FAILED", message);
+      this.logger.error(message, { ...context, step: "run_audio" });
+    } finally {
+      this.activeAudio.delete(task.task_id);
     }
   }
 
@@ -354,6 +419,9 @@ function parseScenesOutput(output: string, episodeId: string): Scene[] {
       visual_prompt: String(scene.visual_prompt ?? scene.video_prompt ?? "").trim(),
       transition_note: String(scene.transition_note ?? "").trim(),
       continuity_note: String(scene.continuity_note ?? "").trim(),
+      audio_asset_path: null,
+      audio_generated_at: null,
+      audio_duration_seconds: null,
     };
   });
 }
@@ -397,4 +465,24 @@ function parseRegeneration(output: string): Partial<Scene> {
     transition_note: typeof raw.transition_note === "string" ? raw.transition_note : undefined,
     continuity_note: typeof raw.continuity_note === "string" ? raw.continuity_note : undefined,
   };
+}
+
+function parseWavDuration(buffer: Uint8Array): number {
+  if (buffer.length < 44) throw new Error("Audio service returned an incomplete WAV file");
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  if (new TextDecoder().decode(buffer.slice(0, 4)) !== "RIFF" || new TextDecoder().decode(buffer.slice(8, 12)) !== "WAVE") {
+    throw new Error("Audio service returned an invalid WAV file");
+  }
+  let offset = 12;
+  let byteRate = 0;
+  let dataSize = 0;
+  while (offset + 8 <= buffer.length) {
+    const chunkId = new TextDecoder().decode(buffer.slice(offset, offset + 4));
+    const chunkSize = view.getUint32(offset + 4, true);
+    if (chunkId === "fmt " && chunkSize >= 16 && offset + 24 <= buffer.length) byteRate = view.getUint32(offset + 16, true);
+    if (chunkId === "data") { dataSize = chunkSize; break; }
+    offset += 8 + chunkSize + (chunkSize % 2);
+  }
+  if (!byteRate || !dataSize) throw new Error("Audio service returned a WAV without duration metadata");
+  return Number((dataSize / byteRate).toFixed(3));
 }
