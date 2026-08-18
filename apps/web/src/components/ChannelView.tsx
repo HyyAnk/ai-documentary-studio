@@ -1,4 +1,4 @@
-import { Archive, ArrowLeft, ArrowUpRight, CaretDown, CircleNotch, FileText, FilmSlate, FloppyDisk, Lightbulb, PencilSimple, Plus, Sparkle, Trash, X } from "@phosphor-icons/react";
+import { Archive, ArrowLeft, ArrowUpRight, CaretDown, CircleNotch, FileText, FilmSlate, FloppyDisk, Lightbulb, PencilSimple, Plus, Play, Sparkle, Trash, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Channel, Episode, Task, TopicCandidate } from "@studio/shared";
 import { api } from "../api";
@@ -6,14 +6,17 @@ import { formatDate, isTaskActive, isTaskTerminal, latestTask } from "../lib/uti
 import { EmptyState } from "./EmptyState";
 import { ChannelCard, ChannelsListView } from "./ChannelList";
 import { PageTitle, StageBadge, StatusBadge, StatusLine } from "./AppChrome";
-import { TopicCard } from "./TopicPanel";
 import { TaskProgressPanel, TopicProgress } from "./TaskProgressPanel";
+import { EpisodeDetail } from "./EpisodeView";
 import type { Notice } from "./types";
 
-export function ChannelsView({ selectedChannel, channels, tasks, onTaskSubmitted, openChannel, onCreate, onRefresh, onNotice, openEpisode }: { selectedChannel: Channel | null; channels: Channel[]; tasks: Task[]; onTaskSubmitted: (task: Task) => void; openChannel: (id: string) => void; onCreate: () => void; onRefresh: () => Promise<void>; onNotice: (notice: NonNullable<Notice>) => void; openEpisode: (channelId: string, episodeId: string) => void }) {
+export function ChannelsView({ selectedChannel, selectedEpisodeId, channels, tasks, onTaskSubmitted, openChannel, onCreate, onRefresh, onNotice, openEpisode, maxDuration, narrationWordsPerSecond, imageGenerationEnabled, imagesPerBundle }: { selectedChannel: Channel | null; selectedEpisodeId: string | null; channels: Channel[]; tasks: Task[]; onTaskSubmitted: (task: Task) => void; openChannel: (id: string) => void; onCreate: () => void; onRefresh: () => Promise<void>; onNotice: (notice: NonNullable<Notice>) => void; openEpisode: (channelId: string, episodeId: string) => void; maxDuration: number; narrationWordsPerSecond: number; imageGenerationEnabled: boolean; imagesPerBundle: number }) {
+  if (selectedChannel && selectedEpisodeId) return <EpisodeDetail channel={selectedChannel} episodeId={selectedEpisodeId} tasks={tasks} onTaskSubmitted={onTaskSubmitted} maxDuration={maxDuration} narrationWordsPerSecond={narrationWordsPerSecond} imageGenerationEnabled={imageGenerationEnabled} imagesPerBundle={imagesPerBundle} onBack={() => openChannel(selectedChannel.channel_id)} onNotice={onNotice} />;
   if (selectedChannel) return <ChannelDetail channel={selectedChannel} channels={channels} tasks={tasks} onTaskSubmitted={onTaskSubmitted} onBack={() => openChannel("")} onRefresh={onRefresh} onNotice={onNotice} openEpisode={openEpisode} />;
   return <ChannelsListView channels={channels} onCreate={onCreate} openChannel={openChannel} />;
 }
+
+export function TopicCard({ topic, onConfirm, busy }: { topic: TopicCandidate; onConfirm: () => void; busy: boolean }) { return <article className="topic-card"><div className="topic-number">Topic candidate</div><h3>{topic.title}</h3><p className="topic-premise">{topic.premise}</p><div className="topic-detail"><span>Why it fits</span><p>{topic.why_it_fits}</p></div><div className="topic-detail"><span>Hook</span><p>{topic.hook}</p></div><div className="topic-footer"><span>{topic.estimated_potential}</span><button className="text-button" disabled={busy} onClick={onConfirm}>{busy ? <CircleNotch className="spin" size={15} /> : <Play size={14} />}Use this topic</button></div></article>; }
 
 export function ChannelDetail({ channel, channels, tasks, onTaskSubmitted, onBack, onRefresh, onNotice, openEpisode }: { channel: Channel; channels: Channel[]; tasks: Task[]; onTaskSubmitted: (task: Task) => void; onBack: () => void; onRefresh: () => Promise<void>; onNotice: (notice: NonNullable<Notice>) => void; openEpisode: (channelId: string, episodeId: string) => void }) {
   const [dna, setDna] = useState<{ content: string; path: string; modified_at: string } | null>(null);

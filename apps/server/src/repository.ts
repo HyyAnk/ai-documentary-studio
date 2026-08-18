@@ -24,6 +24,17 @@ const execFileAsync = promisify(execFile);
 
 type TopicRun = { generated_at: string; candidates: TopicCandidate[] };
 
+export type BundleImageAsset = {
+  bundle_id: string;
+  bundle_number: number;
+  variant: number;
+  filename: string;
+  path: string;
+  absolutePath: string;
+  size: number;
+  modified_at: string;
+};
+
 const allowedEpisodeFiles = new Set([
   "brief.md",
   "research.md",
@@ -420,6 +431,95 @@ export class RepositoryService {
     return parseScenes(file.content, episodeId);
   }
 
+  async listBundleImages(channelId: string, episodeId: string): Promise<BundleImageAsset[]> {
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const directory = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets", "bundles");
+    await mkdir(directory, { recursive: true });
+    const entries = await readdir(directory, { withFileTypes: true });
+    const images: BundleImageAsset[] = [];
+    for (const entry of entries.filter((item) => item.isFile())) {
+      const match = /^CB-(\d{2,})(-alt)?\.png$/i.exec(entry.name);
+      if (!match) continue;
+      const absolutePath = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets", "bundles", entry.name);
+      try {
+        const metadata = await stat(absolutePath);
+        images.push({
+          bundle_id: `CB-${String(Number(match[1])).padStart(2, "0")}`,
+          bundle_number: Number(match[1]),
+          variant: match[2] ? 1 : 0,
+          filename: entry.name,
+          path: `channels/${channel.slug}/episodes/${episode.slug}/assets/bundles/${entry.name}`,
+          absolutePath,
+          size: metadata.size,
+          modified_at: metadata.mtime.toISOString(),
+        });
+      } catch {
+        // Ignore an image that disappeared during a refresh.
+      }
+    }
+    return images.sort((a, b) => a.bundle_number - b.bundle_number || a.variant - b.variant);
+  }
+
+  async getBundleImagePath(channelId: string, episodeId: string, bundleNumber: number, variant = 0): Promise<{ bundle_id: string; filename: string; path: string; absolutePath: string }> {
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const filename = `CB-${String(this.assertBundleNumber(bundleNumber)).padStart(2, "0")}${variant === 1 ? "-alt" : ""}.png`;
+    const absolutePath = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets", "bundles", filename);
+    return { bundle_id: `CB-${String(bundleNumber).padStart(2, "0")}`, filename, path: `channels/${channel.slug}/episodes/${episode.slug}/assets/bundles/${filename}`, absolutePath };
+  }
+
+  async getBundleImageFile(channelId: string, episodeId: string, filename: string): Promise<BundleImageAsset> {
+    if (!/^CB-\d{2,}(?:-alt)?\.png$/i.test(filename)) throw new RepositoryError("Unsupported image asset", "FILE_NOT_ALLOWED");
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const absolutePath = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets", "bundles", filename);
+    try {
+      await this.assertRealPathInside(path.dirname(absolutePath), absolutePath);
+      const metadata = await stat(absolutePath);
+      const bundleNumber = Number(/^CB-(\d+)/i.exec(filename)?.[1] ?? 0);
+      return { bundle_id: `CB-${String(bundleNumber).padStart(2, "0")}`, bundle_number: bundleNumber, variant: /-alt\.png$/i.test(filename) ? 1 : 0, filename, path: `channels/${channel.slug}/episodes/${episode.slug}/assets/bundles/${filename}`, absolutePath, size: metadata.size, modified_at: metadata.mtime.toISOString() };
+    } catch {
+      throw new RepositoryError("Image asset not found", "IMAGE_NOT_FOUND");
+    }
+  }
+
+  async writeBundleImage(channelId: string, episodeId: string, bundleNumber: number, content: Uint8Array, variant = 0): Promise<string> {
+    if (!isPng(content)) throw new RepositoryError("Image output is not a PNG file", "INVALID_IMAGE");
+    const target = await this.getBundleImagePath(channelId, episodeId, bundleNumber, variant);
+    const directory = path.dirname(target.absolutePath);
+    const episodeDirectory = path.dirname(directory);
+    await mkdir(directory, { recursive: true });
+    await this.assertRealPathInside(episodeDirectory, directory);
+    await this.writeBinaryAtomic(target.absolutePath, content);
+    return target.path;
+  }
+
+  async writeBundleImageFromFile(channelId: string, episodeId: string, bundleNumber: number, sourcePath: string, variant = 0): Promise<string> {
+    const resolvedSource = path.resolve(sourcePath);
+    const sourceRoot = [this.rootDirectory, this.storageRoot].find((root) => this.isInside(root, resolvedSource));
+    if (!sourceRoot) throw new RepositoryError("Codex image path is outside the studio workspace", "UNSAFE_PATH");
+    await this.assertRealPathInside(sourceRoot, resolvedSource);
+    return this.writeBundleImage(channelId, episodeId, bundleNumber, await readFile(resolvedSource), variant);
+  }
+
+  async clearBundleImages(channelId: string, episodeId: string, bundleNumber: number): Promise<void> {
+    const images = await this.listBundleImages(channelId, episodeId);
+    const id = `CB-${String(this.assertBundleNumber(bundleNumber)).padStart(2, "0")}`;
+    await Promise.all(images.filter((image) => image.bundle_id === id).map((image) => rm(image.absolutePath, { force: true })));
+  }
+
+  async attachBundleReference(channelId: string, episodeId: string, bundleId: string, assetPath: string): Promise<number> {
+    const scenes = await this.readScenes(channelId, episodeId);
+    const matching = scenes.filter((scene) => scene.continuity_bundle_id.toUpperCase() === bundleId.toUpperCase());
+    if (matching.length === 0) return 0;
+    const next = scenes.map((scene) => scene.continuity_bundle_id.toUpperCase() === bundleId.toUpperCase()
+      ? SceneSchema.parse({ ...scene, reference_asset_ids: [...new Set([...scene.reference_asset_ids, assetPath])] })
+      : scene);
+    await this.saveScenes(channelId, episodeId, next);
+    return matching.length;
+  }
+
   async saveScenes(channelId: string, episodeId: string, scenes: Scene[]): Promise<void> {
     const episode = await this.getEpisode(channelId, episodeId);
     const channel = await this.getChannel(channelId);
@@ -606,6 +706,11 @@ export class RepositoryService {
     return resolved;
   }
 
+  private assertBundleNumber(value: number): number {
+    if (!Number.isInteger(value) || value < 1 || value > 99) throw new RepositoryError("Bundle number must be between 1 and 99", "INVALID_BUNDLE");
+    return value;
+  }
+
   slugify(input: string): string {
     const normalized = input.trim().replaceAll("đ", "d").replaceAll("Đ", "D").normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
     const slug = normalized.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60).replace(/-+$/g, "");
@@ -730,6 +835,10 @@ export class RepositoryService {
 
 function clearSceneAudio(scene: Scene): Scene {
   return { ...scene, audio_asset_path: null, audio_generated_at: null, audio_duration_seconds: null };
+}
+
+function isPng(content: Uint8Array): boolean {
+  return content.length >= 8 && content[0] === 0x89 && content[1] === 0x50 && content[2] === 0x4e && content[3] === 0x47 && content[4] === 0x0d && content[5] === 0x0a && content[6] === 0x1a && content[7] === 0x0a;
 }
 
 export function parseScenes(markdown: string, episodeId: string): Scene[] {

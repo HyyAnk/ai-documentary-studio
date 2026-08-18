@@ -1,11 +1,12 @@
-import { ArrowLeft, ArrowUpRight, CheckCircle, CircleNotch, DownloadSimple, FilmSlate, FloppyDisk, PencilSimple, Play, SpeakerHigh, WarningCircle, X } from "@phosphor-icons/react";
+import { ArrowLeft, CheckCircle, CircleNotch, DownloadSimple, FilmSlate, FloppyDisk, PencilSimple, Play, SpeakerHigh, WarningCircle, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Channel, Episode, ProductionAssessment, Scene, Task } from "@studio/shared";
-import { api } from "../api";
+import type { Channel, ProductionAssessment, Scene, Task } from "@studio/shared";
+import { api, type BundleImage } from "../api";
 import { isTaskActive, isTaskTerminal, latestTask } from "../lib/utils";
+import { parseContinuityBundles } from "../lib/continuity";
 import { useEpisode } from "../hooks/useEpisode";
 import { EmptyState, LoadingState } from "./EmptyState";
-import { PageTitle, StageBadge } from "./AppChrome";
+import { StageBadge } from "./AppChrome";
 import { SceneCard } from "./SceneCard";
 import { TaskProgressPanel } from "./TaskProgressPanel";
 import type { Notice } from "./types";
@@ -19,19 +20,10 @@ const artifactConfig: Array<{ filename: ArtifactName; title: string; taskType: T
   { filename: "visual_bible.md", title: "Visual bible", taskType: "GENERATE_VISUAL_BIBLE", active: "Locking visual identity", complete: "Visual bible ready" },
 ];
 
-export function EpisodesView({ channel, episodeId, tasks, onTaskSubmitted, openChannel, openEpisode, maxDuration, narrationWordsPerSecond, onNotice }: { channel: Channel | null; episodeId: string | null; tasks: Task[]; onTaskSubmitted: (task: Task) => void; openChannel: (id: string) => void; openEpisode: (channelId: string, episodeId: string) => void; maxDuration: number; narrationWordsPerSecond: number; onNotice: (notice: NonNullable<Notice>) => void }) {
-  const [episodes, setEpisodes] = useState<Episode[]>([]);
-  const terminalTaskKey = tasks.filter((task) => task.channel_id === channel?.channel_id && isTaskTerminal(task)).map((task) => `${task.task_id}:${task.status}`).join("|");
-  useEffect(() => { if (channel) void api.episodes(channel.channel_id).then((response) => setEpisodes(response.episodes)).catch((error: Error) => onNotice({ tone: "bad", message: error.message })); }, [channel?.channel_id, terminalTaskKey, onNotice]);
-  if (!channel) return <section className="page-wrap"><PageTitle eyebrow="Episodes" title="Choose a channel" /><EmptyState compact icon={<FilmSlate size={23} />} title="Select a channel" copy="Open a channel to see episodes." action="Browse channels" onAction={() => onNotice({ tone: "neutral", message: "Choose a channel first" })} /></section>;
-  if (episodeId) return <EpisodeDetail channel={channel} episodeId={episodeId} tasks={tasks} onTaskSubmitted={onTaskSubmitted} maxDuration={maxDuration} narrationWordsPerSecond={narrationWordsPerSecond} onBack={() => openChannel(channel.channel_id)} onNotice={onNotice} />;
-  return <section className="page-wrap"><button className="back-button" onClick={() => openChannel(channel.channel_id)}><ArrowLeft size={16} />Channel</button><PageTitle eyebrow={channel.display_name} title="Episodes" />{episodes.length === 0 ? <EmptyState icon={<FilmSlate size={26} />} title="No episodes yet" copy="Choose a topic to create one." action="Open channel" onAction={() => openChannel(channel.channel_id)} /> : <div className="episode-list">{episodes.map((episode, index) => <button className="episode-row" key={episode.episode_id} onClick={() => openEpisode(channel.channel_id, episode.episode_id)}><div className="episode-index">{String(index + 1).padStart(2, "0")}</div><div className="episode-info"><strong>{episode.topic.title}</strong><span>{episode.topic.premise}</span></div><StageBadge stage={episode.stage} /><ArrowUpRight size={17} /></button>)}</div>}</section>;
-}
-
-function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxDuration, narrationWordsPerSecond, onBack, onNotice }: { channel: Channel; episodeId: string; tasks: Task[]; onTaskSubmitted: (task: Task) => void; maxDuration: number; narrationWordsPerSecond: number; onBack: () => void; onNotice: (notice: NonNullable<Notice>) => void }) {
+export function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxDuration, narrationWordsPerSecond, imageGenerationEnabled, imagesPerBundle, onBack, onNotice }: { channel: Channel; episodeId: string; tasks: Task[]; onTaskSubmitted: (task: Task) => void; maxDuration: number; narrationWordsPerSecond: number; imageGenerationEnabled: boolean; imagesPerBundle: number; onBack: () => void; onNotice: (notice: NonNullable<Notice>) => void }) {
   const handleEpisodeError = useCallback((error: Error) => onNotice({ tone: "bad", message: error.message }), [onNotice]);
   const state = useEpisode(channel.channel_id, episodeId, handleEpisodeError);
-  const { episode, research, setResearch, treatment, setTreatment, script, setScript, visualBible, setVisualBible, scenes, setScenes, assessment, load } = state;
+  const { episode, research, setResearch, treatment, setTreatment, script, setScript, visualBible, setVisualBible, scenes, setScenes, assessment, bundleImages, load } = state;
   const [busy, setBusy] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [episodeClock, setEpisodeClock] = useState(() => Date.now());
@@ -112,6 +104,21 @@ function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxDuration
   const mergeNext = async (sceneNumber: number) => { const key = `MERGE_NEXT${sceneNumber}`; setBusy(key); try { const result = await api.mergeNextScene(channel.channel_id, episodeId, sceneNumber); setScenes(result.scenes); onNotice({ tone: "good", message: `Shot ${sceneNumber} combined` }); } catch (error) { onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Could not combine shots" }); } finally { setBusy(null); } };
   const copy = async (key: string, value: string) => { await navigator.clipboard.writeText(value); setCopied(key); window.setTimeout(() => setCopied(null), 1300); };
 
+  const generateBundleImage = async (bundleNumber: number) => {
+    const key = `bundle-image-${bundleNumber}`;
+    setBusy(key);
+    try { const result = await api.generateBundleImage(channel.channel_id, episodeId, bundleNumber); onTaskSubmitted(result.task); onNotice({ tone: "good", message: `Anchor image ${String(bundleNumber).padStart(2, "0")} queued` }); }
+    catch (error) { onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Could not start anchor image" }); }
+    finally { setBusy(null); }
+  };
+
+  const generateAllBundleImages = async () => {
+    setBusy("bundle-images-all");
+    try { const result = await api.generateAllBundleImages(channel.channel_id, episodeId); result.tasks.forEach(onTaskSubmitted); onNotice({ tone: "good", message: `${result.tasks.length} anchor image${result.tasks.length === 1 ? "" : "s"} queued` }); }
+    catch (error) { onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Could not start anchor images" }); }
+    finally { setBusy(null); }
+  };
+
   if (!episode) return <section className="page-wrap"><LoadingState /></section>;
   const artifactValues: Record<ArtifactName, { value: string; set: (value: string) => void }> = {
     "research.md": { value: research, set: setResearch },
@@ -140,6 +147,8 @@ function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxDuration
       })}
     </div>
 
+    {imageGenerationEnabled ? <BundleImagesPanel bundles={parseContinuityBundles(visualBible)} images={bundleImages} tasks={episodeTasks} now={episodeClock} channelId={channel.channel_id} episodeId={episodeId} imagesPerBundle={imagesPerBundle} busy={busy} disabled={false} onGenerate={(bundleNumber) => void generateBundleImage(bundleNumber)} onGenerateAll={() => void generateAllBundleImages()} /> : null}
+
     <section className="panel narration-production-panel">
       <div className="panel-heading"><div><p className="eyebrow">Audio master</p><h2>Production narration</h2></div><button className="primary-button compact" disabled={!readiness.script || Boolean(activeEpisodeTask)} onClick={() => void createTask("GENERATE_NARRATION")}>{latestTask(episodeTasks, ["GENERATE_NARRATION"]) && isTaskActive(latestTask(episodeTasks, ["GENERATE_NARRATION"])!) ? <CircleNotch className="spin" size={15} /> : <SpeakerHigh size={15} />}{readiness.narration ? "Regenerate" : "Generate"}</button></div>
       {latestTask(episodeTasks, ["GENERATE_NARRATION"]) ? <TaskProgressPanel task={latestTask(episodeTasks, ["GENERATE_NARRATION"])!} title="Narration" activeLabel="Generating by sequence" completionLabel="Narration ready" now={episodeClock} compact /> : null}
@@ -149,7 +158,7 @@ function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxDuration
     <section className="shot-plan-section">
       <div className="section-heading scene-heading"><div><p className="eyebrow">Edit timeline</p><h2>Shot plan</h2></div><div className="scene-heading-actions"><button className="primary-button" disabled={!readiness.visualBible || Boolean(activeEpisodeTask)} onClick={() => void createTask("GENERATE_SCENES")}>{latestTask(episodeTasks, ["GENERATE_SCENES"]) && isTaskActive(latestTask(episodeTasks, ["GENERATE_SCENES"])!) ? <CircleNotch className="spin" size={17} /> : <FilmSlate size={17} />}{scenes.length ? "Regenerate shots" : "Generate shots"}</button></div></div>
       {currentShotBatch.length > 0 ? <div className="batch-shot-progress" role="progressbar" aria-label="Shot sequence progress" aria-valuemin={0} aria-valuemax={currentShotBatch.length} aria-valuenow={completedShotSequences}><div><strong>{completedShotSequences} / {currentShotBatch.length} sequences</strong><span>{currentShotBatch.some((task) => task.status === "FAILED") ? "Retry failed sequences from Tasks" : currentShotBatch.some(isTaskActive) ? "Generating in parallel" : "Sequence batch complete"}</span></div><div><span style={{ transform: `scaleX(${completedShotSequences / currentShotBatch.length})` }} /></div></div> : latestTask(episodeTasks, ["GENERATE_SCENES"]) ? <TaskProgressPanel task={latestTask(episodeTasks, ["GENERATE_SCENES"])!} title="Shot generation" activeLabel="Building sequence-aware shots" completionLabel="Shot plan ready" now={episodeClock} /> : null}
-      {scenes.length === 0 ? <EmptyState compact icon={<FilmSlate size={23} />} title="No shots yet" copy="Complete the visual bible first." action="Generate shots" disabled={!readiness.visualBible || Boolean(activeEpisodeTask)} busy={Boolean(latestTask(episodeTasks, ["GENERATE_SCENES"]) && isTaskActive(latestTask(episodeTasks, ["GENERATE_SCENES"])!))} busyLabel="Generating…" onAction={() => void createTask("GENERATE_SCENES")} /> : <div className="scene-list">{scenes.map((scene, index) => <div key={scene.scene_id}>{index === 0 || scenes[index - 1].sequence_id !== scene.sequence_id ? <div className="sequence-divider"><span>{scene.sequence_id}</span><strong>{scene.sequence_title}</strong></div> : null}<SceneCard scene={scene} nextScene={scenes[index + 1] ?? null} task={latestTask(episodeTasks, ["REGENERATE_DIALOGUE", "REGENERATE_PROMPT", "REGENERATE_BOTH"], scene.scene_number)} audioTask={latestTask(episodeTasks, ["GENERATE_AUDIO"], scene.scene_number)} channelId={channel.channel_id} episodeId={episodeId} now={episodeClock} maxDuration={maxDuration} narrationWordsPerSecond={episode.measured_narration_words_per_second ?? narrationWordsPerSecond} copied={copied} busy={busy} onCopy={copy} onChange={(next) => setScenes((current) => current.map((item) => item.scene_id === scene.scene_id ? next : item))} onRegenerate={(type) => void createTask(type, scene.scene_number)} onGenerateAudio={() => void createTask("GENERATE_AUDIO", scene.scene_number)} onMergeNext={() => void mergeNext(scene.scene_number)} /></div>)}<div className="scene-save-row"><span>Manual edits update the assessment after save</span><button className="primary-button compact" disabled={busy === "scenes" || episodeTasks.some(isTaskActive)} onClick={() => void saveScenes()}>{busy === "scenes" ? <CircleNotch className="spin" size={15} /> : <FloppyDisk size={15} />}{busy === "scenes" ? "Saving…" : "Save shots"}</button></div></div>}
+      {scenes.length === 0 ? <EmptyState compact icon={<FilmSlate size={23} />} title="No shots yet" copy="Complete the visual bible first." action="Generate shots" disabled={!readiness.visualBible || Boolean(activeEpisodeTask)} busy={Boolean(latestTask(episodeTasks, ["GENERATE_SCENES"]) && isTaskActive(latestTask(episodeTasks, ["GENERATE_SCENES"])!))} busyLabel="Generating…" onAction={() => void createTask("GENERATE_SCENES")} /> : <div className="scene-list">{scenes.map((scene, index) => <div key={scene.scene_id}>{index === 0 || scenes[index - 1].sequence_id !== scene.sequence_id ? <SequenceDivider scene={scene} images={bundleImages} channelId={channel.channel_id} episodeId={episodeId} /> : null}<SceneCard scene={scene} nextScene={scenes[index + 1] ?? null} task={latestTask(episodeTasks, ["REGENERATE_DIALOGUE", "REGENERATE_PROMPT", "REGENERATE_BOTH"], scene.scene_number)} audioTask={latestTask(episodeTasks, ["GENERATE_AUDIO"], scene.scene_number)} channelId={channel.channel_id} episodeId={episodeId} now={episodeClock} maxDuration={maxDuration} narrationWordsPerSecond={episode.measured_narration_words_per_second ?? narrationWordsPerSecond} copied={copied} busy={busy} onCopy={copy} onChange={(next) => setScenes((current) => current.map((item) => item.scene_id === scene.scene_id ? next : item))} onRegenerate={(type) => void createTask(type, scene.scene_number)} onGenerateAudio={() => void createTask("GENERATE_AUDIO", scene.scene_number)} onMergeNext={() => void mergeNext(scene.scene_number)} /></div>)}<div className="scene-save-row"><span>Manual edits update the assessment after save</span><button className="primary-button compact" disabled={busy === "scenes" || episodeTasks.some(isTaskActive)} onClick={() => void saveScenes()}>{busy === "scenes" ? <CircleNotch className="spin" size={15} /> : <FloppyDisk size={15} />}{busy === "scenes" ? "Saving…" : "Save shots"}</button></div></div>}
     </section>
   </section>;
 }
@@ -157,6 +166,24 @@ function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxDuration
 function PipelineRail({ readiness }: { readiness: { research: boolean; treatment: boolean; script: boolean; visualBible: boolean; scenes: boolean; narration: boolean } }) {
   const steps = [["Research", readiness.research], ["Treatment", readiness.treatment], ["Script", readiness.script], ["Visual bible", readiness.visualBible], ["Shots", readiness.scenes], ["Narration", readiness.narration]] as const;
   return <ol className="pipeline-rail" aria-label="Episode production progress">{steps.map(([label, ready], index) => <li className={ready ? "is-ready" : ""} key={label}><span>{ready ? <CheckCircle size={15} weight="fill" /> : index + 1}</span><strong>{label}</strong></li>)}</ol>;
+}
+
+function BundleImagesPanel({ bundles, images, tasks, now, channelId, episodeId, imagesPerBundle, busy, disabled, onGenerate, onGenerateAll }: { bundles: ReturnType<typeof parseContinuityBundles>; images: BundleImage[]; tasks: Task[]; now: number; channelId: string; episodeId: string; imagesPerBundle: number; busy: string | null; disabled: boolean; onGenerate: (bundleNumber: number) => void; onGenerateAll: () => void }) {
+  const activeImageTask = tasks.some((task) => task.task_type === "GENERATE_BUNDLE_IMAGE" && isTaskActive(task));
+  return <section className="panel bundle-images-panel">
+    <div className="panel-heading"><div><p className="eyebrow">Style lock</p><h2>Continuity images</h2></div><div className="panel-heading-actions"><a className="quiet-button compact" href={images.length ? api.downloadBundleImagesUrl(channelId, episodeId) : undefined} aria-disabled={!images.length} download><DownloadSimple size={15} />Download all</a><button className="primary-button compact" disabled={disabled || activeImageTask || busy === "bundle-images-all" || bundles.length === 0} onClick={onGenerateAll}>{busy === "bundle-images-all" || activeImageTask ? <CircleNotch className="spin" size={15} /> : <Play size={15} />}{activeImageTask ? "Generating…" : "Generate all"}</button></div></div>
+    {bundles.length === 0 ? <p className="artifact-empty">Generate the visual bible to define continuity bundles.</p> : <div className="bundle-image-list">{bundles.map((bundle) => {
+      const bundleImages = images.filter((image) => image.bundle_id === bundle.bundle_id);
+      const task = latestTask(tasks, ["GENERATE_BUNDLE_IMAGE"], bundle.bundle_number);
+      const taskActive = Boolean(task && isTaskActive(task));
+      return <article className="bundle-image-card" key={bundle.bundle_id}><div className="bundle-image-copy"><div><span className="continuity-badge">{bundle.bundle_id}</span><strong>{bundle.title}</strong></div><p>{bundle.anchor_prompt}</p><span className="bundle-image-count">{bundleImages.length} / {imagesPerBundle} image{imagesPerBundle === 1 ? "" : "s"}</span></div><div className="bundle-image-assets">{bundleImages.map((image) => <a key={image.filename} href={api.bundleImageUrl(channelId, episodeId, image.filename)} target="_blank" rel="noreferrer" download={image.filename}><img src={api.bundleImageUrl(channelId, episodeId, image.filename)} alt={`${bundle.bundle_id} anchor`} /></a>)}<button className="quiet-button compact" disabled={disabled || taskActive || busy === `bundle-image-${bundle.bundle_number}`} onClick={() => onGenerate(bundle.bundle_number)}>{taskActive || busy === `bundle-image-${bundle.bundle_number}` ? <CircleNotch className="spin" size={14} /> : <Play size={14} />}{bundleImages.length ? "Regenerate" : "Generate anchor"}</button></div>{task ? <TaskProgressPanel task={task} title={bundle.bundle_id} activeLabel="Generating anchor image" completionLabel="Anchor image ready" now={now} compact /> : null}</article>;
+    })}</div>}
+  </section>;
+}
+
+function SequenceDivider({ scene, images, channelId, episodeId }: { scene: Scene; images: BundleImage[]; channelId: string; episodeId: string }) {
+  const image = images.find((item) => item.bundle_id === scene.continuity_bundle_id && item.variant === 0);
+  return <div className="sequence-divider"><span>{scene.sequence_id}</span><strong>{scene.sequence_title}</strong>{image ? <a className="sequence-anchor" href={api.bundleImageUrl(channelId, episodeId, image.filename)} target="_blank" rel="noreferrer"><img src={api.bundleImageUrl(channelId, episodeId, image.filename)} alt={`${scene.continuity_bundle_id} anchor`} /><span>{scene.continuity_bundle_id}</span></a> : null}</div>;
 }
 
 function AssessmentPanel({ assessment }: { assessment: ProductionAssessment }) {

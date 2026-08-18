@@ -11,13 +11,14 @@ import { RepositoryService } from "./repository.js";
 import { StudioLogger } from "./logger.js";
 import { DEFAULT_CONFIG } from "./config.js";
 import { calibratedScriptTargetWords } from "./production.js";
+import { continuityBundleId } from "./visualBundles.js";
 
 type ContextFile = { path: string; reason: string; content: string };
 
 export class ContextEngine {
   constructor(private readonly repository: RepositoryService, private readonly logger: StudioLogger) {}
 
-  async build(taskType: TaskType, channelId: string, episodeId: string | null, sceneNumber?: number): Promise<ContextManifest> {
+  async build(taskType: TaskType, channelId: string, episodeId: string | null, sceneNumber?: number, imageVariant = 0): Promise<ContextManifest> {
     const channel = await this.repository.getChannel(channelId);
     const files: ContextFile[] = [];
     const sharedFiles: ContextFile[] = [];
@@ -106,6 +107,16 @@ export class ContextEngine {
       await artifact("treatment.md", "approved documentary treatment", true);
       await artifact("script.md", "confirmed episode script", true);
       await this.readSharedRules(["visual_bible_rules.md", "visual_rules.md", "prompt_rules.md", "cinematic_prompt_reference.md"], sharedFiles);
+    } else if (taskType === "GENERATE_BUNDLE_IMAGE") {
+      const bundleNumber = sceneNumber ?? 0;
+      if (bundleNumber < 1) throw new Error("Bundle number is required for anchor image generation");
+      const visualBible = await loadArtifact("visual_bible.md", true);
+      const bundleId = continuityBundleId(bundleNumber);
+      add({ path: `${visualBible.path}#${bundleId}`, reason: `continuity bundle ${bundleId}`, content: selectMarkdownSection(visualBible.content, bundleNumber, /^##\s+Continuity bundle/i) });
+      add({ path: dnaPath, reason: "visual style and language locks", content: selectSections(dna, ["Visual Style", "Visual Language"]) });
+      await this.readSharedRules(["visual_bible_rules.md", "visual_rules.md"], sharedFiles);
+      const target = await this.repository.getBundleImagePath(channelId, episodeKey, bundleNumber, imageVariant);
+      add({ path: target.path, reason: "requested image output path", content: "" });
     } else if (taskType === "GENERATE_SEQUENCE_SCENES") {
       const sequenceNumber = sceneNumber ?? 0;
       if (sequenceNumber < 1) throw new Error("Sequence number is required for shot generation");
@@ -147,6 +158,8 @@ export class ContextEngine {
           ? `Return only the completed Markdown narration script. Target approximately ${calibratedTargetWords} words for ${episode.target_duration_minutes} minutes at ${narrationWordsPerSecond.toFixed(2)} words per second; stay within ±20% of this calibrated target. Aim for ${Math.round(calibratedTargetWords * 1.03)}–${Math.round(calibratedTargetWords * 1.08)} words and do not exceed ${Math.ceil(calibratedTargetWords * 1.15)} words. Humor must replace generic explanation, not add new paragraphs or extend the runtime. The legacy ${episode.target_word_count}-word metadata target is a planning hint, not a hard gate. Add this exact hidden marker immediately after the title: <!-- HUMOR_POLICY: v1 -->. Follow the treatment sequence order. Build the argument from dated events, named programs/people/organizations, measurable facts, decisions, and consequences from research. Add a restrained humor layer: for a typical 6–10 minute episode, weave 2–5 dry, evidence-grounded humor beats across the argument, using ironic contrast, an unexpectedly specific analogy, or a self-aware aside that gives the viewer a new angle. Never invent a quote, statistic, anecdote, or reaction for a joke; never mock victims or sensitive subjects. After a humorous spoken line, add only an HTML comment of the form <!-- AUDIO_CUE: chuckle --> or, rarely, <!-- AUDIO_CUE: laugh -->. Use at most one laugh cue per three minutes and prefer chuckle. Do not write (laughs), [laugh], or visual directions in the visible narration. Before returning, silently verify that the marker exists, the humor beats are spaced across the argument, every joke is grounded in the scoped research, and the word count stays under the cap.`
           : taskType === "GENERATE_VISUAL_BIBLE"
             ? "Return only a completed Markdown Episode Visual Bible. Define fixed channel constants, episode palette, typography/graphic language, editorial overlay system, recurring hero objects, evidence treatment, and asset mix. Provenance is tracked in production metadata; do not require a visible AI or reconstruction label inside footage prompts. Create one continuity bundle per treatment sequence. Format every bundle as a second-level heading exactly like `## Continuity bundle CB-01 — Title`, incrementing CB-02, CB-03, and so on. Each bundle needs labeled Era, Location, Subjects, Wardrobe/objects, Palette, Lighting, Texture, Anchor-frame prompt, Reference asset slots, and Allowed shot variation fields."
+          : taskType === "GENERATE_BUNDLE_IMAGE"
+            ? `Generate exactly one reference image for continuity bundle ${continuityBundleId(sceneNumber ?? 0)}. Follow the bundle's Anchor-frame prompt and the channel Visual Style/Visual Language locks. Depict only the described environment, subjects, era, palette, lighting, and texture. No text, captions, logos, UI, split panels, charts, watermarks, or labels. Save the final PNG exactly to the requested image output path in the task instructions. If the connected image capability returns bytes instead of writing a file, return a data:image/png;base64 payload or report the saved PNG path.`
             : taskType === "GENERATE_SEQUENCE_SCENES"
               ? `Return a JSON array of shot beats covering only the provided script sequence in exact order without paraphrasing or omission. Every beat must use no more than ${maxBeatWords} words and should end at a sentence or natural clause boundary. Use sequence_id \"sequence-${sceneNumber}\", the provided sequence title, and continuity_bundle_id \"CB-${String(sceneNumber ?? 0).padStart(2, "0")}\". Fields: { dialogue, sequence_id, sequence_title, shot_id, visual_prompt, asset_type: archive|document|map|diagram|ai_reconstruction|contemporary|transition, continuity_key, continuity_bundle_id, reference_asset_ids: string[], source_ids: claim/source IDs[], reconstruction: boolean, sound_cue, transition_note, continuity_note, editorial_overlay: { kind: none|caption|stat_card|timeline|bar_chart|line_chart|map_callout|comparison|quote, text, motion: none|fade_up|slide_in|draw_on|count_up|highlight, placement: lower_third|upper_left|upper_right|center|side_panel, duration_seconds, data: [{ label, value, unit }], source_ids: string[] } }. Every prompt must be distinct and include CAMERA/ACTION/LIGHTING/ATMOSPHERE/CONTINUITY sections. The visual_prompt describes only the visible footage: never put captions, labels, logos, UI, charts, source IDs, or \"AI VISUALIZATION\" text inside it. Use editorial_overlay.kind \"none\" for most beats; across the complete episode target 25–30% of shots with an overlay. Use overlays only when they clarify a date, number, geography, comparison, named program, or quote. Charts require at least two sourced data points; never invent data. Repeat the bundle identity locks, link evidence IDs, and do not add durations, SHOT PLAN, or timecodes.`
               : taskType === "GENERATE_SCENES"

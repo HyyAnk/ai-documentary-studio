@@ -46,6 +46,7 @@ export const TaskTypeSchema = z.enum([
   "REGENERATE_BOTH",
   "GENERATE_NARRATION",
   "GENERATE_AUDIO",
+  "GENERATE_BUNDLE_IMAGE",
 ]);
 export type TaskType = z.infer<typeof TaskTypeSchema>;
 
@@ -212,6 +213,10 @@ export const AppConfigSchema = z.object({
     narration_words_per_second: z.number().positive().default(2.3),
     aspect_ratio: z.string().default("16:9"),
   }),
+  image_generation: z.object({
+    enabled: z.boolean().default(false),
+    images_per_bundle: z.number().int().min(1).max(2).default(1),
+  }),
   codex: z.object({
     max_concurrent_tasks: z.number().int().positive().default(3),
     transport: z.enum(["app_server", "openai_compatible"]).default("app_server"),
@@ -256,6 +261,15 @@ export type AssignVoiceInput = z.infer<typeof AssignVoiceInputSchema>;
 
 export const GenerateAllAudioInputSchema = z.object({ force: z.boolean().default(false) });
 export type GenerateAllAudioInput = z.infer<typeof GenerateAllAudioInputSchema>;
+
+export const GenerateAllBundleImagesInputSchema = z.object({ force: z.boolean().default(false) });
+export type GenerateAllBundleImagesInput = z.infer<typeof GenerateAllBundleImagesInputSchema>;
+
+export const ImageSettingsInputSchema = z.object({
+  enabled: z.boolean().optional(),
+  images_per_bundle: z.number().int().min(1).max(2).optional(),
+});
+export type ImageSettingsInput = z.infer<typeof ImageSettingsInputSchema>;
 
 export const AudioSettingsInputSchema = z.object({
   provider: z.string().trim().max(80).optional(),

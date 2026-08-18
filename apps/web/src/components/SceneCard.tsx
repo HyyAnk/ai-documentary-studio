@@ -1,6 +1,7 @@
 import { ArrowClockwise, ArrowRight, Check, CircleNotch, Copy, SpeakerHigh, WarningCircle } from "@phosphor-icons/react";
 import { useLayoutEffect, useRef } from "react";
 import type { Scene, Task } from "@studio/shared";
+import { api } from "../api";
 import { InlineTaskState } from "./InlineTaskState";
 import { isTaskActive } from "../lib/utils";
 
@@ -25,6 +26,8 @@ export function SceneCard({ scene, nextScene, task, audioTask, channelId, episod
   const mergeTooLong = mergedDuration !== null && mergedDuration > maxDuration;
   const mergeTooltip = mergeTooLong ? `Combined duration exceeds the ${maxDuration}s generation limit` : "Override automatic shot grouping";
   const overlay: Scene["editorial_overlay"] = scene.editorial_overlay ?? { kind: "none", text: "", motion: "none", placement: "lower_third", duration_seconds: null, data: [], source_ids: [] };
+  const referenceAsset = scene.reference_asset_ids.find((asset) => /(?:CB-\d{2,})(?:-alt)?\.png$/i.test(asset));
+  const referenceFilename = referenceAsset?.split("/").pop() ?? null;
   const matchDuration = () => { if (scene.audio_duration_seconds !== null && scene.audio_duration_seconds !== undefined) onChange({ ...scene, duration_seconds: Math.min(maxDuration, Math.max(1, Math.round(scene.audio_duration_seconds))) }); };
   const clearAudioWhenDialogueChanges = (dialogue: string): Scene => dialogue === scene.dialogue ? { ...scene, dialogue } : { ...scene, dialogue, audio_asset_path: null, audio_generated_at: null, audio_duration_seconds: null };
   const autoGrow = (element: HTMLTextAreaElement) => { element.style.height = "auto"; element.style.height = `${element.scrollHeight}px`; };
@@ -60,7 +63,7 @@ export function SceneCard({ scene, nextScene, task, audioTask, channelId, episod
         <textarea ref={dialogueRef} rows={1} value={scene.dialogue} disabled={processing || mergePending} onInput={(event) => autoGrow(event.currentTarget)} onChange={(event) => onChange(clearAudioWhenDialogueChanges(event.target.value))} />
       </div>
       <div className="scene-block prompt-block">
-        <div className="block-heading"><span>Video generation prompt</span><button className="copy-button" onClick={() => void onCopy(`${scene.scene_id}-prompt`, scene.visual_prompt)}>{copied === `${scene.scene_id}-prompt` ? <Check size={14} /> : <Copy size={14} />}{copied === `${scene.scene_id}-prompt` ? "Copied" : "Copy"}</button></div>
+        <div className="block-heading"><span>Video generation prompt</span><div className="reference-asset-label">{scene.continuity_bundle_id ? <span>Reference: {scene.continuity_bundle_id}</span> : null}{referenceFilename ? <a href={api.bundleImageUrl(channelId, episodeId, referenceFilename)} target="_blank" rel="noreferrer" download={referenceFilename}>Download</a> : null}<button className="copy-button" onClick={() => void onCopy(`${scene.scene_id}-prompt`, scene.visual_prompt)}>{copied === `${scene.scene_id}-prompt` ? <Check size={14} /> : <Copy size={14} />}{copied === `${scene.scene_id}-prompt` ? "Copied" : "Copy"}</button></div></div>
         <textarea ref={promptRef} rows={1} value={scene.visual_prompt} disabled={processing || mergePending} onInput={(event) => autoGrow(event.currentTarget)} onChange={(event) => onChange({ ...scene, visual_prompt: event.target.value })} />
       </div>
     </div>

@@ -1,5 +1,7 @@
 import type { AppConfig, Channel, CodexSettingsInput, CodexSettingsResponse, Episode, ProductionAssessment, Scene, StorageInfo, Task, TaskEvent, TopicCandidate, VoiceProfile } from "@studio/shared";
 
+export type BundleImage = { bundle_id: string; bundle_number: number; variant: number; filename: string; path: string; size: number; modified_at: string };
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { headers: { "content-type": "application/json", ...(init?.headers ?? {}) }, ...init });
   const body = await response.json().catch(() => ({}));
@@ -22,6 +24,11 @@ export const api = {
   file: (channelId: string, episodeId: string, filename: string) => request<{ content: string; path: string; modified_at: string }>(`/api/channels/${channelId}/episodes/${episodeId}/file/${filename}`),
   saveFile: (channelId: string, episodeId: string, filename: string, content: string) => request<{ path: string; modified_at: string }>(`/api/channels/${channelId}/episodes/${episodeId}/file/${filename}`, { method: "PUT", body: JSON.stringify({ content }) }),
   scenes: (channelId: string, episodeId: string) => request<{ scenes: Scene[] }>(`/api/channels/${channelId}/episodes/${episodeId}/scenes`),
+  bundleImages: (channelId: string, episodeId: string) => request<{ images: BundleImage[] }>(`/api/channels/${channelId}/episodes/${episodeId}/visual-bible/images`),
+  generateBundleImage: (channelId: string, episodeId: string, bundleNumber: number) => request<{ task: Task }>(`/api/channels/${channelId}/episodes/${episodeId}/visual-bible/bundles/${bundleNumber}/image`, { method: "POST", body: "{}" }),
+  generateAllBundleImages: (channelId: string, episodeId: string, force = false) => request<{ tasks: Task[]; bundle_count: number }>(`/api/channels/${channelId}/episodes/${episodeId}/visual-bible/images/generate-all`, { method: "POST", body: JSON.stringify({ force }) }),
+  bundleImageUrl: (channelId: string, episodeId: string, filename: string) => `/api/channels/${channelId}/episodes/${episodeId}/visual-bible/images/${encodeURIComponent(filename)}`,
+  downloadBundleImagesUrl: (channelId: string, episodeId: string) => `/api/channels/${channelId}/episodes/${episodeId}/visual-bible/images/download`,
   productionAssessment: (channelId: string, episodeId: string) => request<{ assessment: ProductionAssessment }>(`/api/channels/${channelId}/episodes/${episodeId}/production-assessment`),
   generateShots: (channelId: string, episodeId: string) => request<{ tasks: Task[]; sequence_count: number }>(`/api/channels/${channelId}/episodes/${episodeId}/shots/generate`, { method: "POST", body: "{}" }),
   optimizeShots: (channelId: string, episodeId: string) => request<{ scenes: Scene[]; merged: number }>(`/api/channels/${channelId}/episodes/${episodeId}/shots/optimize`, { method: "POST", body: "{}" }),
@@ -41,6 +48,7 @@ export const api = {
   cleanupCodex: () => request<{ removed: number }>("/api/codex/cleanup", { method: "POST", body: "{}" }),
   saveAudioSettings: (body: AppConfig["audio_generation"]) => request<{ audio_generation: AppConfig["audio_generation"] }>("/api/audio/settings", { method: "POST", body: JSON.stringify(body) }),
   saveVideoSettings: (body: Pick<AppConfig["video_generation"], "max_scene_duration_seconds" | "narration_words_per_second">) => request<{ video_generation: AppConfig["video_generation"] }>("/api/video/settings", { method: "POST", body: JSON.stringify(body) }),
+  saveImageSettings: (body: AppConfig["image_generation"]) => request<{ image_generation: AppConfig["image_generation"] }>("/api/image/settings", { method: "POST", body: JSON.stringify(body) }),
   codexModels: () => request<{ models: CodexSettingsResponse["models"] }>("/api/codex/models"),
   storage: () => request<StorageInfo>("/api/storage"),
   setStorage: (path: string) => request<StorageInfo>("/api/storage", { method: "POST", body: JSON.stringify({ path }) }),

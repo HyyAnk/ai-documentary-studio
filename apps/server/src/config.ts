@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
-import { AppConfigSchema, AudioSettingsInputSchema, CodexSettingsInputSchema, VideoSettingsInputSchema, type AppConfig, type AudioSettingsInput, type CodexSettingsInput, type VideoSettingsInput } from "@studio/shared";
+import { AppConfigSchema, AudioSettingsInputSchema, CodexSettingsInputSchema, ImageSettingsInputSchema, VideoSettingsInputSchema, type AppConfig, type AudioSettingsInput, type CodexSettingsInput, type ImageSettingsInput, type VideoSettingsInput } from "@studio/shared";
 
 export const DEFAULT_CONFIG: AppConfig = {
   video_generation: {
@@ -10,6 +10,10 @@ export const DEFAULT_CONFIG: AppConfig = {
     default_scene_duration_seconds: 6,
     narration_words_per_second: 2.3,
     aspect_ratio: "16:9",
+  },
+  image_generation: {
+    enabled: false,
+    images_per_bundle: 1,
   },
   codex: {
     max_concurrent_tasks: 3,
@@ -41,6 +45,7 @@ export type StorageSettings = {
 const storageSettingsFilename = "storage.local.json";
 const codexSettingsFilename = "codex.local.json";
 const audioSettingsFilename = "audio.local.json";
+const imageSettingsFilename = "image.local.json";
 
 async function readJsonFile(filePath: string): Promise<Record<string, unknown>> {
   try {
@@ -58,16 +63,20 @@ export async function loadConfig(rootDirectory: string): Promise<AppConfig> {
     const raw = await readJsonFile(configPath);
     const local = await readJsonFile(localConfigPath);
     const localAudio = await readJsonFile(path.join(rootDirectory, ".documentary-studio", audioSettingsFilename));
+    const localImage = await readJsonFile(path.join(rootDirectory, ".documentary-studio", imageSettingsFilename));
     const trackedCodex = raw.codex && typeof raw.codex === "object" ? raw.codex as Record<string, unknown> : {};
     const localCodex = local.codex && typeof local.codex === "object" ? local.codex as Record<string, unknown> : {};
     const trackedAudio = raw.audio_generation && typeof raw.audio_generation === "object" ? raw.audio_generation as Record<string, unknown> : {};
     const localAudioSettings = localAudio.audio_generation && typeof localAudio.audio_generation === "object" ? localAudio.audio_generation as Record<string, unknown> : {};
+    const trackedImages = raw.image_generation && typeof raw.image_generation === "object" ? raw.image_generation as Record<string, unknown> : {};
+    const localImageSettings = localImage.image_generation && typeof localImage.image_generation === "object" ? localImage.image_generation as Record<string, unknown> : {};
     return AppConfigSchema.parse({
       ...DEFAULT_CONFIG,
       ...raw,
       video_generation: { ...DEFAULT_CONFIG.video_generation, ...(raw.video_generation as object | undefined) },
       codex: { ...DEFAULT_CONFIG.codex, ...trackedCodex, api_key: "", ...localCodex },
       audio_generation: { ...DEFAULT_CONFIG.audio_generation, ...trackedAudio, ...localAudioSettings },
+      image_generation: { ...DEFAULT_CONFIG.image_generation, ...trackedImages, ...localImageSettings },
     });
   } catch {
     await mkdir(path.dirname(configPath), { recursive: true });
@@ -76,7 +85,9 @@ export async function loadConfig(rootDirectory: string): Promise<AppConfig> {
     const localCodex = local.codex && typeof local.codex === "object" ? local.codex as Record<string, unknown> : {};
     const localAudio = await readJsonFile(path.join(rootDirectory, ".documentary-studio", audioSettingsFilename));
     const localAudioSettings = localAudio.audio_generation && typeof localAudio.audio_generation === "object" ? localAudio.audio_generation as Record<string, unknown> : {};
-    return AppConfigSchema.parse({ ...DEFAULT_CONFIG, codex: { ...DEFAULT_CONFIG.codex, ...localCodex }, audio_generation: { ...DEFAULT_CONFIG.audio_generation, ...localAudioSettings } });
+    const localImage = await readJsonFile(path.join(rootDirectory, ".documentary-studio", imageSettingsFilename));
+    const localImageSettings = localImage.image_generation && typeof localImage.image_generation === "object" ? localImage.image_generation as Record<string, unknown> : {};
+    return AppConfigSchema.parse({ ...DEFAULT_CONFIG, codex: { ...DEFAULT_CONFIG.codex, ...localCodex }, audio_generation: { ...DEFAULT_CONFIG.audio_generation, ...localAudioSettings }, image_generation: { ...DEFAULT_CONFIG.image_generation, ...localImageSettings } });
   }
 }
 
@@ -120,6 +131,22 @@ export async function saveVideoSettings(rootDirectory: string, input: VideoSetti
   await mkdir(path.dirname(configPath), { recursive: true });
   const raw = await readJsonFile(configPath);
   await writeFile(configPath, `${JSON.stringify({ ...raw, video_generation: next }, null, 2)}\n`, "utf8");
+  return loadConfig(rootDirectory);
+}
+
+export async function saveImageSettings(rootDirectory: string, input: ImageSettingsInput): Promise<AppConfig> {
+  const parsed = ImageSettingsInputSchema.parse(input);
+  const settingsDirectory = path.join(rootDirectory, ".documentary-studio");
+  const localPath = path.join(settingsDirectory, imageSettingsFilename);
+  const currentLocal = await readJsonFile(localPath);
+  const currentImage = currentLocal.image_generation && typeof currentLocal.image_generation === "object" ? currentLocal.image_generation as Record<string, unknown> : {};
+  const nextImage = { ...currentImage } as Record<string, unknown>;
+  for (const key of ["enabled", "images_per_bundle"] as const) {
+    const value = parsed[key];
+    if (value !== undefined) nextImage[key] = value;
+  }
+  await mkdir(settingsDirectory, { recursive: true });
+  await writeFile(localPath, `${JSON.stringify({ image_generation: nextImage }, null, 2)}\n`, "utf8");
   return loadConfig(rootDirectory);
 }
 

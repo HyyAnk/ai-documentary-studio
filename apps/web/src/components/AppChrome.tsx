@@ -1,4 +1,4 @@
-import { Broadcast, CaretDown, FilmSlate, Gear, GitBranch, House, Lightbulb, ListChecks, MoonStars, Power, Sun, TerminalWindow, X, CheckCircle, Sparkle, WarningCircle } from "@phosphor-icons/react";
+import { Broadcast, CaretDown, Gear, GitBranch, House, ListChecks, MoonStars, Power, Sun, TerminalWindow, X, CheckCircle, Sparkle, WarningCircle } from "@phosphor-icons/react";
 import type { Channel, CodexSettingsResponse } from "@studio/shared";
 import type { GitInfo, Notice, Page, Theme } from "./types";
 
@@ -6,8 +6,6 @@ export function Sidebar({ page, setPage, activeTaskCount }: { page: Page; setPag
   const items: Array<{ page: Page; label: string; icon: typeof House }> = [
     { page: "dashboard", label: "Dashboard", icon: House },
     { page: "channels", label: "Channels", icon: Broadcast },
-    { page: "topics", label: "Topics", icon: Lightbulb },
-    { page: "episodes", label: "Episodes", icon: FilmSlate },
     { page: "tasks", label: "Tasks", icon: ListChecks },
   ];
   return <aside className="sidebar"><div className="brand-lockup"><div className="brand-mark">AD</div><div><span className="brand-name">Documentary</span><span className="brand-subtitle">Studio</span></div></div><div className="sidebar-rule" /><nav className="primary-nav" aria-label="Primary navigation">{items.map(({ page: itemPage, label, icon: Icon }) => <button key={itemPage} className={`nav-item ${page === itemPage ? "is-active" : ""}`} onClick={() => setPage(itemPage)}><Icon size={18} weight={page === itemPage ? "fill" : "regular"} /><span>{label}</span>{itemPage === "tasks" && activeTaskCount > 0 ? <span className="nav-count">{activeTaskCount}</span> : null}</button>)}<button className={`nav-item mobile-settings-nav ${page === "settings" ? "is-active" : ""}`} aria-label="Settings" onClick={() => setPage("settings")}><Gear size={18} /><span>Settings</span></button></nav><div className="sidebar-bottom"><button className={`nav-item ${page === "settings" ? "is-active" : ""}`} onClick={() => setPage("settings")}><Gear size={18} /><span>Settings</span></button><div className="local-badge"><span className="status-dot" />Local workspace</div></div></aside>;

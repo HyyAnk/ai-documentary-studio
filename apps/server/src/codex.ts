@@ -510,6 +510,7 @@ function extractOpenAiOutput(payload: Record<string, unknown>): string {
       });
     });
     if (text.length) return text.join("");
+    if (JSON.stringify(output).match(/(?:b64_json|base64|data:image|\.png)/i)) return JSON.stringify(output);
   }
   const choices = payload.choices;
   if (Array.isArray(choices)) {

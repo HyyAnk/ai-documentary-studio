@@ -14,6 +14,7 @@ import {
   CreateVoiceInputSchema,
   CreateChannelInputSchema,
   GenerateAllAudioInputSchema,
+  GenerateAllBundleImagesInputSchema,
   EpisodeSettingsInputSchema,
   SaveTextInputSchema,
   SceneSchema,
@@ -22,12 +23,14 @@ import {
   StoragePathInputSchema,
   VoiceReferenceUploadSchema,
   VideoSettingsInputSchema,
+  ImageSettingsInputSchema,
   type AppConfig,
   type StorageInfo,
   type TaskEvent,
+  type Task,
   type TaskType,
 } from "@studio/shared";
-import { loadConfig, loadStorageRoot, saveAudioSettings, saveCodexSettings, saveStorageRoot, saveVideoSettings } from "./config.js";
+import { loadConfig, loadStorageRoot, saveAudioSettings, saveCodexSettings, saveImageSettings, saveStorageRoot, saveVideoSettings } from "./config.js";
 import { CodexAppServerClient } from "./codex.js";
 import { ContextEngine } from "./context.js";
 import { StudioLogger } from "./logger.js";
@@ -37,6 +40,7 @@ import { synthesizeWav } from "./providers/chatterbox.js";
 import { createStoredZip } from "./zip.js";
 import { composeMergedVisualPrompt, mergeEditorialOverlays, optimizeShortScenes } from "./sceneTiming.js";
 import { assessProduction, countWords, extractNarration, extractNarrationChunks, extractNarrationSections } from "./production.js";
+import { parseContinuityBundles } from "./visualBundles.js";
 
 const VOICE_PREVIEW_TEXT = "This is a preview of this narrator voice for AI Documentary Studio.";
 
@@ -72,7 +76,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
   let config = await loadConfig(rootDirectory);
   const codex = new CodexAppServerClient(rootDirectory, config, logger);
   const contextEngine = new ContextEngine(repository, logger);
-  const tasks = new TaskManager(repository, contextEngine, codex, config.codex.max_concurrent_tasks, config.video_generation, logger, config.audio_generation, undefined, config.codex);
+  const tasks = new TaskManager(repository, contextEngine, codex, config.codex.max_concurrent_tasks, config.video_generation, logger, config.audio_generation, undefined, config.codex, config.image_generation);
   await tasks.load();
   const getStorageInfo = (): StorageInfo => ({
     path: repository.storageRoot,
@@ -195,6 +199,13 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     tasks.updateVideoConfig(config.video_generation);
     return { video_generation: config.video_generation };
   });
+  server.post("/api/image/settings", async (request) => {
+    const input = ImageSettingsInputSchema.parse(request.body);
+    if (tasks.hasActiveWork()) throw new RepositoryError("Finish active tasks before changing image settings", "IMAGE_SETTINGS_BUSY");
+    config = await saveImageSettings(rootDirectory, input);
+    tasks.updateImageConfig(config.image_generation);
+    return { image_generation: config.image_generation };
+  });
   server.get("/api/voices", async () => ({ voices: await repository.listVoices() }));
   server.get("/api/voices/:voiceId/sample", async (request, reply) => {
     const file = await repository.getVoiceSampleFile((request.params as { voiceId: string }).voiceId);
@@ -284,6 +295,52 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
   server.get("/api/channels/:channelId/episodes/:episodeId/scenes", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };
     return { scenes: await repository.readScenes(params.channelId, params.episodeId) };
+  });
+  server.get("/api/channels/:channelId/episodes/:episodeId/visual-bible/images", async (request) => {
+    const params = request.params as { channelId: string; episodeId: string };
+    return { images: await repository.listBundleImages(params.channelId, params.episodeId) };
+  });
+  server.post("/api/channels/:channelId/episodes/:episodeId/visual-bible/bundles/:bundleNumber/image", async (request, reply) => {
+    if (!config.image_generation.enabled) throw new RepositoryError("Image generation is disabled in Settings", "IMAGE_GENERATION_DISABLED");
+    const params = request.params as { channelId: string; episodeId: string; bundleNumber: string };
+    const bundleNumber = Number(params.bundleNumber);
+    const visualBible = await repository.getEpisodeFile(params.channelId, params.episodeId, "visual_bible.md");
+    if (!parseContinuityBundles(visualBible.content).some((bundle) => bundle.bundle_number === bundleNumber)) throw new RepositoryError("Continuity bundle was not found", "BUNDLE_NOT_FOUND");
+    const task = tasks.submit("GENERATE_BUNDLE_IMAGE", params.channelId, params.episodeId, bundleNumber);
+    return reply.code(202).send({ task });
+  });
+  server.post("/api/channels/:channelId/episodes/:episodeId/visual-bible/images/generate-all", async (request, reply) => {
+    if (!config.image_generation.enabled) throw new RepositoryError("Image generation is disabled in Settings", "IMAGE_GENERATION_DISABLED");
+    const params = request.params as { channelId: string; episodeId: string };
+    const { force } = GenerateAllBundleImagesInputSchema.parse(request.body ?? {});
+    const visualBible = await repository.getEpisodeFile(params.channelId, params.episodeId, "visual_bible.md");
+    const bundles = parseContinuityBundles(visualBible.content);
+    const existing = await repository.listBundleImages(params.channelId, params.episodeId);
+    const active = tasks.list().filter((task) => task.episode_id === params.episodeId && task.task_type === "GENERATE_BUNDLE_IMAGE" && ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(task.status));
+    const created: Task[] = [];
+    for (const bundle of bundles) {
+      if (active.some((task) => task.scene_number === bundle.bundle_number)) continue;
+      if (force) await repository.clearBundleImages(params.channelId, params.episodeId, bundle.bundle_number);
+      const current = force ? [] : existing.filter((image) => image.bundle_number === bundle.bundle_number);
+      for (let variant = 0; variant < config.image_generation.images_per_bundle; variant += 1) {
+        if (current.some((image) => image.variant === variant)) continue;
+        created.push(tasks.submit("GENERATE_BUNDLE_IMAGE", params.channelId, params.episodeId, bundle.bundle_number));
+      }
+    }
+    return reply.code(202).send({ tasks: created, bundle_count: bundles.length });
+  });
+  server.get("/api/channels/:channelId/episodes/:episodeId/visual-bible/images/download", async (request, reply) => {
+    const params = request.params as { channelId: string; episodeId: string };
+    const episode = await repository.getEpisode(params.channelId, params.episodeId);
+    const images = await repository.listBundleImages(params.channelId, params.episodeId);
+    if (images.length === 0) throw new RepositoryError("No reference images have been generated", "IMAGE_NOT_FOUND");
+    const zip = createStoredZip(await Promise.all(images.map(async (image) => ({ name: image.filename, data: await readFile(image.absolutePath) }))));
+    return reply.headers({ "content-type": "application/zip", "content-disposition": `attachment; filename="${episode.slug}-reference-images.zip"` }).send(zip);
+  });
+  server.get("/api/channels/:channelId/episodes/:episodeId/visual-bible/images/:filename", async (request, reply) => {
+    const params = request.params as { channelId: string; episodeId: string; filename: string };
+    const file = await repository.getBundleImageFile(params.channelId, params.episodeId, params.filename);
+    return reply.headers({ "content-type": "image/png", "content-length": file.size, "last-modified": file.modified_at, "cache-control": "no-store", "content-disposition": `inline; filename="${file.filename}"` }).send(createReadStream(file.absolutePath));
   });
   server.get("/api/channels/:channelId/episodes/:episodeId/production-assessment", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };

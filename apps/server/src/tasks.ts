@@ -19,6 +19,7 @@ import { CodexAppServerClient, type CodexServerRequest } from "./codex.js";
 import { StudioLogger } from "./logger.js";
 import { RepositoryError, RepositoryService } from "./repository.js";
 import { ChatterboxProvider, synthesizeWav, type ChatterboxTarget } from "./providers/chatterbox.js";
+import { CodexImageProvider } from "./providers/codexImage.js";
 import type { AudioProvider } from "./providers/index.js";
 import { optimizeShortScenes, packBeatsIntoScenes, type Beat } from "./sceneTiming.js";
 import { calibratedScriptTargetWords, countWords, extractNarration, extractNarrationChunks, extractNarrationSections, hasHumorPolicyMarker, scriptWordBounds } from "./production.js";
@@ -39,10 +40,12 @@ export class TaskManager extends EventEmitter {
   private readonly pipelineRuns = new Map<string, PipelineRun>();
   private readonly locks = new Set<string>();
   private readonly assemblingEpisodes = new Set<string>();
+  private readonly imageVariants = new Map<string, number>();
   private runningCount = 0;
   private runningAudioCount = 0;
   private readonly activeAudio = new Set<string>();
   private audioConfig: AppConfig["audio_generation"];
+  private imageConfig: AppConfig["image_generation"];
   private videoConfig: Pick<AppConfig["video_generation"], "max_scene_duration_seconds" | "narration_words_per_second">;
   private readonly audioProviderFactory: (target: ChatterboxTarget, config: AppConfig["audio_generation"]) => AudioProvider;
   private codexCleanupConfig: CodexCleanupConfig;
@@ -67,12 +70,14 @@ export class TaskManager extends EventEmitter {
     },
     audioProviderFactory?: (target: ChatterboxTarget, config: AppConfig["audio_generation"]) => AudioProvider,
     codexConfig: CodexCleanupConfig = { auto_delete_threads: true, failed_thread_retention_days: 7 },
+    imageConfig: AppConfig["image_generation"] = { enabled: false, images_per_bundle: 1 },
   ) {
     super();
     this.videoConfig = typeof videoConfigOrMaxSceneDuration === "number"
       ? { max_scene_duration_seconds: videoConfigOrMaxSceneDuration, narration_words_per_second: 2.3 }
       : videoConfigOrMaxSceneDuration;
     this.audioConfig = audioConfig;
+    this.imageConfig = imageConfig;
     this.audioProviderFactory = audioProviderFactory ?? ((target, config) => new ChatterboxProvider(repository, config, target));
     this.codexCleanupConfig = { auto_delete_threads: codexConfig.auto_delete_threads, failed_thread_retention_days: codexConfig.failed_thread_retention_days };
     codex.on("status", (status: typeof this.connectionStatus) => {
@@ -111,6 +116,7 @@ export class TaskManager extends EventEmitter {
   async reload(): Promise<void> {
     if (this.hasActiveWork()) throw new RepositoryError("Finish active tasks before changing storage", "STORAGE_BUSY");
     this.tasks.clear();
+    this.imageVariants.clear();
     this.approvalRequests.clear();
     this.locks.clear();
     this.connectionStatus = this.codex.isConnected ? "connected" : "disconnected";
@@ -126,6 +132,10 @@ export class TaskManager extends EventEmitter {
       max_scene_duration_seconds: config.max_scene_duration_seconds,
       narration_words_per_second: config.narration_words_per_second,
     };
+  }
+
+  updateImageConfig(config: AppConfig["image_generation"]): void {
+    this.imageConfig = config;
   }
 
   updateCodexConfig(config: AppConfig["codex"]): void {
@@ -151,6 +161,10 @@ export class TaskManager extends EventEmitter {
   }
 
   submit(taskType: TaskType, channelId: string, episodeId: string | null, sceneNumber?: number): Task {
+    if (taskType === "GENERATE_BUNDLE_IMAGE" && !this.imageConfig.enabled) throw new RepositoryError("Image generation is disabled in Settings", "IMAGE_GENERATION_DISABLED");
+    const imageVariant = taskType === "GENERATE_BUNDLE_IMAGE" && episodeId && sceneNumber
+      ? this.list().filter((item) => item.task_type === "GENERATE_BUNDLE_IMAGE" && item.episode_id === episodeId && item.scene_number === sceneNumber && ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(item.status)).length % Math.max(1, this.imageConfig.images_per_bundle)
+      : 0;
     const lockKey = taskType === "GENERATE_PIPELINE" && episodeId
       ? `${episodeId}:pipeline`
       : taskType === "GENERATE_SEQUENCE_SCENES" && episodeId && sceneNumber
@@ -179,6 +193,7 @@ export class TaskManager extends EventEmitter {
       progress_message: "Queued",
       scene_number: sceneNumber ?? null,
     });
+    if (taskType === "GENERATE_BUNDLE_IMAGE") this.imageVariants.set(task.task_id, imageVariant);
     this.tasks.set(task.task_id, task);
     void this.persist(task);
     this.emitTask(task);
@@ -190,6 +205,7 @@ export class TaskManager extends EventEmitter {
     const task = this.get(taskId);
     if (task.status === "QUEUED") {
       await this.update(taskId, { status: "CANCELLED", completed_at: nowIso(), progress_message: "Cancelled before start" });
+      this.imageVariants.delete(taskId);
       void this.pump();
       return this.get(taskId);
     }
@@ -254,7 +270,7 @@ export class TaskManager extends EventEmitter {
     const context = { profileId: task.channel_id, workerId: task.task_id, step: "run_task" };
     try {
       await this.update(task.task_id, { status: "RUNNING", started_at: nowIso(), queue_position: null, progress_message: "Preparing scoped context" });
-      const manifest = await this.contextEngine.build(task.task_type, task.channel_id, task.episode_id, this.findSceneNumber(task.task_id));
+      const manifest = await this.contextEngine.build(task.task_type, task.channel_id, task.episode_id, this.findSceneNumber(task.task_id), this.imageVariants.get(task.task_id) ?? 0);
       await this.update(task.task_id, { progress_message: "Connecting to Codex" });
       await this.codex.connect();
       const threadId = task.codex_thread_id ? await this.codex.resumeThread(task.codex_thread_id) : await this.codex.startThread();
@@ -469,9 +485,12 @@ export class TaskManager extends EventEmitter {
     const active = [...this.active.values()].find((run) => (threadId ? run.threadId === threadId : true) && (turnId ? run.turnId === turnId : true));
     if (!active) return;
     if (method === "item/agentMessage/delta") {
-      const delta = typeof params.delta === "string" ? params.delta : "";
+      const delta = typeof params.delta === "string" ? params.delta : params.delta && typeof params.delta === "object" ? JSON.stringify(params.delta) : "";
       active.output += delta;
       void this.update(active.task.task_id, { progress_message: "Receiving output" });
+    } else if (method.startsWith("item/") && method !== "item/started") {
+      active.output += JSON.stringify(params);
+      void this.update(active.task.task_id, { progress_message: "Receiving media output" });
     } else if (method === "turn/completed") {
       const turn = params.turn as { status?: string; error?: { message?: string } } | undefined;
       if (turn?.status === "failed") void this.finish(active.task.task_id, "FAILED", turn.error?.message ?? "Codex turn failed");
@@ -539,6 +558,20 @@ export class TaskManager extends EventEmitter {
         await this.repository.saveEpisodeFile(task.channel_id, task.episode_id!, "visual_bible.md", visualBible);
         await this.repository.updateEpisodeStage(task.channel_id, task.episode_id!, "VISUAL_BIBLE_READY");
         outputFiles = [(await this.repository.getEpisodeFile(task.channel_id, task.episode_id!, "visual_bible.md")).path];
+      } else if (task.task_type === "GENERATE_BUNDLE_IMAGE") {
+        if (!this.imageConfig.enabled) throw new Error("Image generation is disabled in Settings");
+        const bundleNumber = this.findSceneNumber(task.task_id);
+        if (!bundleNumber) throw new Error("Bundle number is required");
+        const provider = new CodexImageProvider(this.repository, {
+          channelId: task.channel_id,
+          episodeId: task.episode_id!,
+          bundleNumber,
+          variant: this.imageVariants.get(task.task_id) ?? 0,
+        }, output);
+        const image = await provider.generateReference(active.manifest.prompt);
+        const bundleId = `CB-${String(bundleNumber).padStart(2, "0")}`;
+        await this.repository.attachBundleReference(task.channel_id, task.episode_id!, bundleId, image.asset_path);
+        outputFiles = [image.asset_path];
       } else if (task.task_type === "GENERATE_SEQUENCE_SCENES") {
         const sequenceNumber = this.findSceneNumber(task.task_id);
         if (!sequenceNumber) throw new Error("Sequence number is required");
@@ -614,6 +647,7 @@ export class TaskManager extends EventEmitter {
     this.completionWaiters.get(taskId)?.();
     this.completionWaiters.delete(taskId);
     await this.update(taskId, { status, error, completed_at: nowIso(), output_files: outputFiles.length ? outputFiles : this.get(taskId).output_files, progress_message: status === "COMPLETED" ? "Completed" : error ?? status, progress_percent: status === "COMPLETED" ? 100 : this.get(taskId).progress_percent });
+    this.imageVariants.delete(taskId);
     const shouldDelete = Boolean(threadId && this.codexCleanupConfig.auto_delete_threads && (status === "COMPLETED" || ((status === "FAILED" || status === "CANCELLED") && this.codexCleanupConfig.failed_thread_retention_days === 0)));
     if (shouldDelete && threadId && await this.tryDeleteThread(threadId)) await this.update(taskId, { codex_thread_id: null });
   }
