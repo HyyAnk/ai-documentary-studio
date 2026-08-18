@@ -35,7 +35,7 @@ import { RepositoryError, RepositoryService } from "./repository.js";
 import { TaskManager } from "./tasks.js";
 import { synthesizeWav } from "./providers/chatterbox.js";
 import { createStoredZip } from "./zip.js";
-import { composeMergedVisualPrompt, optimizeShortScenes } from "./sceneTiming.js";
+import { composeMergedVisualPrompt, mergeEditorialOverlays, optimizeShortScenes } from "./sceneTiming.js";
 import { assessProduction, countWords, extractNarration, extractNarrationChunks, extractNarrationSections } from "./production.js";
 
 const VOICE_PREVIEW_TEXT = "This is a preview of this narrator voice for AI Documentary Studio.";
@@ -320,7 +320,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
       repository.getEpisode(params.channelId, params.episodeId),
       repository.getEpisodeFile(params.channelId, params.episodeId, "script.md"),
     ]);
-    const chunks = extractNarrationChunks(script.content, 60).filter((chunk) => countWords(chunk.text) >= 3);
+    const chunks = extractNarrationChunks(script.content, 60, true).filter((chunk) => countWords(chunk.text) >= 3);
     const paths: string[] = [];
     for (let index = 0; index < chunks.length; index += 1) {
       paths.push((await repository.getEpisodeAudioFile(params.channelId, params.episodeId, `narration-${String(index + 1).padStart(2, "0")}.wav`)).absolutePath);
@@ -374,6 +374,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
       visual_prompt: composeMergedVisualPrompt(current, next),
       transition_note: next.transition_note,
       continuity_note: current.continuity_note,
+      editorial_overlay: mergeEditorialOverlays(current.editorial_overlay, next.editorial_overlay),
       audio_asset_path: null,
       audio_generated_at: null,
       audio_duration_seconds: null,

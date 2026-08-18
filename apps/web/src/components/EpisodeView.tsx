@@ -42,6 +42,7 @@ function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxDuration
   const currentShotBatch = latestShotBatchStartedAt ? sequenceShotTasks.filter((task) => Math.abs(Date.parse(task.created_at) - Date.parse(latestShotBatchStartedAt)) < 5_000) : [];
   const completedShotSequences = currentShotBatch.filter((task) => task.status === "COMPLETED").length;
   const activeEpisodeTask = episodeTasks.find(isTaskActive) ?? null;
+  const pipelineTask = latestTask(episodeTasks, ["GENERATE_PIPELINE"]);
   const [observedTerminalTasks, setObservedTerminalTasks] = useState(() => new Set<string>());
 
   useEffect(() => { if (episode) setDurationDraft(episode.target_duration_minutes); }, [episode?.episode_id, episode?.target_duration_minutes]);
@@ -62,18 +63,6 @@ function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxDuration
     scenes: scenes.length > 0,
     narration: Boolean(episode?.narration_asset_path),
   }), [research, treatment, script, visualBible, scenes.length, episode?.narration_asset_path]);
-
-  const nextTask: { type: Task["task_type"]; label: string } = !readiness.research
-    ? { type: "GENERATE_RESEARCH", label: "Research topic" }
-    : !readiness.treatment
-      ? { type: "GENERATE_TREATMENT", label: "Build treatment" }
-      : !readiness.script
-        ? { type: "GENERATE_SCRIPT", label: "Write script" }
-        : !readiness.visualBible
-          ? { type: "GENERATE_VISUAL_BIBLE", label: "Lock visual identity" }
-          : !readiness.scenes
-            ? { type: "GENERATE_SCENES", label: "Build shot plan" }
-            : { type: "GENERATE_NARRATION", label: readiness.narration ? "Regenerate narration" : "Generate narration" };
 
   const createTask = async (taskType: Task["task_type"], sceneNumber?: number) => {
     if (taskType === "GENERATE_SCENES" && scenes.length > 0 && !window.confirm(`Replace all ${scenes.length} shots and clear their preview audio?`)) return;
@@ -136,9 +125,10 @@ function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxDuration
     <button className="back-button" onClick={onBack}><ArrowLeft size={16} />{channel.display_name}</button>
     <header className="detail-header episode-detail-header">
       <div><p className="eyebrow">Production workspace</p><h1>{episode.topic.title}</h1><p className="detail-copy">{episode.topic.premise}</p></div>
-      <div className="detail-actions"><StageBadge stage={episode.stage} /><label className="duration-target">Target<input aria-label="Target duration in minutes" type="number" min="3" max="60" value={durationDraft} onChange={(event) => setDurationDraft(Number(event.target.value))} onBlur={() => void saveDuration()} />min</label><button className="primary-button" disabled={Boolean(activeEpisodeTask) || busy === nextTask.type} onClick={() => void createTask(nextTask.type)}>{activeEpisodeTask || busy === nextTask.type ? <CircleNotch className="spin" size={16} /> : <Play size={16} />}{activeEpisodeTask ? "Working…" : nextTask.label}</button></div>
+      <div className="detail-actions"><StageBadge stage={episode.stage} /><label className="duration-target">Target<input aria-label="Target duration in minutes" type="number" min="3" max="60" value={durationDraft} onChange={(event) => setDurationDraft(Number(event.target.value))} onBlur={() => void saveDuration()} />min</label><button className="primary-button" disabled={Boolean(activeEpisodeTask) || busy === "GENERATE_PIPELINE"} onClick={() => void createTask("GENERATE_PIPELINE")}>{activeEpisodeTask || busy === "GENERATE_PIPELINE" ? <CircleNotch className="spin" size={16} /> : <Play size={16} />}{activeEpisodeTask ? "Working…" : readiness.narration ? "Run pipeline again" : pipelineTask?.status === "FAILED" ? "Retry pipeline" : "Start production"}</button></div>
     </header>
 
+    {pipelineTask ? <TaskProgressPanel task={pipelineTask} title="Production pipeline" activeLabel="Running the next step" completionLabel="Production pipeline complete" now={episodeClock} progressLabel="Production pipeline progress" /> : null}
     <PipelineRail readiness={readiness} />
     {assessment ? <AssessmentPanel assessment={assessment} /> : null}
 
@@ -171,7 +161,8 @@ function PipelineRail({ readiness }: { readiness: { research: boolean; treatment
 
 function AssessmentPanel({ assessment }: { assessment: ProductionAssessment }) {
   const blockers = assessment.issues.filter((issue) => issue.severity === "blocker");
-  return <section className={`assessment-panel ${assessment.rating}`}><div className="assessment-score"><strong>{assessment.score}</strong><span>Production score</span></div><div className="assessment-summary"><div><h2>{assessment.rating === "production_ready" ? "Production ready" : assessment.rating === "needs_work" ? "Needs review" : "Not ready"}</h2><span>{assessment.metrics.narration_word_count} / {assessment.metrics.target_word_count} words · {assessment.metrics.sequence_count} sequences · {assessment.metrics.scene_count} shots</span></div>{blockers.length ? <details><summary><WarningCircle size={16} />{blockers.length} blocker{blockers.length === 1 ? "" : "s"}</summary><ul>{assessment.issues.map((issue) => <li key={issue.code} className={issue.severity}><strong>{issue.message}</strong><span>{issue.next_action}</span></li>)}</ul></details> : <span className="assessment-ready"><CheckCircle size={16} />Quality gates passed</span>}</div></section>;
+  const targetWords = assessment.metrics.calibrated_word_target_count || assessment.metrics.target_word_count;
+  return <section className={`assessment-panel ${assessment.rating}`}><div className="assessment-score"><strong>{assessment.score}</strong><span>Production score</span></div><div className="assessment-summary"><div><h2>{assessment.rating === "production_ready" ? "Production ready" : assessment.rating === "needs_work" ? "Needs review" : "Not ready"}</h2><span>{assessment.metrics.narration_word_count} / {targetWords} calibrated words · {assessment.metrics.sequence_count} sequences · {assessment.metrics.scene_count} shots · {Math.round((assessment.metrics.overlay_coverage_ratio ?? 0) * 100)}% overlays</span></div>{blockers.length ? <details><summary><WarningCircle size={16} />{blockers.length} blocker{blockers.length === 1 ? "" : "s"}</summary><ul>{assessment.issues.map((issue) => <li key={issue.code} className={issue.severity}><strong>{issue.message}</strong><span>{issue.next_action}</span></li>)}</ul></details> : <span className="assessment-ready"><CheckCircle size={16} />Quality gates passed</span>}</div></section>;
 }
 
 function ArtifactPanel({ filename, title, taskType, active, complete, content, setContent, task, now, disabled, saving, defaultOpen, onGenerate, onSave }: { filename: ArtifactName; title: string; taskType: Task["task_type"]; active: string; complete: string; content: string; setContent: (value: string) => void; task: Task | null; now: number; disabled: boolean; saving: boolean; defaultOpen: boolean; onGenerate: () => void; onSave: (content: string) => void }) {
@@ -199,6 +190,7 @@ function taskLabel(type: Task["task_type"]): string {
     GENERATE_SCRIPT: "Write",
     GENERATE_VISUAL_BIBLE: "Build",
     GENERATE_SCENES: "Generate shots",
+    GENERATE_PIPELINE: "Start production",
     GENERATE_NARRATION: "Generate narration",
     GENERATE_AUDIO: "Generate preview",
   };

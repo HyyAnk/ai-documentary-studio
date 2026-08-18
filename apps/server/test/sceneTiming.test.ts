@@ -7,6 +7,16 @@ const beat = (dialogue: string, continuity_key: string): Beat => ({
   continuity_key,
   transition_note: "",
   continuity_note: `Keep ${continuity_key} continuity`,
+  sequence_id: "sequence-1",
+  sequence_title: "Sequence 1",
+  shot_id: `shot-${continuity_key}`,
+  asset_type: "ai_reconstruction",
+  continuity_bundle_id: "CB-01",
+  reference_asset_ids: [],
+  source_ids: ["C01"],
+  reconstruction: true,
+  sound_cue: "",
+  editorial_overlay: { kind: "none", text: "", motion: "none", placement: "lower_third", duration_seconds: null, data: [], source_ids: [] },
 });
 
 describe("scene timing", () => {
@@ -43,5 +53,12 @@ describe("scene timing", () => {
     expect(scenes.length).toBeGreaterThan(1);
     expect(scenes.every((scene) => scene.duration_seconds <= 4)).toBe(true);
     expect(scenes.map((scene) => scene.dialogue).join(" ")).toBe(dialogue);
+  });
+
+  it("keeps editorial overlays separate from the footage prompt", () => {
+    const scenes = packBeatsIntoScenes([{ ...beat("In 1956 the program changed", "timeline"), editorial_overlay: { kind: "timeline", text: "1956 — Firebird II", motion: "draw_on", placement: "upper_left", duration_seconds: 3, data: [], source_ids: ["C01"] } }], 8, 2.3, "episode_1");
+
+    expect(scenes[0].visual_prompt).not.toContain("AI VISUALIZATION");
+    expect(scenes[0].editorial_overlay).toMatchObject({ kind: "timeline", text: "1956 — Firebird II", motion: "draw_on" });
   });
 });

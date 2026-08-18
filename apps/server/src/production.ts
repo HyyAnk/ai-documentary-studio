@@ -1,11 +1,37 @@
 import {
   ProductionAssessmentSchema,
+  SceneSchema,
   type Episode,
   type ProductionAssessment,
   type Scene,
 } from "@studio/shared";
 
 const WORD_PATTERN = /[\p{L}\p{N}]+(?:[’'-][\p{L}\p{N}]+)*/gu;
+const AUDIO_CUE_PATTERN = /<!--\s*AUDIO[_ -]?CUE\s*:\s*(chuckle|laugh)\s*-->/gi;
+const PARALINGUISTIC_TAG_PATTERN = /\[(?:chuckle|laugh)\]/gi;
+export const HUMOR_POLICY_MARKER = "<!-- HUMOR_POLICY: v1 -->";
+
+export function hasHumorPolicyMarker(markdown: string): boolean {
+  return /<!--\s*HUMOR[_ -]?POLICY\s*:\s*v1\s*-->/i.test(markdown);
+}
+
+// A duration target is more useful than the historical word-count default once a
+// real narrator pace is known. Keep the gate permissive enough for natural
+// documentary phrasing while still catching scripts that would materially miss
+// the requested runtime.
+export const SCRIPT_WORD_TOLERANCE = 0.2;
+
+export function calibratedScriptTargetWords(episode: Pick<Episode, "target_duration_minutes" | "measured_narration_words_per_second">, fallbackWordsPerSecond: number): number {
+  const pace = episode.measured_narration_words_per_second ?? fallbackWordsPerSecond;
+  return Math.max(1, Math.round(episode.target_duration_minutes * 60 * Math.max(0.1, pace)));
+}
+
+export function scriptWordBounds(targetWords: number): { lower: number; upper: number } {
+  return {
+    lower: Math.floor(targetWords * (1 - SCRIPT_WORD_TOLERANCE)),
+    upper: Math.ceil(targetWords * (1 + SCRIPT_WORD_TOLERANCE)),
+  };
+}
 
 export function extractNarration(markdown: string): string {
   return markdown
@@ -19,17 +45,26 @@ export function extractNarration(markdown: string): string {
     .trim();
 }
 
-export function extractNarrationSections(markdown: string): Array<{ title: string; text: string }> {
+/**
+ * Returns narration with supported audio cues restored as Chatterbox tags.
+ * The normal narration extractor intentionally removes the HTML comments so
+ * scripts, shot plans, and word counts stay clean.
+ */
+export function extractNarrationForAudio(markdown: string): string {
+  return extractNarration(markdown.replace(AUDIO_CUE_PATTERN, (_match, cue: string) => ` [${cue.toLowerCase()}] `));
+}
+
+export function extractNarrationSections(markdown: string, includeAudioCues = false): Array<{ title: string; text: string }> {
   const sections = markdown.split(/^(?=##\s+)/gm).map((value) => value.trim()).filter(Boolean);
   const parsed = sections.map((section, index) => {
     const title = section.match(/^##\s+(.+)$/m)?.[1]?.trim() ?? `Section ${index + 1}`;
-    return { title, text: extractNarration(section) };
+    return { title, text: includeAudioCues ? extractNarrationForAudio(section) : extractNarration(section) };
   }).filter((section) => section.text.length > 0);
-  return parsed.length ? parsed : [{ title: "Narration", text: extractNarration(markdown) }];
+  return parsed.length ? parsed : [{ title: "Narration", text: includeAudioCues ? extractNarrationForAudio(markdown) : extractNarration(markdown) }];
 }
 
-export function extractNarrationChunks(markdown: string, maxWords = 70): Array<{ title: string; text: string }> {
-  return extractNarrationSections(markdown).flatMap((section) => {
+export function extractNarrationChunks(markdown: string, maxWords = 70, includeAudioCues = false): Array<{ title: string; text: string }> {
+  return extractNarrationSections(markdown, includeAudioCues).flatMap((section) => {
     const chunks = splitAtNarrativeBoundaries(section.text, maxWords);
     if (chunks.length > 1 && countWords(chunks[chunks.length - 1]) < 25 && countWords(chunks[chunks.length - 2]) + countWords(chunks[chunks.length - 1]) <= maxWords + 15) {
       chunks.splice(chunks.length - 2, 2, `${chunks[chunks.length - 2]} ${chunks[chunks.length - 1]}`.trim());
@@ -42,7 +77,7 @@ export function extractNarrationChunks(markdown: string, maxWords = 70): Array<{
 }
 
 export function countWords(value: string): number {
-  return value.match(WORD_PATTERN)?.length ?? 0;
+  return value.replace(/<!--[\s\S]*?-->/g, " ").replace(PARALINGUISTIC_TAG_PATTERN, " ").match(WORD_PATTERN)?.length ?? 0;
 }
 
 export function splitAtNarrativeBoundaries(dialogue: string, maxWords: number): string[] {
@@ -99,7 +134,8 @@ export function assessProduction(input: {
   scenes: Scene[];
   fallbackWordsPerSecond: number;
 }): ProductionAssessment {
-  const { episode, research, treatment, visualBible, script, scenes } = input;
+  const { episode, research, treatment, visualBible, script, scenes: inputScenes } = input;
+  const scenes = inputScenes.map((scene) => SceneSchema.parse(scene));
   const narration = extractNarration(script);
   const narrationWords = countWords(narration);
   const pace = episode.measured_narration_words_per_second ?? input.fallbackWordsPerSecond;
@@ -113,6 +149,7 @@ export function assessProduction(input: {
   const continuityCoverageRatio = ratio(scenes.filter((scene) => scene.continuity_bundle_id.trim() && scene.continuity_note.trim()).length, scenes.length);
   const sourceCoverageRatio = ratio(scenes.filter((scene) => scene.asset_type === "transition" || scene.source_ids.length > 0).length, scenes.length);
   const narrationCoverageRatio = wordCoverage(narration, scenes.map((scene) => scene.dialogue).join(" "));
+  const overlayCoverageRatio = ratio(scenes.filter((scene) => scene.editorial_overlay.kind !== "none").length, scenes.length);
   const issues: ProductionAssessment["issues"] = [];
   let score = 100;
   const add = (code: string, severity: "blocker" | "warning" | "info", message: string, nextAction: string, penalty: number, sceneNumbers: number[] = []) => {
@@ -124,8 +161,10 @@ export function assessProduction(input: {
   const treatmentSequenceCount = Math.max(new Set(treatment.match(/\bSequence\s+\d+\b/gi) ?? []).size, (treatment.match(/\bTime budget\b/gi) ?? []).length);
   if (!treatment.trim() || treatmentSequenceCount < 5) add("treatment_structure", "blocker", "The treatment does not define at least five timed sequences.", "Generate a treatment before writing the script.", 12);
   if (!visualBible.trim() || !/continuity bundle/i.test(visualBible)) add("visual_bible", "blocker", "The visual bible has no continuity bundles.", "Generate the visual bible and define reusable identity locks.", 12);
-  const wordRatio = narrationWords / Math.max(1, episode.target_word_count);
-  if (wordRatio < 0.88 || wordRatio > 1.12) add("script_length", "blocker", `Narration is ${narrationWords} words against a ${episode.target_word_count}-word target.`, "Regenerate or edit the script within ±12% of the word target.", 15);
+  if (script.trim() && !hasHumorPolicyMarker(script)) add("humor_policy", "warning", "This script predates the current humor policy and has not been reviewed for restrained humor or audio cues.", "Regenerate the script once to apply the current documentary humor layer.", 2);
+  const calibratedTargetWords = calibratedScriptTargetWords(episode, input.fallbackWordsPerSecond);
+  const bounds = scriptWordBounds(calibratedTargetWords);
+  if (narrationWords < bounds.lower || narrationWords > bounds.upper) add("script_length", "blocker", `Narration is ${narrationWords} words against a calibrated ${calibratedTargetWords}-word target (${episode.target_duration_minutes} minutes at ${pace.toFixed(2)} words/sec).`, `Regenerate or edit the script to stay within ${Math.round(SCRIPT_WORD_TOLERANCE * 100)}% of the calibrated word target.`, 15);
   if (factualAnchorCount < 6) add("factual_density", "blocker", `The script contains only ${factualAnchorCount} measurable factual anchors.`, "Add dated events, named programs, figures, decisions, and claim IDs from research.", 15);
   if (scenes.length === 0) add("scene_plan", "blocker", "No production shots exist.", "Generate the shot breakdown after the visual bible is ready.", 25);
   if (scenes.length > 0 && sequenceCount < 5) add("sequence_count", "warning", `The breakdown uses ${sequenceCount} sequence${sequenceCount === 1 ? "" : "s"}.`, "Organize the documentary into at least five purposeful sequences.", 8);
@@ -136,6 +175,9 @@ export function assessProduction(input: {
   if (narrationCoverageRatio < 0.975) add("narration_coverage", "blocker", `${(narrationCoverageRatio * 100).toFixed(1)}% of script words are represented in the shot timeline.`, "Regenerate the affected sequence without paraphrasing or omitting narration.", 15);
   const types = new Set(scenes.map((scene) => scene.asset_type));
   if (scenes.length && types.size < 3) add("visual_mix", "warning", `The plan uses only ${types.size} visual asset type${types.size === 1 ? "" : "s"}.`, "Mix evidence, diagrams, maps, contemporary footage, and reconstruction where appropriate.", 6);
+  if (scenes.length && (overlayCoverageRatio < 0.2 || overlayCoverageRatio > 0.35)) add("overlay_coverage", "warning", `Editorial overlays cover ${Math.round(overlayCoverageRatio * 100)}% of shots; the target range is 25–30%.`, "Use restrained captions, timelines, charts, or map callouts on only the explanatory shots.", 4);
+  const invalidChartOverlays = scenes.filter((scene) => ["bar_chart", "line_chart"].includes(scene.editorial_overlay.kind) && scene.editorial_overlay.data.length < 2).map((scene) => scene.scene_number);
+  if (invalidChartOverlays.length) add("overlay_data", "warning", `${invalidChartOverlays.length} chart overlay${invalidChartOverlays.length === 1 ? "" : "s"} lack at least two sourced data points.`, "Replace the chart with a caption or provide two or more research-backed data points.", Math.min(4, invalidChartOverlays.length), invalidChartOverlays);
   if (!episode.narration_asset_path) add("narration_audio", "info", "Production narration has not been generated.", "Generate sequence narration to calibrate the real timeline.", 3);
   if (episode.narration_duration_seconds) {
     const durationDeltaRatio = Math.abs(episode.narration_duration_seconds - targetDurationSeconds) / targetDurationSeconds;
@@ -156,6 +198,7 @@ export function assessProduction(input: {
       estimated_narration_seconds: Number(estimatedNarrationSeconds.toFixed(1)),
       narration_word_count: narrationWords,
       target_word_count: episode.target_word_count,
+      calibrated_word_target_count: calibratedTargetWords,
       scene_count: scenes.length,
       sequence_count: sequenceCount,
       unique_prompt_ratio: uniquePromptRatio,
@@ -163,6 +206,7 @@ export function assessProduction(input: {
       continuity_coverage_ratio: continuityCoverageRatio,
       source_coverage_ratio: sourceCoverageRatio,
       narration_coverage_ratio: narrationCoverageRatio,
+      overlay_coverage_ratio: overlayCoverageRatio,
       factual_anchor_count: factualAnchorCount,
       research_source_count: researchSourceCount,
     },

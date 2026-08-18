@@ -94,12 +94,14 @@ describe("scene markdown", () => {
       scene_number: 1,
       duration_seconds: 6,
       dialogue: "A clear line.",
-      visual_prompt: "A specific shot.",
+      visual_prompt: "A specific shot. Lower-left label: RECONSTRUCTION — AI VISUALIZATION. Lower-right: FACT — C01.",
       transition_note: "Cut on motion.",
       continuity_note: "Same room.",
+      editorial_overlay: { kind: "caption", text: "1939 — Futurama", motion: "fade_up", placement: "lower_third", duration_seconds: 2.5, data: [], source_ids: ["C01"] },
     }]);
     const scenes = parseScenes(markdown, "episode_1");
-    expect(scenes[0]).toMatchObject({ duration_seconds: 6, dialogue: "A clear line.", visual_prompt: "A specific shot.", continuity_note: "Same room." });
+    expect(scenes[0]).toMatchObject({ duration_seconds: 6, dialogue: "A clear line.", continuity_note: "Same room.", editorial_overlay: { kind: "caption", text: "1939 — Futurama", motion: "fade_up" } });
+    expect(scenes[0].visual_prompt).not.toContain("AI VISUALIZATION");
   });
 
   it("invalidates audio only when dialogue changes", async () => {

@@ -12,6 +12,8 @@ The model reacts to what can be seen and measured, not mood words.
 
 Plain, concrete, instruction-style language. Fewer precise words beat many vague ones. Positive phrasing only — state the target, never what to avoid.
 
+The visual prompt is a footage prompt, not a graphics or post-production instruction. Keep captions, labels, logos, UI, charts, source IDs, and AI/reconstruction disclosure out of it. Use the shot's separate `editorial_overlay` metadata when a title, number, timeline, map callout, comparison, or chart should be added in the edit.
+
 ## Shot plan & timing
 
 Every scene fits inside one fixed duration budget (`beat_duration_seconds` from config — currently the value shown in Settings). Two modes:

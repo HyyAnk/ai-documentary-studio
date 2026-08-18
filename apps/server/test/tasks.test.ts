@@ -164,6 +164,35 @@ describe("TaskManager locks", () => {
     expect(manager.get("task_old_thread").codex_thread_id).toBeNull();
     expect(fake.deletedThreads).toEqual(["thread_old"]);
   });
+
+  it("runs the one-click pipeline and skips artifacts that are already ready", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "documentary-pipeline-tasks-"));
+    roots.push(root);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await mkdir(path.join(root, "shared"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
+    const repository = new RepositoryService(root);
+    const channel = await repository.createChannel({ name: "Pipeline Channel", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });
+    const topics = Array.from({ length: 5 }, (_, index) => ({ topic_id: `pipeline_topic_${index}`, channel_id: channel.channel_id, title: `Pipeline Topic ${index}`, premise: "Premise", why_it_fits: "Fits", hook: "Hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false }));
+    await repository.saveTopicRun(channel.channel_id, topics);
+    const episode = await repository.confirmTopic(channel.channel_id, topics[0].topic_id);
+    for (const filename of ["research.md", "treatment.md", "visual_bible.md"]) await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, filename, `# ${filename}\nReady artifact`);
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "script.md", "# script\n\n<!-- HUMOR_POLICY: v1 -->\nReady artifact");
+    await repository.saveScenes(channel.channel_id, episode.episode_id, [{ scene_id: "pipeline_scene_1", episode_id: episode.episode_id, scene_number: 1, duration_seconds: 6, dialogue: "Ready dialogue", visual_prompt: "CAMERA\nReady\nACTION\nReady\nLIGHTING\nReady\nATMOSPHERE\nReady\nCONTINUITY\nReady", transition_note: "", continuity_note: "Ready continuity", sequence_id: "sequence-1", sequence_title: "Sequence 1", shot_id: "shot-1", asset_type: "ai_reconstruction", continuity_bundle_id: "CB-01", reference_asset_ids: [], source_ids: [], reconstruction: true, sound_cue: "", editorial_overlay: { kind: "none" }, audio_asset_path: null, audio_generated_at: null, audio_duration_seconds: null }]);
+    const narrationPath = await repository.writeNarrationAudio(channel.channel_id, episode.episode_id, new Uint8Array([1, 2, 3]));
+    await repository.saveNarrationMetadata(channel.channel_id, episode.episode_id, narrationPath, 10, 1, 20);
+    const logger = new StudioLogger(root);
+    await logger.init();
+    const fake = new FakeCodex();
+    const manager = new TaskManager(repository, new ContextEngine(repository, logger), fake as never, 1, 8, logger);
+    await manager.load();
+    const pipeline = manager.submit("GENERATE_PIPELINE", channel.channel_id, episode.episode_id);
+    await waitFor(() => manager.get(pipeline.task_id).status === "COMPLETED");
+    expect(manager.get(pipeline.task_id).progress_percent).toBe(100);
+    expect(manager.get(pipeline.task_id).progress_message).toBe("Completed");
+    expect(fake.maxActiveTurns).toBe(0);
+  });
 });
 
 async function waitFor(predicate: () => boolean): Promise<void> {

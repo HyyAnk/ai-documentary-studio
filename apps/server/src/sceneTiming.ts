@@ -1,4 +1,4 @@
-import type { Scene } from "@studio/shared";
+import { EditorialOverlaySchema, type Scene } from "@studio/shared";
 import { splitAtNarrativeBoundaries } from "./production.js";
 
 export type Beat = {
@@ -16,6 +16,7 @@ export type Beat = {
   source_ids: string[];
   reconstruction: boolean;
   sound_cue: string;
+  editorial_overlay: Scene["editorial_overlay"];
 };
 
 export type PackedBeat = Beat & { estSeconds: number };
@@ -51,6 +52,7 @@ export function packBeatsIntoScenes(beats: Beat[], maxDuration: number, wordsPer
           dialogue: chunk,
           shot_id: `${beat.shot_id || "shot"}-${chunkIndex + 1}`,
           visual_prompt: continuationPrompt(beat.visual_prompt, chunkIndex, chunks.length),
+          editorial_overlay: chunkIndex === 0 ? beat.editorial_overlay : EditorialOverlaySchema.parse({}),
           estSeconds: Math.min(safeMaxDuration, estimateSpokenSeconds(chunk, wordsPerSecond)),
         }]);
       }
@@ -151,6 +153,7 @@ function mergeProductionScenes(first: Scene, second: Scene): Scene {
     source_ids: [...new Set([...first.source_ids, ...second.source_ids])],
     reconstruction: first.reconstruction || second.reconstruction,
     sound_cue: [first.sound_cue, second.sound_cue].filter(Boolean).join("; "),
+    editorial_overlay: mergeEditorialOverlays(first.editorial_overlay, second.editorial_overlay),
     audio_asset_path: null,
     audio_generated_at: null,
     audio_duration_seconds: null,
@@ -189,10 +192,27 @@ function finalizeScene(group: PackedBeat[], sceneNumber: number, episodeId: stri
     source_ids: [...new Set(group.flatMap((beat) => beat.source_ids))],
     reconstruction: group.some((beat) => beat.reconstruction),
     sound_cue: group.map((beat) => beat.sound_cue).filter(Boolean).join("; "),
+    editorial_overlay: group.map((beat) => beat.editorial_overlay).reduce(mergeEditorialOverlays, EditorialOverlaySchema.parse({})),
     audio_asset_path: null,
     audio_generated_at: null,
     audio_duration_seconds: null,
   };
+}
+
+export function mergeEditorialOverlays(first: Scene["editorial_overlay"], second: Scene["editorial_overlay"]): Scene["editorial_overlay"] {
+  const left = EditorialOverlaySchema.parse(first ?? {});
+  const right = EditorialOverlaySchema.parse(second ?? {});
+  if (left.kind === "none") return right;
+  if (right.kind === "none") return left;
+  return EditorialOverlaySchema.parse({
+    kind: left.kind === right.kind ? left.kind : "comparison",
+    text: [left.text, right.text].filter(Boolean).join(" · "),
+    motion: left.motion !== "none" ? left.motion : right.motion,
+    placement: left.placement,
+    duration_seconds: left.duration_seconds ?? right.duration_seconds,
+    data: [...left.data, ...right.data],
+    source_ids: [...new Set([...left.source_ids, ...right.source_ids])],
+  });
 }
 
 function continuationPrompt(prompt: string, index: number, count: number): string {

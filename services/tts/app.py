@@ -4,6 +4,7 @@ import io
 import logging
 import math
 import os
+import re
 import threading
 from typing import Optional
 
@@ -52,12 +53,21 @@ class MergeRequest(BaseModel):
 
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-MODEL: Optional[ChatterboxTTS] = None
+MODEL: Optional[object] = None
 MODEL_ERROR: Optional[str] = None
+# Turbo is the production default because narration scripts can contain native
+# [chuckle]/[laugh] cues. Keep the environment override for troubleshooting or
+# compatibility, but never silently fall back to the cue-less model by default.
+MODEL_KIND = "turbo" if os.getenv("CHATTERBOX_MODEL", "turbo").strip().lower() == "turbo" else "original"
+MODEL_SUPPORTS_PARALINGUISTICS = MODEL_KIND == "turbo"
 
-logger.info("Starting Chatterbox sidecar device=%s model=ChatterboxTTS mode=local", DEVICE, extra={"step": "startup"})
+logger.info("Starting Chatterbox sidecar device=%s model=%s paralinguistic_tags=%s mode=local", DEVICE, MODEL_KIND, MODEL_SUPPORTS_PARALINGUISTICS, extra={"step": "startup"})
 try:
-    MODEL = ChatterboxTTS.from_pretrained(device=DEVICE)
+    if MODEL_KIND == "turbo":
+        from chatterbox.tts_turbo import ChatterboxTurboTTS
+        MODEL = ChatterboxTurboTTS.from_pretrained(device=DEVICE)
+    else:
+        MODEL = ChatterboxTTS.from_pretrained(device=DEVICE)
     logger.info("Chatterbox model loaded", extra={"step": "load_model"})
 except Exception as error:  # pragma: no cover - depends on local model and hardware
     MODEL_ERROR = str(error)
@@ -71,8 +81,17 @@ async def health() -> JSONResponse:
     ready = MODEL is not None
     return JSONResponse(
         status_code=200 if ready else 503,
-        content={"status": "ok" if ready else "loading", "model_loaded": ready, "device": DEVICE, "error": MODEL_ERROR},
+        content={"status": "ok" if ready else "loading", "model_loaded": ready, "device": DEVICE, "model": MODEL_KIND, "paralinguistic_tags": MODEL_SUPPORTS_PARALINGUISTICS, "error": MODEL_ERROR},
     )
+
+
+def prepare_text(text: str) -> str:
+    if MODEL_SUPPORTS_PARALINGUISTICS:
+        return text
+    # The original and multilingual Chatterbox tokenizers do not support the
+    # Turbo paralinguistic vocabulary. Remove cues instead of letting them be
+    # read aloud as literal words.
+    return re.sub(r"\s{2,}", " ", re.sub(r"\[(?:chuckle|laugh)\]", "", text, flags=re.IGNORECASE)).strip()
 
 
 def synthesize(request: SynthesizeRequest) -> bytes:
@@ -83,7 +102,7 @@ def synthesize(request: SynthesizeRequest) -> bytes:
         reference = None
     with torch.inference_mode():
         waveform = MODEL.generate(
-            request.text,
+            prepare_text(request.text),
             audio_prompt_path=reference,
             exaggeration=request.exaggeration,
             cfg_weight=request.cfg_weight,

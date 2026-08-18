@@ -304,8 +304,9 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
 .scene-card-header { min-height: 53px; padding: 0 17px; border-bottom: 1px solid var(--line); }
 .scene-number { color: var(--accent-deep); font: 500 10px "DM Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
 .shot-sequence { max-width: 180px; overflow: hidden; color: var(--ink); font-size: 10px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-.shot-type, .continuity-badge { padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); font: 500 8px "DM Mono", monospace; text-transform: uppercase; white-space: nowrap; }
+.shot-type, .continuity-badge, .overlay-badge { padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); font: 500 8px "DM Mono", monospace; text-transform: uppercase; white-space: nowrap; }
 .continuity-badge { color: var(--accent-deep); }
+.overlay-badge { border-color: color-mix(in srgb, var(--accent) 38%, var(--line)); color: var(--accent-deep); }
 .scene-cut-badge { color: var(--accent-deep); font: 600 9px "DM Mono", monospace; white-space: nowrap; }
 .duration-input { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--muted); font-size: 10px; }
 .duration-input input { width: 44px; padding: 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); color: var(--ink); font: 500 10px "DM Mono", monospace; text-align: center; }
@@ -350,6 +351,11 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
 .shot-metadata-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; padding: 0 14px 14px; }
 .shot-metadata-grid label { display: grid; gap: 6px; color: var(--muted); font-size: 9px; font-weight: 600; }
 .shot-metadata-grid input, .shot-metadata-grid select { min-width: 0; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink); font: 500 9px "DM Mono", monospace; }
+.editorial-overlay-editor { margin: 0 14px 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.editorial-overlay-editor .block-heading { padding: 0 0 10px; }
+.editorial-overlay-editor .shot-metadata-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 0; }
+.editorial-overlay-editor .overlay-text-field { grid-column: span 2; }
+.field-hint { color: var(--muted); font-size: 8px; font-weight: 400; }
 .task-table { border-bottom: 1px solid var(--line); }
 .task-row { min-height: 70px; }
 .task-status-label { background: var(--soft-muted); color: var(--muted); }
@@ -522,6 +528,8 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
   .shot-sequence { order: 2; max-width: calc(100% - 80px); }
   .shot-type, .continuity-badge { order: 3; }
   .shot-metadata-grid { grid-template-columns: 1fr; }
+  .editorial-overlay-editor .shot-metadata-grid { grid-template-columns: 1fr; }
+  .editorial-overlay-editor .overlay-text-field { grid-column: auto; }
   .inline-task-state { grid-template-columns: auto minmax(0, 1fr) auto; }
   .inline-task-state > span:nth-child(3) { display: none; }
   .duration-input { margin-left: 0; }

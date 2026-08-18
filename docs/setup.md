@@ -6,7 +6,7 @@ Use [`run dashboard.bat`](../run%20dashboard.bat) as the normal launcher. It che
 
 1. creates `services/tts/.venv` when needed;
 2. installs Chatterbox, PyTorch, FastAPI, and Uvicorn once;
-3. starts the local Chatterbox sidecar on `127.0.0.1:8890`;
+3. starts the local Chatterbox Turbo sidecar on `127.0.0.1:8890` with native `[chuckle]`/`[laugh]` support;
 4. waits for the model to finish loading;
 5. starts the dashboard only after audio is ready.
 
@@ -34,7 +34,16 @@ cd services/tts
 .venv/Scripts/python -m uvicorn app:app --host 127.0.0.1 --port 8890
 ```
 
-Check `http://127.0.0.1:8890/health`. It returns ready only after the model is loaded. The Node server talks to this service over loopback HTTP; it never imports Python packages directly.
+Check `http://127.0.0.1:8890/health`. It returns ready only after the Turbo model is loaded and `paralinguistic_tags` is enabled. The Node server talks to this service over loopback HTTP; it never imports Python packages directly.
+
+Narration scripts may contain invisible `AUDIO_CUE` comments for restrained chuckles or laughs. The one-click launcher enables the English Turbo model automatically, so no extra command is required. For manual startup, use:
+
+```powershell
+$env:CHATTERBOX_MODEL = "turbo"
+.\services\tts\.venv\Scripts\python -m uvicorn app:app --host 127.0.0.1 --port 8890
+```
+
+Turbo supports `[chuckle]` and `[laugh]`; the launcher also restarts an already-running cue-less sidecar when needed. The health endpoint reports `paralinguistic_tags: true` when Turbo is active.
 
 Audio settings are available in Settings. The service URL, Chatterbox controls, and optional per-channel WAV voice reference are stored locally. Voice references and generated WAV files stay in the selected content storage folder, which is ignored by Git.
 

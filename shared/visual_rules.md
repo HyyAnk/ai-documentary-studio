@@ -12,5 +12,8 @@
 - Every shot belongs to a named treatment sequence and a continuity bundle from the episode visual bible.
 - Use a documentary evidence mix. Archive, documents, maps, diagrams, contemporary material, and reconstruction should each appear only when they advance the argument.
 - Link every non-transition shot to claim/source IDs. A reconstruction inherits the evidence IDs supporting what it depicts.
+- Keep provenance and editorial graphics out of `visual_prompt`: never ask the video model to render captions, labels, logos, UI, charts, source IDs, or an AI/reconstruction disclosure. Store them in `editorial_overlay` for the edit layer.
+- Use `editorial_overlay.kind: none` for most shots. Across a complete episode, target roughly 25–30% overlay coverage. Prefer captions/timelines for dates and named programs, stat cards for sourced numbers, charts only for two or more sourced data points, and map callouts for geography.
+- Motion should be restrained and purposeful: fade-up for captions, slide-in for lower thirds, draw-on for timelines/charts, count-up for numeric values, and highlight for comparisons.
 - Repeated subjects, vehicles, locations, graphics, and era details must use the same reference asset IDs and continuity bundle.
 - Exact duplicate prompts are invalid unless the shot is explicitly marked as a held continuation with a new visible action and framing.

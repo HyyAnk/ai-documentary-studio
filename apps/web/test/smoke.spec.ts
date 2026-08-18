@@ -179,5 +179,5 @@ test("scene audio updates inline and exposes the duration match action", async (
   await expect(page.getByLabel("Shot 1 preview audio")).toBeVisible();
   await expect(page.getByText("Preview is 2.0s longer", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "Match", exact: true }).click();
-  await expect(page.locator(".scene-card input[type=number]")).toHaveValue("8");
+  await expect(page.getByRole("spinbutton", { name: "Duration sec" })).toHaveValue("8");
 });

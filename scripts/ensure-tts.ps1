@@ -13,6 +13,7 @@ $requirements = Join-Path $ttsRoot "requirements.txt"
 $runtimeRoot = Join-Path $project ".documentary-studio\logs"
 $worker = "main"
 $profile = "tts"
+$desiredModel = "turbo"
 
 New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
 
@@ -115,6 +116,27 @@ function Get-TtsHealth {
   }
 }
 
+function Stop-TtsListener {
+  $connections = Get-NetTCPConnection -LocalPort 8890 -State Listen -ErrorAction SilentlyContinue
+  foreach ($connection in $connections) {
+    Write-Log "WARN" "restart" "Stopping existing Chatterbox process $($connection.OwningProcess) so Turbo can be enabled"
+    Stop-Process -Id $connection.OwningProcess -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Restore-EnvironmentValue {
+  param(
+    [string]$Name,
+    [AllowNull()][string]$Value
+  )
+
+  if ($null -eq $Value) {
+    Remove-Item "Env:$Name" -ErrorAction SilentlyContinue
+  } else {
+    Set-Item "Env:$Name" $Value
+  }
+}
+
 Write-Log "STEP" "startup" "Preparing local Chatterbox runtime"
 $launcher = Ensure-Python
 if ($null -eq $launcher) { exit 1 }
@@ -155,19 +177,35 @@ if ($importExitCode -ne 0) {
 }
 
 $health = Get-TtsHealth
+if ($health.Seen -and ($null -eq $health.Payload -or $health.Payload.model -ne $desiredModel -or $health.Payload.paralinguistic_tags -ne $true)) {
+  $activeModel = if ($null -ne $health.Payload -and $health.Payload.model) { $health.Payload.model } else { "unknown" }
+  Write-Log "WARN" "model" "Existing Chatterbox sidecar is $activeModel; switching to Turbo with native laughter cues"
+  Stop-TtsListener
+  for ($attempt = 1; $attempt -le 15; $attempt++) {
+    if (-not (Get-TtsHealth).Seen) { break }
+    Start-Sleep -Milliseconds 200
+  }
+  $health = Get-TtsHealth
+}
 if (-not $health.Seen) {
-  Write-Log "STEP" "launch" "Starting Chatterbox sidecar on 127.0.0.1:8890"
+  Write-Log "STEP" "launch" "Starting Chatterbox Turbo sidecar on 127.0.0.1:8890"
   $stdout = Join-Path $runtimeRoot "tts.stdout.log"
   $stderr = Join-Path $runtimeRoot "tts.stderr.log"
-  Start-Process -FilePath $ttsPython -ArgumentList @("-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", "8890") -WorkingDirectory $ttsRoot -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr | Out-Null
+  $previousModel = $env:CHATTERBOX_MODEL
+  $env:CHATTERBOX_MODEL = $desiredModel
+  try {
+    Start-Process -FilePath $ttsPython -ArgumentList @("-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", "8890") -WorkingDirectory $ttsRoot -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr | Out-Null
+  } finally {
+    Restore-EnvironmentValue "CHATTERBOX_MODEL" $previousModel
+  }
 } else {
-  Write-Log "INFO" "launch" "Chatterbox sidecar is already responding; waiting for model readiness"
+  Write-Log "INFO" "launch" "Chatterbox Turbo sidecar is already responding; waiting for model readiness"
 }
 
 for ($attempt = 1; $attempt -le 300; $attempt++) {
   $health = Get-TtsHealth
-  if ($health.Ready) {
-    Write-Log "OK" "health" "Chatterbox model is ready"
+  if ($health.Ready -and $null -ne $health.Payload -and $health.Payload.model -eq $desiredModel -and $health.Payload.paralinguistic_tags -eq $true) {
+    Write-Log "OK" "health" "Chatterbox Turbo is ready with native laughter cues"
     exit 0
   }
   if ($attempt -eq 1 -or $attempt % 15 -eq 0) {

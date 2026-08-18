@@ -27,6 +27,8 @@ The sidecar loads `ChatterboxTTS` once at startup and exposes:
 - `GET /health` for readiness checks;
 - `POST /synthesize` with dialogue, optional voice reference, `exaggeration`, and `cfg_weight`, returning `audio/wav` bytes.
 
+Narration-only `<!-- AUDIO_CUE: chuckle -->` and `<!-- AUDIO_CUE: laugh -->` comments are converted to native tags by the default Chatterbox Turbo sidecar. The launcher sets `CHATTERBOX_MODEL=turbo` and automatically replaces a cue-less sidecar if one is already running. `GET /health` reports the active model and `paralinguistic_tags` capability.
+
 Audio failures are mapped to the plain-language task error `Audio service unavailable`; the browser does not receive a Python traceback. Audio tasks have no `codex_thread_id` or `codex_turn_id`.
 
 Future interfaces remain reserved for `VideoProvider.generateScene`, `ImageProvider.generateReference`, and `ResearchProvider.search`. A Google Veo adapter can be added behind `VideoProvider` without adding provider-specific parameters to the episode UI.

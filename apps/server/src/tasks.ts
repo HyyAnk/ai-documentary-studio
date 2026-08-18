@@ -2,6 +2,7 @@ import { readFile, readdir, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { EventEmitter } from "node:events";
 import {
+  EditorialOverlaySchema,
   TaskSchema,
   type AppConfig,
   type ContextManifest,
@@ -20,10 +21,12 @@ import { RepositoryError, RepositoryService } from "./repository.js";
 import { ChatterboxProvider, synthesizeWav, type ChatterboxTarget } from "./providers/chatterbox.js";
 import type { AudioProvider } from "./providers/index.js";
 import { optimizeShortScenes, packBeatsIntoScenes, type Beat } from "./sceneTiming.js";
-import { countWords, extractNarration, extractNarrationChunks, extractNarrationSections } from "./production.js";
+import { calibratedScriptTargetWords, countWords, extractNarration, extractNarrationChunks, extractNarrationSections, hasHumorPolicyMarker, scriptWordBounds } from "./production.js";
+import { stripEditorialOverlayInstructions } from "./visualPrompt.js";
 
 type ActiveRun = { task: Task; threadId: string; turnId: string; output: string; manifest: ContextManifest };
 type CodexCleanupConfig = { auto_delete_threads: boolean; failed_thread_retention_days: number };
+type PipelineRun = { cancelled: boolean; children: Set<string> };
 
 const channelTaskTypes = new Set<TaskType>(["GENERATE_DNA", "SUGGEST_TOPICS"]);
 const audioTaskTypes = new Set<TaskType>(["GENERATE_AUDIO", "GENERATE_NARRATION"]);
@@ -33,6 +36,7 @@ export class TaskManager extends EventEmitter {
   private readonly active = new Map<string, ActiveRun>();
   private readonly approvalRequests = new Map<number, { taskId: string; request: CodexServerRequest }>();
   private readonly completionWaiters = new Map<string, () => void>();
+  private readonly pipelineRuns = new Map<string, PipelineRun>();
   private readonly locks = new Set<string>();
   private readonly assemblingEpisodes = new Set<string>();
   private runningCount = 0;
@@ -143,14 +147,19 @@ export class TaskManager extends EventEmitter {
   }
 
   hasActiveWork(): boolean {
-    return this.active.size > 0 || this.activeAudio.size > 0 || this.runningCount > 0 || this.runningAudioCount > 0 || this.list().some((task) => ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(task.status));
+    return this.active.size > 0 || this.activeAudio.size > 0 || this.pipelineRuns.size > 0 || this.runningCount > 0 || this.runningAudioCount > 0 || this.list().some((task) => ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(task.status));
   }
 
   submit(taskType: TaskType, channelId: string, episodeId: string | null, sceneNumber?: number): Task {
-    const lockKey = taskType === "GENERATE_SEQUENCE_SCENES" && episodeId && sceneNumber
+    const lockKey = taskType === "GENERATE_PIPELINE" && episodeId
+      ? `${episodeId}:pipeline`
+      : taskType === "GENERATE_SEQUENCE_SCENES" && episodeId && sceneNumber
       ? `${episodeId}:sequence:${sceneNumber}`
       : channelTaskTypes.has(taskType) ? channelId : episodeId;
     if (!lockKey) throw new RepositoryError("Episode is required for this task", "EPISODE_REQUIRED");
+    if (taskType === "GENERATE_PIPELINE" && this.list().some((item) => item.lock_key === lockKey && ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(item.status))) {
+      throw new RepositoryError("Production pipeline is already running for this episode", "PIPELINE_ACTIVE");
+    }
     const existingQueue = this.list().filter((task) => task.lock_key === lockKey && task.status === "QUEUED").length;
     const task = TaskSchema.parse({
       task_id: makeId("task"),
@@ -191,6 +200,12 @@ export class TaskManager extends EventEmitter {
       await this.finish(taskId, "CANCELLED", "Cancelled by user");
     } else if (this.activeAudio.has(taskId)) {
       await this.finish(taskId, "CANCELLED", "Cancelled by user");
+    } else {
+      const pipeline = this.pipelineRuns.get(taskId);
+      if (pipeline) {
+        pipeline.cancelled = true;
+        await Promise.all([...pipeline.children].map((childId) => this.cancel(childId).catch(() => undefined)));
+      }
     }
     return this.get(taskId);
   }
@@ -210,10 +225,11 @@ export class TaskManager extends EventEmitter {
       const next = this.list().reverse().find((task) => task.status === "QUEUED" && !audioTaskTypes.has(task.task_type) && !this.locks.has(task.lock_key));
       if (!next) break;
       this.locks.add(next.lock_key);
-      this.runningCount += 1;
+      const isPipeline = next.task_type === "GENERATE_PIPELINE";
+      if (!isPipeline) this.runningCount += 1;
       void this.run(next).finally(() => {
         this.locks.delete(next.lock_key);
-        this.runningCount -= 1;
+        if (!isPipeline) this.runningCount -= 1;
         void this.pump();
       });
     }
@@ -231,6 +247,10 @@ export class TaskManager extends EventEmitter {
   }
 
   private async run(task: Task): Promise<void> {
+    if (task.task_type === "GENERATE_PIPELINE") {
+      await this.runPipelineTask(task);
+      return;
+    }
     const context = { profileId: task.channel_id, workerId: task.task_id, step: "run_task" };
     try {
       await this.update(task.task_id, { status: "RUNNING", started_at: nowIso(), queue_position: null, progress_message: "Preparing scoped context" });
@@ -247,6 +267,113 @@ export class TaskManager extends EventEmitter {
     } catch (error) {
       await this.finish(task.task_id, "FAILED", error instanceof Error ? error.message : "Task failed");
       this.logger.error("Codex task failed", { ...context, step: "run_task" });
+    }
+  }
+
+  private async runPipelineTask(task: Task): Promise<void> {
+    if (!task.episode_id) {
+      await this.finish(task.task_id, "FAILED", "Episode is required for the production pipeline");
+      return;
+    }
+    const run: PipelineRun = { cancelled: false, children: new Set() };
+    this.pipelineRuns.set(task.task_id, run);
+    const episodeId = task.episode_id;
+    const step = async (label: string, percent: number, childType: TaskType, shouldRun: () => Promise<boolean>): Promise<boolean> => {
+      if (run.cancelled) throw new Error("Pipeline cancelled");
+      await this.update(task.task_id, { progress_message: label, progress_percent: percent });
+      if (!(await shouldRun())) return false;
+      const child = this.submit(childType, task.channel_id, episodeId);
+      run.children.add(child.task_id);
+      try {
+        const completed = await this.waitForTaskTerminal(child.task_id, run);
+        if (completed.status !== "COMPLETED") throw new Error(`${label} failed: ${completed.error ?? completed.status}`);
+      } finally {
+        run.children.delete(child.task_id);
+      }
+      return true;
+    };
+    try {
+      await this.update(task.task_id, { status: "RUNNING", started_at: nowIso(), queue_position: null, progress_message: "Starting production pipeline", progress_percent: 0 });
+      const researchChanged = await step("Research · verifying sources", 5, "GENERATE_RESEARCH", async () => !(await this.hasReadyArtifact(task.channel_id, episodeId, "research.md")));
+      const treatmentChanged = await step("Treatment · structuring the story", 20, "GENERATE_TREATMENT", async () => !(await this.hasReadyArtifact(task.channel_id, episodeId, "treatment.md")));
+      const scriptChanged = await step("Narration script · writing the argument", 35, "GENERATE_SCRIPT", async () => !(await this.hasReadyScript(task.channel_id, episodeId)));
+      const visualBibleChanged = await step("Visual bible · locking continuity", 50, "GENERATE_VISUAL_BIBLE", async () => !(await this.hasReadyArtifact(task.channel_id, episodeId, "visual_bible.md")));
+      const upstreamChanged = researchChanged || treatmentChanged || scriptChanged || visualBibleChanged;
+
+      const scenes = await this.repository.readScenes(task.channel_id, episodeId);
+      if (run.cancelled) throw new Error("Pipeline cancelled");
+      const shotPlanFresh = await this.isShotPlanFresh(task.channel_id, episodeId);
+      const regenerateShots = scenes.length === 0 || upstreamChanged || !shotPlanFresh;
+      await this.update(task.task_id, { progress_message: regenerateShots ? "Shot plan · generating sequences" : "Shot plan · already ready", progress_percent: 60 });
+      if (regenerateShots) {
+        const script = await this.repository.getEpisodeFile(task.channel_id, episodeId, "script.md");
+        const sections = extractNarrationSections(script.content);
+        if (sections.length === 0) throw new Error("Shot plan failed: a completed script is required");
+        await this.repository.backupEpisodeFile(task.channel_id, episodeId, "scene_plan.md");
+        await this.repository.clearSequenceDrafts(episodeId);
+        const children = sections.map((_, index) => this.submit("GENERATE_SEQUENCE_SCENES", task.channel_id, episodeId, index + 1));
+        children.forEach((child) => run.children.add(child.task_id));
+        try {
+          await Promise.all(children.map(async (child) => {
+            const result = await this.waitForTaskTerminal(child.task_id, run);
+            if (result.status !== "COMPLETED") throw new Error(`Shot plan failed: ${result.error ?? result.status}`);
+            return result;
+          }));
+        } catch (error) {
+          await Promise.all(children.map((child) => this.cancel(child.task_id).catch(() => undefined)));
+          throw error;
+        } finally {
+          children.forEach((child) => run.children.delete(child.task_id));
+        }
+      }
+
+      if (run.cancelled) throw new Error("Pipeline cancelled");
+      await this.update(task.task_id, { progress_message: "Narration · generating the master voice track", progress_percent: 88 });
+      const episode = await this.repository.getEpisode(task.channel_id, episodeId);
+      if (upstreamChanged || !episode.narration_asset_path) {
+        const child = this.submit("GENERATE_NARRATION", task.channel_id, episodeId);
+        run.children.add(child.task_id);
+        try {
+          const completed = await this.waitForTaskTerminal(child.task_id, run);
+          if (completed.status !== "COMPLETED") throw new Error(`Narration failed: ${completed.error ?? completed.status}`);
+        } finally {
+          run.children.delete(child.task_id);
+        }
+      }
+      await this.finish(task.task_id, "COMPLETED", null, []);
+    } catch (error) {
+      const cancelled = run.cancelled || (error instanceof Error && error.message === "Pipeline cancelled");
+      await this.finish(task.task_id, cancelled ? "CANCELLED" : "FAILED", cancelled ? "Cancelled by user" : error instanceof Error ? error.message : "Production pipeline failed");
+    } finally {
+      this.pipelineRuns.delete(task.task_id);
+    }
+  }
+
+  private async hasReadyArtifact(channelId: string, episodeId: string, filename: string): Promise<boolean> {
+    const file = await this.repository.getEpisodeFile(channelId, episodeId, filename);
+    return !isPlaceholderArtifact(file.content);
+  }
+
+  private async hasReadyScript(channelId: string, episodeId: string): Promise<boolean> {
+    const file = await this.repository.getEpisodeFile(channelId, episodeId, "script.md");
+    return !isPlaceholderArtifact(file.content) && hasHumorPolicyMarker(file.content);
+  }
+
+  private async isShotPlanFresh(channelId: string, episodeId: string): Promise<boolean> {
+    const [script, scenePlan] = await Promise.all([
+      this.repository.getEpisodeFile(channelId, episodeId, "script.md"),
+      this.repository.getEpisodeFile(channelId, episodeId, "scene_plan.md"),
+    ]);
+    if (!script.modified_at || !scenePlan.modified_at) return false;
+    return Date.parse(scenePlan.modified_at) >= Date.parse(script.modified_at);
+  }
+
+  private async waitForTaskTerminal(taskId: string, run: PipelineRun): Promise<Task> {
+    while (true) {
+      if (run.cancelled) throw new Error("Pipeline cancelled");
+      const task = this.get(taskId);
+      if (["COMPLETED", "FAILED", "CANCELLED"].includes(task.status)) return task;
+      await new Promise((resolve) => setTimeout(resolve, 150));
     }
   }
 
@@ -290,7 +417,7 @@ export class TaskManager extends EventEmitter {
   private async runNarrationTask(task: Task): Promise<void> {
     if (!task.episode_id) throw new RepositoryError("Episode is required", "EPISODE_REQUIRED");
     const script = await this.repository.getEpisodeFile(task.channel_id, task.episode_id, "script.md");
-    const sections = extractNarrationChunks(script.content, 60).filter((section) => countWords(section.text) >= 3);
+    const sections = extractNarrationChunks(script.content, 60, true).filter((section) => countWords(section.text) >= 3);
     if (sections.length === 0) throw new RepositoryError("A completed script is required before narration", "SCRIPT_REQUIRED");
     const channel = await this.repository.getChannel(task.channel_id);
     const episode = await this.repository.getEpisode(task.channel_id, task.episode_id);
@@ -402,7 +529,7 @@ export class TaskManager extends EventEmitter {
       } else if (task.task_type === "GENERATE_SCRIPT") {
         const script = extractMarkdown(output, "# Script");
         const episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
-        validateScript(script, episode.target_word_count);
+        validateScript(script, calibratedScriptTargetWords(episode, this.videoConfig.narration_words_per_second));
         await this.repository.saveEpisodeFile(task.channel_id, task.episode_id!, "script.md", script);
         await this.repository.updateEpisodeStage(task.channel_id, task.episode_id!, "SCRIPT_READY");
         outputFiles = [`${(await this.repository.getEpisodeFile(task.channel_id, task.episode_id!, "script.md")).path}`];
@@ -599,7 +726,7 @@ export function parseBeatsOutput(output: string): Beat[] {
   return list.map((item, index) => {
     const beat = item as Record<string, unknown>;
     const dialogue = String(beat.dialogue ?? "").trim();
-    const visualPrompt = String(beat.visual_prompt ?? beat.video_prompt ?? "").trim();
+    const visualPrompt = stripEditorialOverlayInstructions(String(beat.visual_prompt ?? beat.video_prompt ?? "").trim());
     if (!dialogue) throw new Error(`Codex beat ${index + 1} is missing dialogue`);
     if (!visualPrompt) throw new Error(`Codex beat ${index + 1} is missing visual_prompt`);
     return {
@@ -617,6 +744,7 @@ export function parseBeatsOutput(output: string): Beat[] {
       source_ids: parseStringList(beat.source_ids),
       reconstruction: typeof beat.reconstruction === "boolean" ? beat.reconstruction : String(beat.asset_type ?? "").toLowerCase() === "ai_reconstruction",
       sound_cue: String(beat.sound_cue ?? "").trim(),
+      editorial_overlay: parseEditorialOverlay(beat.editorial_overlay),
     };
   });
 }
@@ -647,7 +775,7 @@ function parseRegeneration(output: string): Partial<Scene> {
   const raw = parseJson(output) as Record<string, unknown>;
   return {
     dialogue: typeof raw.dialogue === "string" ? raw.dialogue : undefined,
-    visual_prompt: typeof raw.visual_prompt === "string" ? raw.visual_prompt : typeof raw.video_prompt === "string" ? raw.video_prompt : undefined,
+    visual_prompt: typeof raw.visual_prompt === "string" ? stripEditorialOverlayInstructions(raw.visual_prompt) : typeof raw.video_prompt === "string" ? stripEditorialOverlayInstructions(raw.video_prompt) : undefined,
     transition_note: typeof raw.transition_note === "string" ? raw.transition_note : undefined,
     continuity_note: typeof raw.continuity_note === "string" ? raw.continuity_note : undefined,
     asset_type: raw.asset_type === undefined ? undefined : parseAssetType(raw.asset_type),
@@ -656,7 +784,24 @@ function parseRegeneration(output: string): Partial<Scene> {
     source_ids: raw.source_ids === undefined ? undefined : parseStringList(raw.source_ids),
     reconstruction: typeof raw.reconstruction === "boolean" ? raw.reconstruction : undefined,
     sound_cue: typeof raw.sound_cue === "string" ? raw.sound_cue : undefined,
+    editorial_overlay: raw.editorial_overlay === undefined ? undefined : parseEditorialOverlay(raw.editorial_overlay),
   };
+}
+
+function parseEditorialOverlay(value: unknown): Beat["editorial_overlay"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return EditorialOverlaySchema.parse({});
+  const raw = value as Record<string, unknown>;
+  const kinds = ["none", "caption", "stat_card", "timeline", "bar_chart", "line_chart", "map_callout", "comparison", "quote"] as const;
+  const motions = ["none", "fade_up", "slide_in", "draw_on", "count_up", "highlight"] as const;
+  const placements = ["lower_third", "upper_left", "upper_right", "center", "side_panel"] as const;
+  const kind = kinds.includes(String(raw.kind ?? "none") as typeof kinds[number]) ? String(raw.kind ?? "none") : "none";
+  const motion = motions.includes(String(raw.motion ?? "none") as typeof motions[number]) ? String(raw.motion ?? "none") : "none";
+  const placement = placements.includes(String(raw.placement ?? "lower_third") as typeof placements[number]) ? String(raw.placement ?? "lower_third") : "lower_third";
+  const data = Array.isArray(raw.data)
+    ? raw.data.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item)).map((item) => ({ label: String(item.label ?? "").trim(), value: typeof item.value === "number" ? item.value : String(item.value ?? "").trim(), unit: String(item.unit ?? "").trim() })).filter((item) => item.label && item.value !== "")
+    : [];
+  const duration = typeof raw.duration_seconds === "number" && Number.isFinite(raw.duration_seconds) ? Math.max(0.1, Math.min(20, raw.duration_seconds)) : null;
+  return EditorialOverlaySchema.parse({ kind, text: String(raw.text ?? "").trim(), motion, placement, duration_seconds: duration, data, source_ids: parseStringList(raw.source_ids) });
 }
 
 function parseWavDuration(buffer: Uint8Array): number {
@@ -699,8 +844,9 @@ function validateTreatment(markdown: string): void {
 function validateScript(markdown: string, targetWords: number): void {
   const narration = extractNarration(markdown);
   const words = countWords(narration);
-  const ratio = words / Math.max(1, targetWords);
-  if (ratio < 0.88 || ratio > 1.12) throw new Error(`Script quality gate failed: ${words} words is outside ±12% of the ${targetWords}-word target`);
+  if (!hasHumorPolicyMarker(markdown)) throw new Error("Script quality gate failed: HUMOR_POLICY v1 marker is missing; regenerate the script with the current documentary humor layer");
+  const bounds = scriptWordBounds(targetWords);
+  if (words < bounds.lower || words > bounds.upper) throw new Error(`Script quality gate failed: ${words} words is outside ±20% of the calibrated ${targetWords}-word target (${bounds.lower}–${bounds.upper} words)`);
   const anchors = new Set([
     ...(narration.match(/\b(?:18|19|20)\d{2}\b/g) ?? []),
     ...(markdown.match(/\bC\d{2,}\b/g) ?? []),
@@ -731,6 +877,10 @@ function validateBeatOutput(beats: Beat[], minimumSequences = 5): void {
   if (incomplete.length > Math.max(1, Math.floor(beats.length * 0.05))) throw new Error(`Shot-plan quality gate failed: ${incomplete.length} prompts lack structure or continuity metadata`);
   const sourced = beats.filter((beat) => beat.asset_type === "transition" || beat.source_ids.length > 0).length / beats.length;
   if (sourced < 0.75) throw new Error(`Shot-plan quality gate failed: only ${Math.round(sourced * 100)}% of shots carry source IDs`);
+  const overlayCoverage = beats.filter((beat) => beat.editorial_overlay.kind !== "none").length / beats.length;
+  if (overlayCoverage > 0.45) throw new Error(`Shot-plan quality gate failed: editorial overlays cover ${Math.round(overlayCoverage * 100)}% of beats; keep overlays selective and below 45%`);
+  const invalidCharts = beats.filter((beat) => ["bar_chart", "line_chart"].includes(beat.editorial_overlay.kind) && beat.editorial_overlay.data.length < 2);
+  if (invalidCharts.length) throw new Error("Shot-plan quality gate failed: charts require at least two sourced data points");
 }
 
 function validateNarrationCoverage(script: string, beats: Beat[], threshold: number): void {
@@ -745,4 +895,9 @@ function validateNarrationCoverage(script: string, beats: Beat[], threshold: num
   }
   const coverage = expected.length ? matched / expected.length : 0;
   if (coverage < threshold) throw new Error(`Shot-plan quality gate failed: narration coverage is ${(coverage * 100).toFixed(1)}%; at least ${(threshold * 100).toFixed(1)}% is required`);
+}
+
+function isPlaceholderArtifact(content: string): boolean {
+  const value = content.trim();
+  return !value || /(?:has not started|generation has not started|breakdown has not started)/i.test(value);
 }

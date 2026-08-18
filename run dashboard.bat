@@ -14,7 +14,8 @@ set "C_ERROR=!ESC![1;31m"
 set "C_STEP=!ESC![1;34m"
 set "C_DEBUG=!ESC![2m"
 
-call :log INFO T:setup startup "root=!ROOT! | profiles=1 | mode=local | concurrency=3 | automation=process+HTTP | storage=local-only"
+set "CHATTERBOX_MODEL=turbo"
+call :log INFO T:setup startup "root=!ROOT! | profiles=1 | mode=local | concurrency=3 | automation=process+HTTP | audio=chatterbox-turbo | storage=local-only"
 call :log STEP T:setup dependencies "Checking Node.js, Corepack, pnpm, and workspace packages"
 
 where node >nul 2>nul
@@ -95,7 +96,7 @@ if errorlevel 1 (
 )
 call :log OK T:setup install "Workspace dependencies ready"
 
-call :log STEP T:setup audio "Preparing Chatterbox TTS runtime and waiting for model readiness"
+call :log STEP T:setup audio "Preparing Chatterbox Turbo TTS runtime and waiting for native laughter support"
 powershell -NoProfile -ExecutionPolicy Bypass -File "!ROOT!\scripts\ensure-tts.ps1" -ProjectRoot "!ROOT!"
 if errorlevel 1 (
   call :log ERROR T:setup audio "Chatterbox could not be prepared. Dashboard startup stopped so Generate Audio is not silently unavailable"
