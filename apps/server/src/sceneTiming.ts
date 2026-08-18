@@ -138,6 +138,17 @@ export function optimizeShortScenes(scenes: Scene[], maxDuration: number, episod
     if (canMergePrevious && previous) result[result.length - 1] = mergeProductionScenes(previous, current);
     else result.push(current);
   }
+
+  for (let index = 0; index < result.length - 1; index += 1) {
+    const current = result[index];
+    const next = result[index + 1];
+    if (current.duration_seconds >= 2.5 || current.sequence_id !== next.sequence_id || current.continuity_bundle_id !== next.continuity_bundle_id) continue;
+    const transferable = Math.min(2.5 - current.duration_seconds, Math.max(0, next.duration_seconds - 2.5));
+    if (transferable <= 0) continue;
+    result[index] = { ...current, duration_seconds: Number((current.duration_seconds + transferable).toFixed(1)) };
+    result[index + 1] = { ...next, duration_seconds: Number((next.duration_seconds - transferable).toFixed(1)) };
+  }
+
   return result.map((scene, index) => ({ ...scene, scene_id: `${episodeId}_scene_${index + 1}`, scene_number: index + 1 }));
 }
 
@@ -213,6 +224,40 @@ export function mergeEditorialOverlays(first: Scene["editorial_overlay"], second
     data: [...left.data, ...right.data],
     source_ids: [...new Set([...left.source_ids, ...right.source_ids])],
   });
+}
+
+/** Keep explanatory graphics useful without letting overlays dominate the edit. */
+export function rebalanceEditorialOverlays(scenes: Scene[], maxRatio = 0.30): Scene[] {
+  const overlayScenes = scenes.filter((scene) => scene.editorial_overlay.kind !== "none");
+  const maximum = Math.floor(scenes.length * Math.max(0, Math.min(1, maxRatio)));
+  if (overlayScenes.length <= maximum) return scenes;
+
+  const remove = new Set<number>();
+  const seenCaptions = new Set<string>();
+  for (const scene of overlayScenes) {
+    if (remove.size >= overlayScenes.length - maximum) break;
+    if (scene.editorial_overlay.kind === "caption" && seenCaptions.has(scene.sequence_id)) remove.add(scene.scene_number);
+    else if (scene.editorial_overlay.kind === "caption") seenCaptions.add(scene.sequence_id);
+  }
+
+  if (remove.size < overlayScenes.length - maximum) {
+    const lowPriority = overlayScenes
+      .filter((scene) => !remove.has(scene.scene_number) && scene.editorial_overlay.kind === "comparison")
+      .sort((left, right) => right.scene_number - left.scene_number);
+    for (const scene of lowPriority) {
+      if (remove.size >= overlayScenes.length - maximum) break;
+      remove.add(scene.scene_number);
+    }
+  }
+
+  if (remove.size < overlayScenes.length - maximum) {
+    for (const scene of overlayScenes) {
+      if (remove.size >= overlayScenes.length - maximum) break;
+      remove.add(scene.scene_number);
+    }
+  }
+
+  return scenes.map((scene) => remove.has(scene.scene_number) ? { ...scene, editorial_overlay: EditorialOverlaySchema.parse({}) } : scene);
 }
 
 function continuationPrompt(prompt: string, index: number, count: number): string {

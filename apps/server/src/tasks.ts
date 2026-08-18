@@ -22,7 +22,7 @@ import { ChatterboxProvider, synthesizeWav, type ChatterboxTarget } from "./prov
 import { CodexImageProvider } from "./providers/codexImage.js";
 import { ShopAiKeyImageProvider } from "./providers/shopAiKeyImage.js";
 import type { AudioProvider } from "./providers/index.js";
-import { optimizeShortScenes, packBeatsIntoScenes, type Beat } from "./sceneTiming.js";
+import { optimizeShortScenes, packBeatsIntoScenes, rebalanceEditorialOverlays, type Beat } from "./sceneTiming.js";
 import { calibratedScriptTargetWords, countWords, extractNarration, extractNarrationChunks, extractNarrationSections, hasHumorPolicyMarker, scriptWordBounds } from "./production.js";
 import { stripEditorialOverlayInstructions } from "./visualPrompt.js";
 import { parseContinuityBundles } from "./visualBundles.js";
@@ -42,6 +42,7 @@ export class TaskManager extends EventEmitter {
   private readonly pipelineRuns = new Map<string, PipelineRun>();
   private readonly locks = new Set<string>();
   private readonly assemblingEpisodes = new Set<string>();
+  private readonly activeImageControllers = new Map<string, AbortController>();
   private readonly imageVariants = new Map<string, number>();
   private runningCount = 0;
   private runningAudioCount = 0;
@@ -119,6 +120,7 @@ export class TaskManager extends EventEmitter {
     if (this.hasActiveWork()) throw new RepositoryError("Finish active tasks before changing storage", "STORAGE_BUSY");
     this.tasks.clear();
     this.imageVariants.clear();
+    this.activeImageControllers.clear();
     this.approvalRequests.clear();
     this.locks.clear();
     this.connectionStatus = this.codex.isConnected ? "connected" : "disconnected";
@@ -171,6 +173,8 @@ export class TaskManager extends EventEmitter {
       ? `${episodeId}:pipeline`
       : taskType === "GENERATE_SEQUENCE_SCENES" && episodeId && sceneNumber
       ? `${episodeId}:sequence:${sceneNumber}`
+      : taskType === "GENERATE_BUNDLE_IMAGE" && episodeId && sceneNumber
+      ? `${episodeId}:bundle:${sceneNumber}:variant:${imageVariant}`
       : channelTaskTypes.has(taskType) ? channelId : episodeId;
     if (!lockKey) throw new RepositoryError("Episode is required for this task", "EPISODE_REQUIRED");
     if (taskType === "GENERATE_PIPELINE" && this.list().some((item) => item.lock_key === lockKey && ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(item.status))) {
@@ -217,6 +221,10 @@ export class TaskManager extends EventEmitter {
       await this.codex.interruptTurn(active.threadId, active.turnId).catch(() => undefined);
       await this.finish(taskId, "CANCELLED", "Cancelled by user");
     } else if (this.activeAudio.has(taskId)) {
+      await this.finish(taskId, "CANCELLED", "Cancelled by user");
+    } else if (this.activeImageControllers.has(taskId)) {
+      await this.update(taskId, { status: "CANCELLED", progress_message: "Interrupting image generation" });
+      this.activeImageControllers.get(taskId)?.abort();
       await this.finish(taskId, "CANCELLED", "Cancelled by user");
     } else {
       const pipeline = this.pipelineRuns.get(taskId);
@@ -269,6 +277,10 @@ export class TaskManager extends EventEmitter {
       await this.runPipelineTask(task);
       return;
     }
+    if (task.task_type === "GENERATE_BUNDLE_IMAGE" && ShopAiKeyImageProvider.isConfigured()) {
+      await this.runShopAiKeyImageTask(task);
+      return;
+    }
     const context = { profileId: task.channel_id, workerId: task.task_id, step: "run_task" };
     try {
       await this.update(task.task_id, { status: "RUNNING", started_at: nowIso(), queue_position: null, progress_message: "Preparing scoped context" });
@@ -285,6 +297,37 @@ export class TaskManager extends EventEmitter {
     } catch (error) {
       await this.finish(task.task_id, "FAILED", error instanceof Error ? error.message : "Task failed");
       this.logger.error("Codex task failed", { ...context, step: "run_task" });
+    }
+  }
+
+  private async runShopAiKeyImageTask(task: Task): Promise<void> {
+    const context = { profileId: task.channel_id, workerId: task.task_id, step: "run_image" };
+    const controller = new AbortController();
+    this.activeImageControllers.set(task.task_id, controller);
+    try {
+      await this.update(task.task_id, { status: "RUNNING", started_at: nowIso(), queue_position: null, progress_message: "Preparing continuity context", progress_percent: 10 });
+      if (!task.episode_id) throw new RepositoryError("Episode is required", "EPISODE_REQUIRED");
+      const bundleNumber = this.findSceneNumber(task.task_id);
+      if (!bundleNumber) throw new RepositoryError("Bundle number is required", "BUNDLE_REQUIRED");
+      const manifest = await this.contextEngine.build(task.task_type, task.channel_id, task.episode_id, bundleNumber, this.imageVariants.get(task.task_id) ?? 0);
+      await this.update(task.task_id, { progress_message: "Generating continuity image", progress_percent: 35 });
+      const image = await new ShopAiKeyImageProvider(this.repository, {
+        channelId: task.channel_id,
+        episodeId: task.episode_id,
+        bundleNumber,
+        variant: this.imageVariants.get(task.task_id) ?? 0,
+      }).generateReference(manifest.prompt, controller.signal);
+      const bundleId = `CB-${String(bundleNumber).padStart(2, "0")}`;
+      await this.repository.attachBundleReference(task.channel_id, task.episode_id, bundleId, image.asset_path);
+      await this.update(task.task_id, { progress_message: "Saving continuity image", progress_percent: 90 });
+      await this.finish(task.task_id, "COMPLETED", null, [image.asset_path]);
+    } catch (error) {
+      if (this.get(task.task_id).status === "CANCELLED") return;
+      const message = error instanceof Error ? error.message : "Image generation failed";
+      await this.finish(task.task_id, "FAILED", message);
+      this.logger.error(message, { ...context, step: "run_image" });
+    } finally {
+      this.activeImageControllers.delete(task.task_id);
     }
   }
 
@@ -348,6 +391,8 @@ export class TaskManager extends EventEmitter {
       }
 
       await this.attachPipelineBundleImages(task.channel_id, episodeId);
+      const balancedScenes = rebalanceEditorialOverlays(await this.repository.readScenes(task.channel_id, episodeId));
+      await this.repository.saveScenes(task.channel_id, episodeId, balancedScenes);
 
       if (run.cancelled) throw new Error("Pipeline cancelled");
       await this.update(task.task_id, { progress_message: "Narration · generating the master voice track", progress_percent: 88 });

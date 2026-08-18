@@ -104,6 +104,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .topbar-meta { gap: 15px; color: var(--muted); font-size: 11px; }
 .codex-pill { gap: 7px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: 10px; font-weight: 700; }
 .codex-pill:not(.is-connected) .status-dot { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+.codex-pill.is-idle .status-dot { background: var(--muted); box-shadow: none; }
 .git-readout { gap: 6px; font: 400 10px "DM Mono", monospace; }
 .dirty-dot { width: 5px; height: 5px; display: inline-block; border-radius: 50%; background: var(--yellow); }
 .model-select { position: relative; display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font: 500 9px "DM Mono", monospace; text-transform: uppercase; letter-spacing: .06em; }

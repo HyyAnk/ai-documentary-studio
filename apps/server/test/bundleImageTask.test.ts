@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContextEngine } from "../src/context.js";
 import { StudioLogger } from "../src/logger.js";
 import { RepositoryService } from "../src/repository.js";
@@ -10,13 +10,17 @@ import { TaskManager } from "../src/tasks.js";
 
 const roots: string[] = [];
 const PNG_DATA_URL = "data:image/png;base64,iVBORw0KGgo=";
+const originalFetch = globalThis.fetch;
+const originalShopAiKey = process.env.SHOPAIKEY_API_KEY;
 
 class ImageCodex extends EventEmitter {
   private turnNumber = 0;
+  turnsStarted = 0;
   constructor(private readonly mediaOnly = false) { super(); }
   async connect(): Promise<void> { this.emit("status", "connected"); }
   async startThread(): Promise<string> { return "image-thread"; }
   async startTurn(threadId: string): Promise<string> {
+    this.turnsStarted += 1;
     const turnId = `image-turn-${++this.turnNumber}`;
     setTimeout(() => {
       if (this.mediaOnly) this.emit("notification", { method: "item/image", params: { threadId, turnId, data: PNG_DATA_URL } });
@@ -30,11 +34,16 @@ class ImageCodex extends EventEmitter {
 }
 
 afterEach(async () => {
+  globalThis.fetch = originalFetch;
+  if (originalShopAiKey === undefined) delete process.env.SHOPAIKEY_API_KEY;
+  else process.env.SHOPAIKEY_API_KEY = originalShopAiKey;
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  vi.restoreAllMocks();
 });
 
 describe("bundle image tasks", () => {
   it("materializes an image and attaches it to every scene in the bundle", async () => {
+    delete process.env.SHOPAIKEY_API_KEY;
     const root = await mkdtemp(path.join(os.tmpdir(), "documentary-image-task-"));
     roots.push(root);
     await mkdir(path.join(root, "templates"), { recursive: true });
@@ -62,6 +71,7 @@ describe("bundle image tasks", () => {
   });
 
   it("captures a PNG delivered through a media item without contaminating text output", async () => {
+    delete process.env.SHOPAIKEY_API_KEY;
     const root = await mkdtemp(path.join(os.tmpdir(), "documentary-media-image-task-"));
     roots.push(root);
     await mkdir(path.join(root, "templates"), { recursive: true });
@@ -80,6 +90,31 @@ describe("bundle image tasks", () => {
     await manager.load();
     const task = manager.submit("GENERATE_BUNDLE_IMAGE", channel.channel_id, episode.episode_id, 1);
     await waitFor(() => manager.get(task.task_id).status === "COMPLETED");
+    expect((await repository.listBundleImages(channel.channel_id, episode.episode_id))).toMatchObject([{ filename: "CB-01.png", bundle_id: "CB-01" }]);
+  });
+
+  it("uses ShopAIKey directly without starting a Codex image turn", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "documentary-shopaikey-direct-image-task-"));
+    roots.push(root);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# DNA\n\n## Visual Style\nWarm\n\n## Visual Language\nCinematic\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
+    const repository = new RepositoryService(root);
+    const channel = await repository.createChannel({ name: "ShopAIKey Direct", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });
+    const topics = Array.from({ length: 5 }, (_, index) => ({ topic_id: `direct_image_topic_${index}`, channel_id: channel.channel_id, title: `Direct Image Topic ${index}`, premise: "Premise", why_it_fits: "Fits", hook: "Hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false }));
+    await repository.saveTopicRun(channel.channel_id, topics);
+    const episode = await repository.confirmTopic(channel.channel_id, topics[0].topic_id);
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "visual_bible.md", "# Episode Visual Bible\n\n## Continuity bundle CB-01 — Workshop\n\n- Era: 1950s\n- Location: Workshop\n- Subjects: Desk\n- Palette: Warm\n- Lighting: Soft\n- Anchor-frame prompt: A warm workshop with brass tools.\n- Reference asset slots: anchor\n");
+    const logger = new StudioLogger(root);
+    await logger.init();
+    process.env.SHOPAIKEY_API_KEY = "test-key";
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ data: [{ b64_json: "iVBORw0KGgo=" }] }), { status: 200 }));
+    const fakeCodex = new ImageCodex();
+    const manager = new TaskManager(repository, new ContextEngine(repository, logger), fakeCodex as never, 1, 8, logger, undefined, undefined, undefined, { enabled: true, images_per_bundle: 1 });
+    await manager.load();
+    const task = manager.submit("GENERATE_BUNDLE_IMAGE", channel.channel_id, episode.episode_id, 1);
+    await waitFor(() => manager.get(task.task_id).status === "COMPLETED");
+    expect(fakeCodex.turnsStarted).toBe(0);
     expect((await repository.listBundleImages(channel.channel_id, episode.episode_id))).toMatchObject([{ filename: "CB-01.png", bundle_id: "CB-01" }]);
   });
 });
