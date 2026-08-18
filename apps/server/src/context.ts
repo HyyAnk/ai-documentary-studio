@@ -119,7 +119,11 @@ export class ContextEngine {
       add({ path: dnaPath, reason: "visual style and language locks", content: selectSections(dna, ["Visual Style", "Visual Language"]) });
       await this.readSharedRules(["visual_bible_rules.md", "visual_rules.md"], sharedFiles);
       const target = await this.repository.getBundleImagePath(channelId, episodeKey, bundleNumber, imageVariant);
-      add({ path: target.path, reason: "requested image output path", content: "" });
+      // The Codex turn runs with the project as its working directory, while
+      // channel storage may be configured elsewhere. Give the image-capable
+      // provider the real destination so it cannot accidentally write to a
+      // non-existent relative path under the project.
+      add({ path: target.absolutePath, reason: "requested image output path", content: "" });
     } else if (taskType === "GENERATE_SEQUENCE_SCENES") {
       const sequenceNumber = sceneNumber ?? 0;
       if (sequenceNumber < 1) throw new Error("Sequence number is required for shot generation");

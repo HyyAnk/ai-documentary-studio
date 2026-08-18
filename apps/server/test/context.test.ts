@@ -69,4 +69,28 @@ describe("ContextEngine", () => {
       expect(treatmentContext.prompt).toContain(minutes <= 3 ? "5–6 numbered sequences" : minutes <= 5 ? "6–8 numbered sequences" : "7–10 numbered sequences");
     }
   });
+
+  it("uses the absolute storage path for continuity image output", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "documentary-image-context-"));
+    const storage = await mkdtemp(path.join(os.tmpdir(), "documentary-image-storage-"));
+    roots.push(root, storage);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await mkdir(path.join(root, "shared"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# DNA\n\n## Visual Style\nWarm\n\n## Visual Language\nCinematic\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
+    await writeFile(path.join(root, "shared", "visual_bible_rules.md"), "# Visual rules\n", "utf8");
+    await writeFile(path.join(root, "shared", "visual_rules.md"), "# Visual rules\n", "utf8");
+    const repository = new RepositoryService(root, storage);
+    const channel = await repository.createChannel({ name: "Image Context", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });
+    const topic = { topic_id: "image_context_topic", channel_id: channel.channel_id, title: "Image Context Topic", premise: "A test premise", why_it_fits: "A test fit", hook: "A test hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false };
+    await repository.saveTopicRun(channel.channel_id, [topic, ...Array.from({ length: 4 }, (_, index) => ({ ...topic, topic_id: `image_context_topic_${index + 2}`, title: `Other Image Topic ${index + 2}` }))]);
+    const episode = await repository.confirmTopic(channel.channel_id, topic.topic_id);
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "visual_bible.md", "# Episode Visual Bible\n\n## Continuity bundle CB-01 — Workshop\n\n- Era: 1950s\n- Anchor-frame prompt: A warm workshop.\n- Reference asset slots: anchor\n");
+    const logger = new StudioLogger(root, true);
+    await logger.init();
+    const context = await new ContextEngine(repository, logger).build("GENERATE_BUNDLE_IMAGE", channel.channel_id, episode.episode_id, 1);
+    const target = await repository.getBundleImagePath(channel.channel_id, episode.episode_id, 1);
+    expect(context.included_files.some((file) => file.path === target.absolutePath)).toBe(true);
+    expect(context.prompt).toContain(target.absolutePath);
+  });
 });
