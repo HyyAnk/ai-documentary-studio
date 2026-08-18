@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ContextEngine } from "../src/context.js";
 import { StudioLogger } from "../src/logger.js";
+import { calibratedScriptTargetWords, scriptWordBounds } from "../src/production.js";
 import { RepositoryService } from "../src/repository.js";
 
 const roots: string[] = [];
@@ -36,5 +37,36 @@ describe("ContextEngine", () => {
     expect(paths.some((file) => file.endsWith("script.md"))).toBe(false);
     expect(context.prompt).not.toContain("SECRET_OTHER_CHANNEL");
     expect(context.excluded_categories).toContain("research/script/scene work for candidates");
+  });
+
+  it("writes target-aware script contracts for every 3–8 minute duration", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "documentary-script-context-"));
+    roots.push(root);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await mkdir(path.join(root, "shared"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
+    const repository = new RepositoryService(root);
+    const channel = await repository.createChannel({ name: "Target Matrix", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });
+    const topic = { topic_id: "target_matrix_topic", channel_id: channel.channel_id, title: "Target Matrix Topic", premise: "A test premise", why_it_fits: "A test fit", hook: "A test hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false };
+    await repository.saveTopicRun(channel.channel_id, [topic, ...Array.from({ length: 4 }, (_, index) => ({ ...topic, topic_id: `target_matrix_topic_${index + 2}`, title: `Other Target ${index + 2}` }))]);
+    const episode = await repository.confirmTopic(channel.channel_id, topic.topic_id);
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "research.md", "# Research Dossier\n\nC01 verified source");
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "treatment.md", "# Documentary Treatment\n\n## Sequence 1\nTime budget and claim C01");
+    const logger = new StudioLogger(root, true);
+    await logger.init();
+    const engine = new ContextEngine(repository, logger);
+
+    for (const minutes of [3, 4, 5, 6, 7, 8]) {
+      const configured = await repository.updateEpisodeSettings(channel.channel_id, episode.episode_id, { target_duration_minutes: minutes }, 2.3);
+      const target = calibratedScriptTargetWords(configured, 2.3);
+      const bounds = scriptWordBounds(target);
+      const context = await engine.build("GENERATE_SCRIPT", channel.channel_id, episode.episode_id);
+      expect(context.prompt).toContain(`Target approximately ${target} spoken words for ${minutes} minutes`);
+      expect(context.prompt).toContain(`hard acceptable range is ${bounds.lower}–${bounds.upper}`);
+      expect(context.prompt).toContain(minutes <= 3 ? "1–2 dry" : minutes <= 5 ? "2–3 dry" : "2–4 dry");
+      const treatmentContext = await engine.build("GENERATE_TREATMENT", channel.channel_id, episode.episode_id);
+      expect(treatmentContext.prompt).toContain(minutes <= 3 ? "5–6 numbered sequences" : minutes <= 5 ? "6–8 numbered sequences" : "7–10 numbered sequences");
+    }
   });
 });

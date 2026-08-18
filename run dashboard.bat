@@ -15,7 +15,8 @@ set "C_STEP=!ESC![1;34m"
 set "C_DEBUG=!ESC![2m"
 
 set "CHATTERBOX_MODEL=turbo"
-call :log INFO T:setup startup "root=!ROOT! | profiles=1 | mode=local | concurrency=3 | automation=process+HTTP | audio=chatterbox-turbo | storage=local-only"
+set "DASHBOARD_WEB_PORT=2233"
+call :log INFO T:setup startup "root=!ROOT! | profiles=1 | mode=local | concurrency=3 | automation=process+HTTP | web_port=!DASHBOARD_WEB_PORT! | audio=chatterbox-turbo | storage=local-only"
 call :log STEP T:setup dependencies "Checking Node.js, Corepack, pnpm, and workspace packages"
 
 where node >nul 2>nul
@@ -109,7 +110,7 @@ set "SERVER_READY=0"
 set "WEB_READY=0"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $config = Invoke-RestMethod -UseBasicParsing -Uri 'http://127.0.0.1:4310/api/config' -TimeoutSec 2; if ($null -ne $config.audio_generation) { exit 0 }; exit 2 } catch { exit 1 }" >nul 2>nul
 if not errorlevel 1 set "SERVER_READY=1"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $page = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:5173/' -TimeoutSec 2; if ($page.Content -match '<title>AI Documentary Studio</title>') { exit 0 }; exit 2 } catch { exit 1 }" >nul 2>nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $page = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:2233/' -TimeoutSec 2; if ($page.Content -match '<title>AI Documentary Studio</title>') { exit 0 }; exit 2 } catch { exit 1 }" >nul 2>nul
 if not errorlevel 1 set "WEB_READY=1"
 
 if "!SERVER_READY!"=="1" if "!WEB_READY!"=="1" (
@@ -127,16 +128,16 @@ if "!SERVER_READY!"=="0" (
 )
 
 :wait_for_dashboard
-call :log STEP T:setup wait "Waiting for http://127.0.0.1:5173"
+call :log STEP T:setup wait "Waiting for http://127.0.0.1:2233"
 for /l %%I in (1,1,30) do (
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $config = Invoke-RestMethod -UseBasicParsing -Uri 'http://127.0.0.1:4310/api/config' -TimeoutSec 2; if ($null -eq $config.audio_generation) { exit 1 }; Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:5173/' -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }" >nul 2>nul
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $config = Invoke-RestMethod -UseBasicParsing -Uri 'http://127.0.0.1:4310/api/config' -TimeoutSec 2; if ($null -eq $config.audio_generation) { exit 1 }; Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:2233/' -TimeoutSec 2 | Out-Null; exit 0 } catch { exit 1 }" >nul 2>nul
   if not errorlevel 1 goto dashboard_ready
   timeout /t 1 /nobreak >nul
 )
 call :log WARN T:setup wait "Dashboard did not answer within 30 seconds; opening the URL anyway"
 
 :dashboard_ready
-start "" "http://127.0.0.1:5173/"
+start "" "http://127.0.0.1:2233/"
 call :log OK T:setup done "Dashboard opened. Keep the server window running while working"
 call :log OK T:setup summary "total=1 | success=1 | failed=0 | skipped=0 | retries=0 | elapsed=bootstrap complete"
 exit /b 0

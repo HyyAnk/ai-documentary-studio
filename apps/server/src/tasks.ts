@@ -25,7 +25,7 @@ import { optimizeShortScenes, packBeatsIntoScenes, type Beat } from "./sceneTimi
 import { calibratedScriptTargetWords, countWords, extractNarration, extractNarrationChunks, extractNarrationSections, hasHumorPolicyMarker, scriptWordBounds } from "./production.js";
 import { stripEditorialOverlayInstructions } from "./visualPrompt.js";
 
-type ActiveRun = { task: Task; threadId: string; turnId: string; output: string; manifest: ContextManifest };
+type ActiveRun = { task: Task; threadId: string; turnId: string; output: string; manifest: ContextManifest; scriptAttempts: number };
 type CodexCleanupConfig = { auto_delete_threads: boolean; failed_thread_retention_days: number };
 type PipelineRun = { cancelled: boolean; children: Set<string> };
 
@@ -277,7 +277,7 @@ export class TaskManager extends EventEmitter {
       await this.update(task.task_id, { codex_thread_id: threadId, progress_message: "Generating" });
       const turnId = await this.codex.startTurn(threadId, manifest.prompt);
       await this.update(task.task_id, { codex_turn_id: turnId });
-      this.active.set(task.task_id, { task: this.get(task.task_id), threadId, turnId, output: "", manifest });
+      this.active.set(task.task_id, { task: this.get(task.task_id), threadId, turnId, output: "", manifest, scriptAttempts: 0 });
       await new Promise<void>((resolve) => this.completionWaiters.set(task.task_id, resolve));
       this.logger.step("Codex turn started", context);
     } catch (error) {
@@ -488,9 +488,6 @@ export class TaskManager extends EventEmitter {
       const delta = typeof params.delta === "string" ? params.delta : params.delta && typeof params.delta === "object" ? JSON.stringify(params.delta) : "";
       active.output += delta;
       void this.update(active.task.task_id, { progress_message: "Receiving output" });
-    } else if (method.startsWith("item/") && method !== "item/started") {
-      active.output += JSON.stringify(params);
-      void this.update(active.task.task_id, { progress_message: "Receiving media output" });
     } else if (method === "turn/completed") {
       const turn = params.turn as { status?: string; error?: { message?: string } } | undefined;
       if (turn?.status === "failed") void this.finish(active.task.task_id, "FAILED", turn.error?.message ?? "Codex turn failed");
@@ -546,8 +543,8 @@ export class TaskManager extends EventEmitter {
         await this.repository.updateEpisodeStage(task.channel_id, task.episode_id!, "TREATMENT_READY");
         outputFiles = [(await this.repository.getEpisodeFile(task.channel_id, task.episode_id!, "treatment.md")).path];
       } else if (task.task_type === "GENERATE_SCRIPT") {
-        const script = extractMarkdown(output, "# Script");
         const episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
+        const script = extractScriptMarkdown(output, episode.topic.title);
         validateScript(script, calibratedScriptTargetWords(episode, this.videoConfig.narration_words_per_second));
         await this.repository.saveEpisodeFile(task.channel_id, task.episode_id!, "script.md", script);
         await this.repository.updateEpisodeStage(task.channel_id, task.episode_id!, "SCRIPT_READY");
@@ -633,8 +630,33 @@ export class TaskManager extends EventEmitter {
       }
       await this.finish(task.task_id, "COMPLETED", null, outputFiles);
     } catch (error) {
-      await this.finish(active.task.task_id, "FAILED", error instanceof Error ? error.message : "Could not persist Codex output");
+      const message = error instanceof Error ? error.message : "Could not persist Codex output";
+      if (active.task.task_type === "GENERATE_SCRIPT" && active.scriptAttempts < 1 && message.startsWith("Script quality gate failed")) {
+        try {
+          await this.retryScript(active, message);
+          return;
+        } catch (retryError) {
+          await this.finish(active.task.task_id, "FAILED", retryError instanceof Error ? retryError.message : message);
+          return;
+        }
+      }
+      await this.finish(active.task.task_id, "FAILED", message);
     }
+  }
+
+  private async retryScript(active: ActiveRun, reason: string): Promise<void> {
+    const episode = await this.repository.getEpisode(active.task.channel_id, active.task.episode_id!);
+    const targetWords = calibratedScriptTargetWords(episode, this.videoConfig.narration_words_per_second);
+    const bounds = scriptWordBounds(targetWords);
+    const previousThreadId = active.threadId;
+    const threadId = await this.codex.startThread();
+    const turnId = await this.codex.startTurn(threadId, `${active.manifest.prompt}\n\nSTRICT RETRY: The previous response failed validation (${reason}). Start over in a fresh response. Return only one Markdown narration script, with no planning, reasoning, research dossier, treatment, tool output, JSON, or explanation. Keep spoken narration between ${bounds.lower} and ${bounds.upper} words for the ${episode.target_duration_minutes}-minute target; aim for approximately ${targetWords} words. Do not echo any scoped files. Preserve the HUMOR_POLICY marker and restrained AUDIO_CUE comments.`);
+    active.threadId = threadId;
+    active.turnId = turnId;
+    active.output = "";
+    active.scriptAttempts += 1;
+    await this.update(active.task.task_id, { codex_thread_id: threadId, codex_turn_id: turnId, progress_message: "Retrying script with strict word budget" });
+    if (previousThreadId !== threadId) void this.codex.deleteThread(previousThreadId).catch(() => undefined);
   }
 
   private findSceneNumber(taskId: string): number | undefined {
@@ -722,6 +744,18 @@ function extractMarkdown(output: string, fallbackHeading: string): string {
   }
   value = value.replace(/^(#\s+.+\r?\n)\s*(?:I(?:’|'| a)m\s+(?:drafting|using|switching|building|preparing)[\s\S]*?)(?=^##\s+)/im, "$1\n");
   return value.startsWith("#") ? value : `${fallbackHeading}\n\n${value}`;
+}
+
+export function extractScriptMarkdown(output: string, episodeTitle: string): string {
+  const value = extractMarkdown(output, "# Script");
+  const headings = [...value.matchAll(/^#\s+(.+)$/gm)];
+  if (headings.length <= 1) return value;
+  const normalizedTitle = episodeTitle.trim().toLowerCase();
+  const titleMatch = [...headings].reverse().find((heading) => heading[1].trim().toLowerCase() === normalizedTitle);
+  const selected = titleMatch ?? headings.at(-1);
+  if (selected?.index === undefined) return value;
+  const nextHeading = headings.find((heading) => (heading.index ?? 0) > selected.index!);
+  return value.slice(selected.index, nextHeading?.index).trim();
 }
 
 function parseJson(output: string): unknown {
@@ -875,7 +909,7 @@ function validateTreatment(markdown: string): void {
   if (!/time budget/i.test(markdown) || !/claim/i.test(markdown)) throw new Error("Treatment quality gate failed: time budgets and claim IDs are required");
 }
 
-function validateScript(markdown: string, targetWords: number): void {
+export function validateScript(markdown: string, targetWords: number): void {
   const narration = extractNarration(markdown);
   const words = countWords(narration);
   if (!hasHumorPolicyMarker(markdown)) throw new Error("Script quality gate failed: HUMOR_POLICY v1 marker is missing; regenerate the script with the current documentary humor layer");

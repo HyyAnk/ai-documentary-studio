@@ -15,7 +15,7 @@ pnpm install
 pnpm dev
 ```
 
-Open `http://127.0.0.1:5173`. The browser talks to the local Fastify server on port `4310`; credentials and filesystem access stay on the server.
+Open `http://127.0.0.1:2233`. The browser talks to the local Fastify server on port `4310`; credentials and filesystem access stay on the server.
 
 For the complete one-click startup, use [`run dashboard.bat`](run%20dashboard.bat). It prepares the local Chatterbox environment on first run, starts the sidecar, waits for the model to be ready, and only then opens the dashboard. `pnpm dev` is intended for frontend/backend development and does not perform the heavy Python setup.
 

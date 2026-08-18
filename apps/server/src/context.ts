@@ -10,7 +10,7 @@ import {
 import { RepositoryService } from "./repository.js";
 import { StudioLogger } from "./logger.js";
 import { DEFAULT_CONFIG } from "./config.js";
-import { calibratedScriptTargetWords } from "./production.js";
+import { calibratedScriptTargetWords, scriptWordBounds } from "./production.js";
 import { continuityBundleId } from "./visualBundles.js";
 
 type ContextFile = { path: string; reason: string; content: string };
@@ -87,7 +87,10 @@ export class ContextEngine {
     const runtimeConfig = await this.readConfig() as { video_generation?: { max_scene_duration_seconds?: number; narration_words_per_second?: number } };
     const narrationWordsPerSecond = runtimeConfig.video_generation?.narration_words_per_second ?? 2.3;
     const calibratedTargetWords = calibratedScriptTargetWords(episode, narrationWordsPerSecond);
+    const scriptBounds = scriptWordBounds(calibratedTargetWords);
     const maxBeatWords = Math.max(1, Math.floor((runtimeConfig.video_generation?.max_scene_duration_seconds ?? 8) * (episode.measured_narration_words_per_second ?? runtimeConfig.video_generation?.narration_words_per_second ?? 2.3)));
+    const humorGuidance = humorGuidanceForDuration(episode.target_duration_minutes);
+    const sequenceGuidance = sequenceGuidanceForDuration(episode.target_duration_minutes);
 
     if (taskType === "GENERATE_RESEARCH") {
       await read(stylePath, "channel style guide");
@@ -153,9 +156,9 @@ export class ContextEngine {
     const outputContract = taskType === "GENERATE_RESEARCH"
       ? "Return only a completed Markdown research dossier. Include: research question, chronological evidence, verified claim ledger with stable IDs C01..., failure factors, what replaced the idea, open uncertainties, and a visual evidence inventory. Every material claim must cite a direct primary or authoritative URL. Use at least 8 independent sources and distinguish fact, inference, and uncertainty."
       : taskType === "GENERATE_TREATMENT"
-        ? "Return only a completed Markdown documentary treatment. Define the thesis, audience promise, target duration and word count, then 6-10 numbered sequences. Format every sequence as a second-level heading exactly like `## Sequence 1 — Title`. Every sequence must include labeled Purpose, Time budget, Dramatic question, Claim IDs, Evidence/visual modes, Transition, and Changed understanding fields. Time budgets must sum to the target duration."
+        ? `Return only a completed Markdown documentary treatment. Define the thesis, audience promise, target duration and word count, then ${sequenceGuidance} numbered sequences. Format every sequence as a second-level heading exactly like \`## Sequence 1 — Title\`. Every sequence must include labeled Purpose, Time budget, Dramatic question, Claim IDs, Evidence/visual modes, Transition, and Changed understanding fields. Time budgets must sum to the target duration.`
         : taskType === "GENERATE_SCRIPT"
-          ? `Return only the completed Markdown narration script. Target approximately ${calibratedTargetWords} words for ${episode.target_duration_minutes} minutes at ${narrationWordsPerSecond.toFixed(2)} words per second; stay within ±20% of this calibrated target. Aim for ${Math.round(calibratedTargetWords * 1.03)}–${Math.round(calibratedTargetWords * 1.08)} words and do not exceed ${Math.ceil(calibratedTargetWords * 1.15)} words. Humor must replace generic explanation, not add new paragraphs or extend the runtime. The legacy ${episode.target_word_count}-word metadata target is a planning hint, not a hard gate. Add this exact hidden marker immediately after the title: <!-- HUMOR_POLICY: v1 -->. Follow the treatment sequence order. Build the argument from dated events, named programs/people/organizations, measurable facts, decisions, and consequences from research. Add a restrained humor layer: for a typical 6–10 minute episode, weave 2–5 dry, evidence-grounded humor beats across the argument, using ironic contrast, an unexpectedly specific analogy, or a self-aware aside that gives the viewer a new angle. Never invent a quote, statistic, anecdote, or reaction for a joke; never mock victims or sensitive subjects. After a humorous spoken line, add only an HTML comment of the form <!-- AUDIO_CUE: chuckle --> or, rarely, <!-- AUDIO_CUE: laugh -->. Use at most one laugh cue per three minutes and prefer chuckle. Do not write (laughs), [laugh], or visual directions in the visible narration. Before returning, silently verify that the marker exists, the humor beats are spaced across the argument, every joke is grounded in the scoped research, and the word count stays under the cap.`
+          ? `Return only one completed Markdown narration script for the confirmed episode. Do not return planning notes, reasoning, research, treatment, tool output, JSON, file excerpts, or an explanation. The final answer must be only the script. Target approximately ${calibratedTargetWords} spoken words for ${episode.target_duration_minutes} minutes at ${narrationWordsPerSecond.toFixed(2)} words per second; the hard acceptable range is ${scriptBounds.lower}–${scriptBounds.upper} spoken words. Aim near ${Math.round(calibratedTargetWords * 1.05)} words and never add padding to reach the number. Humor must replace generic explanation, not add new paragraphs or extend the runtime. The legacy ${episode.target_word_count}-word metadata target is only a planning hint. Add this exact hidden marker immediately after the title: <!-- HUMOR_POLICY: v1 -->. Follow the treatment sequence order. Build the argument from dated events, named programs/people/organizations, measurable facts, decisions, and consequences from research. Add a restrained humor layer: ${humorGuidance}. Never invent a quote, statistic, anecdote, or reaction for a joke; never mock victims or sensitive subjects. After a humorous spoken line, add only an HTML comment of the form <!-- AUDIO_CUE: chuckle --> or, rarely, <!-- AUDIO_CUE: laugh -->. Use at most one laugh cue per three minutes and prefer chuckle. Do not write (laughs), [laugh], or visual directions in the visible narration. Before returning, silently verify that the marker exists, humor beats are spaced across the argument, every joke is grounded in the scoped research, and the spoken word count is between ${scriptBounds.lower} and ${scriptBounds.upper}.`
           : taskType === "GENERATE_VISUAL_BIBLE"
             ? "Return only a completed Markdown Episode Visual Bible. Define fixed channel constants, episode palette, typography/graphic language, editorial overlay system, recurring hero objects, evidence treatment, and asset mix. Provenance is tracked in production metadata; do not require a visible AI or reconstruction label inside footage prompts. Create one continuity bundle per treatment sequence. Format every bundle as a second-level heading exactly like `## Continuity bundle CB-01 — Title`, incrementing CB-02, CB-03, and so on. Each bundle needs labeled Era, Location, Subjects, Wardrobe/objects, Palette, Lighting, Texture, Anchor-frame prompt, Reference asset slots, and Allowed shot variation fields."
           : taskType === "GENERATE_BUNDLE_IMAGE"
@@ -229,6 +232,18 @@ export class ContextEngine {
     this.logger.debug("Context manifest assembled", { step: "context", profileId: channelId });
     return manifest;
   }
+}
+
+function humorGuidanceForDuration(minutes: number): string {
+  if (minutes <= 3) return "weave 1–2 dry, evidence-grounded humor beats across the story";
+  if (minutes <= 5) return "weave 2–3 dry, evidence-grounded humor beats across the story";
+  return "weave 2–4 dry, evidence-grounded humor beats across the story";
+}
+
+function sequenceGuidanceForDuration(minutes: number): string {
+  if (minutes <= 3) return "5–6";
+  if (minutes <= 5) return "6–8";
+  return "7–10";
 }
 
 function selectSections(markdown: string, headings: string[]): string {
