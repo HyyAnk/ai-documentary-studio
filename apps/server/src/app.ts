@@ -324,7 +324,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
       const current = force ? [] : existing.filter((image) => image.bundle_number === bundle.bundle_number);
       for (let variant = 0; variant < config.image_generation.images_per_bundle; variant += 1) {
         if (current.some((image) => image.variant === variant)) continue;
-        created.push(tasks.submit("GENERATE_BUNDLE_IMAGE", params.channelId, params.episodeId, bundle.bundle_number));
+        created.push(tasks.submit("GENERATE_BUNDLE_IMAGE", params.channelId, params.episodeId, bundle.bundle_number, variant));
       }
     }
     return reply.code(202).send({ tasks: created, bundle_count: bundles.length });

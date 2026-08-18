@@ -22,6 +22,7 @@ test("workspace opens with an actionable empty state", async ({ page }) => {
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByRole("heading", { name: "Scene packing" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Voices" })).toBeVisible();
+  await expect(page.getByLabel("Enable continuity anchor images")).toBeChecked();
   await expect(page.getByLabel("Merge gap (ms)")).toBeVisible();
   await expect(page.getByRole("button", { name: "Clean up old Codex sessions" })).toBeVisible();
 });

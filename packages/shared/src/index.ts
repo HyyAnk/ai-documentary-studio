@@ -214,7 +214,7 @@ export const AppConfigSchema = z.object({
     aspect_ratio: z.string().default("16:9"),
   }),
   image_generation: z.object({
-    enabled: z.boolean().default(false),
+    enabled: z.boolean().default(true),
     images_per_bundle: z.number().int().min(1).max(2).default(1),
   }),
   codex: z.object({

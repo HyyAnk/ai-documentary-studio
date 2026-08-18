@@ -19,14 +19,22 @@ class FakeCodex extends EventEmitter {
   async connect(): Promise<void> { this.emit("status", "connected"); }
   async startThread(): Promise<string> { return `thread_${this.turnNumber + 1}`; }
   async resumeThread(threadId: string): Promise<string> { return threadId; }
-  async startTurn(threadId: string): Promise<string> {
+  async startTurn(threadId: string, prompt = ""): Promise<string> {
     const turnId = `turn_${++this.turnNumber}`;
     this.activeTurns += 1;
     this.maxActiveTurns = Math.max(this.maxActiveTurns, this.activeTurns);
     setTimeout(() => {
-      this.emit("notification", { method: "item/agentMessage/delta", params: { threadId, turnId, delta: "# Research Dossier\n\nC01 https://example.com/1\nC02 https://example.com/2\nC03 https://example.com/3\nC04 https://example.com/4\nC05 https://example.com/5" } });
-      this.emit("notification", { method: "turn/completed", params: { turn: { id: turnId, status: "completed" } } });
+      const visualBible = prompt.includes("Task type: GENERATE_VISUAL_BIBLE");
+      const strictVisualRetry = visualBible && prompt.includes("STRICT RETRY");
+      const validVisualBible = "# Episode Visual Bible\n\n" + Array.from({ length: 5 }, (_, index) => `## Continuity bundle CB-0${index + 1} — Bundle ${index + 1}\n\n- Era: 1950s\n- Location: Test location\n- Subjects: Test subject\n- Palette: Warm neutral\n- Lighting: Soft side light\n- Anchor-frame prompt: A coherent documentary environment for bundle ${index + 1}.\n- Reference asset slots: anchor`).join("\n\n");
+      const delta = prompt.includes("Generate exactly one reference image")
+        ? "data:image/png;base64,iVBORw0KGgo="
+        : visualBible
+          ? strictVisualRetry ? validVisualBible : "# Episode Visual Bible\n\nThe visual bible needs revision."
+          : "# Research Dossier\n\nC01 https://example.com/1\nC02 https://example.com/2\nC03 https://example.com/3\nC04 https://example.com/4\nC05 https://example.com/5";
+      this.emit("notification", { method: "item/agentMessage/delta", params: { threadId, turnId, delta } });
       this.activeTurns -= 1;
+      this.emit("notification", { method: "turn/completed", params: { turn: { id: turnId, status: "completed" } } });
     }, 30);
     return turnId;
   }
@@ -120,7 +128,7 @@ describe("TaskManager locks", () => {
     await waitFor(() => manager.get(first.task_id).status === "COMPLETED");
     await waitFor(() => manager.get(second.task_id).status === "COMPLETED");
     expect(maxActiveAudio).toBe(2);
-    expect(fake.maxActiveTurns).toBe(0);
+    expect(fake.activeTurns).toBe(0);
     expect(manager.get(first.task_id).codex_thread_id).toBeNull();
     expect((await repository.readScenes(channel.channel_id, firstEpisode.episode_id))[0].audio_duration_seconds).toBe(2);
   });
@@ -165,6 +173,33 @@ describe("TaskManager locks", () => {
     expect(fake.deletedThreads).toEqual(["thread_old"]);
   });
 
+  it("retries a visual bible when continuity bundles are missing", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "documentary-visual-bible-retry-"));
+    roots.push(root);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await mkdir(path.join(root, "shared"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
+    const repository = new RepositoryService(root);
+    const channel = await repository.createChannel({ name: "Visual Retry", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });
+    const topics = Array.from({ length: 5 }, (_, index) => ({ topic_id: `visual_retry_topic_${index}`, channel_id: channel.channel_id, title: `Visual Retry ${index}`, premise: "Premise", why_it_fits: "Fits", hook: "Hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false }));
+    await repository.saveTopicRun(channel.channel_id, topics);
+    const episode = await repository.confirmTopic(channel.channel_id, topics[0].topic_id);
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "research.md", "# Research Dossier\n\nC01 verified");
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "treatment.md", "# Documentary Treatment\n\n## Sequence 1\nTime budget and claim C01");
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "script.md", "# Visual Retry 0\n\n<!-- HUMOR_POLICY: v1 -->\n\n1956 C01 evidence.");
+    const logger = new StudioLogger(root, true);
+    await logger.init();
+    const fake = new FakeCodex();
+    const manager = new TaskManager(repository, new ContextEngine(repository, logger), fake as never, 1, 8, logger);
+    await manager.load();
+    const task = manager.submit("GENERATE_VISUAL_BIBLE", channel.channel_id, episode.episode_id);
+    await waitFor(() => manager.get(task.task_id).status === "COMPLETED");
+    const visualBible = await repository.getEpisodeFile(channel.channel_id, episode.episode_id, "visual_bible.md");
+    expect(visualBible.content).toContain("## Continuity bundle CB-05");
+    expect(manager.get(task.task_id).progress_message).toBe("Completed");
+  });
+
   it("runs the one-click pipeline and skips artifacts that are already ready", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "documentary-pipeline-tasks-"));
     roots.push(root);
@@ -177,7 +212,8 @@ describe("TaskManager locks", () => {
     const topics = Array.from({ length: 5 }, (_, index) => ({ topic_id: `pipeline_topic_${index}`, channel_id: channel.channel_id, title: `Pipeline Topic ${index}`, premise: "Premise", why_it_fits: "Fits", hook: "Hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false }));
     await repository.saveTopicRun(channel.channel_id, topics);
     const episode = await repository.confirmTopic(channel.channel_id, topics[0].topic_id);
-    for (const filename of ["research.md", "treatment.md", "visual_bible.md"]) await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, filename, `# ${filename}\nReady artifact`);
+    for (const filename of ["research.md", "treatment.md"]) await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, filename, `# ${filename}\nReady artifact`);
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "visual_bible.md", "# Episode Visual Bible\n\n## Continuity bundle CB-01 — Ready\n\n- Anchor-frame prompt: A ready continuity anchor.\n- Reference asset slots: anchor");
     await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "script.md", "# script\n\n<!-- HUMOR_POLICY: v1 -->\nReady artifact");
     await repository.saveScenes(channel.channel_id, episode.episode_id, [{ scene_id: "pipeline_scene_1", episode_id: episode.episode_id, scene_number: 1, duration_seconds: 6, dialogue: "Ready dialogue", visual_prompt: "CAMERA\nReady\nACTION\nReady\nLIGHTING\nReady\nATMOSPHERE\nReady\nCONTINUITY\nReady", transition_note: "", continuity_note: "Ready continuity", sequence_id: "sequence-1", sequence_title: "Sequence 1", shot_id: "shot-1", asset_type: "ai_reconstruction", continuity_bundle_id: "CB-01", reference_asset_ids: [], source_ids: [], reconstruction: true, sound_cue: "", editorial_overlay: { kind: "none" }, audio_asset_path: null, audio_generated_at: null, audio_duration_seconds: null }]);
     const narrationPath = await repository.writeNarrationAudio(channel.channel_id, episode.episode_id, new Uint8Array([1, 2, 3]));
@@ -191,7 +227,10 @@ describe("TaskManager locks", () => {
     await waitFor(() => manager.get(pipeline.task_id).status === "COMPLETED");
     expect(manager.get(pipeline.task_id).progress_percent).toBe(100);
     expect(manager.get(pipeline.task_id).progress_message).toBe("Completed");
-    expect(fake.maxActiveTurns).toBe(0);
+    expect(fake.activeTurns).toBe(0);
+    const pipelineImages = await repository.listBundleImages(channel.channel_id, episode.episode_id);
+    expect(pipelineImages).toMatchObject([{ filename: "CB-01.png", bundle_id: "CB-01" }]);
+    expect((await repository.readScenes(channel.channel_id, episode.episode_id))[0].reference_asset_ids).toContain(pipelineImages[0].path);
   });
 });
 

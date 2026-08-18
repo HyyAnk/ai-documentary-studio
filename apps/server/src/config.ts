@@ -12,7 +12,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     aspect_ratio: "16:9",
   },
   image_generation: {
-    enabled: false,
+    enabled: true,
     images_per_bundle: 1,
   },
   codex: {

@@ -24,8 +24,9 @@ import type { AudioProvider } from "./providers/index.js";
 import { optimizeShortScenes, packBeatsIntoScenes, type Beat } from "./sceneTiming.js";
 import { calibratedScriptTargetWords, countWords, extractNarration, extractNarrationChunks, extractNarrationSections, hasHumorPolicyMarker, scriptWordBounds } from "./production.js";
 import { stripEditorialOverlayInstructions } from "./visualPrompt.js";
+import { parseContinuityBundles } from "./visualBundles.js";
 
-type ActiveRun = { task: Task; threadId: string; turnId: string; output: string; manifest: ContextManifest; scriptAttempts: number };
+type ActiveRun = { task: Task; threadId: string; turnId: string; output: string; manifest: ContextManifest; scriptAttempts: number; visualBibleAttempts: number };
 type CodexCleanupConfig = { auto_delete_threads: boolean; failed_thread_retention_days: number };
 type PipelineRun = { cancelled: boolean; children: Set<string> };
 
@@ -70,7 +71,7 @@ export class TaskManager extends EventEmitter {
     },
     audioProviderFactory?: (target: ChatterboxTarget, config: AppConfig["audio_generation"]) => AudioProvider,
     codexConfig: CodexCleanupConfig = { auto_delete_threads: true, failed_thread_retention_days: 7 },
-    imageConfig: AppConfig["image_generation"] = { enabled: false, images_per_bundle: 1 },
+    imageConfig: AppConfig["image_generation"] = { enabled: true, images_per_bundle: 1 },
   ) {
     super();
     this.videoConfig = typeof videoConfigOrMaxSceneDuration === "number"
@@ -160,10 +161,10 @@ export class TaskManager extends EventEmitter {
     return this.active.size > 0 || this.activeAudio.size > 0 || this.pipelineRuns.size > 0 || this.runningCount > 0 || this.runningAudioCount > 0 || this.list().some((task) => ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(task.status));
   }
 
-  submit(taskType: TaskType, channelId: string, episodeId: string | null, sceneNumber?: number): Task {
+  submit(taskType: TaskType, channelId: string, episodeId: string | null, sceneNumber?: number, requestedImageVariant?: number): Task {
     if (taskType === "GENERATE_BUNDLE_IMAGE" && !this.imageConfig.enabled) throw new RepositoryError("Image generation is disabled in Settings", "IMAGE_GENERATION_DISABLED");
     const imageVariant = taskType === "GENERATE_BUNDLE_IMAGE" && episodeId && sceneNumber
-      ? this.list().filter((item) => item.task_type === "GENERATE_BUNDLE_IMAGE" && item.episode_id === episodeId && item.scene_number === sceneNumber && ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(item.status)).length % Math.max(1, this.imageConfig.images_per_bundle)
+      ? requestedImageVariant ?? this.list().filter((item) => item.task_type === "GENERATE_BUNDLE_IMAGE" && item.episode_id === episodeId && item.scene_number === sceneNumber && ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(item.status)).length % Math.max(1, this.imageConfig.images_per_bundle)
       : 0;
     const lockKey = taskType === "GENERATE_PIPELINE" && episodeId
       ? `${episodeId}:pipeline`
@@ -277,7 +278,7 @@ export class TaskManager extends EventEmitter {
       await this.update(task.task_id, { codex_thread_id: threadId, progress_message: "Generating" });
       const turnId = await this.codex.startTurn(threadId, manifest.prompt);
       await this.update(task.task_id, { codex_turn_id: turnId });
-      this.active.set(task.task_id, { task: this.get(task.task_id), threadId, turnId, output: "", manifest, scriptAttempts: 0 });
+      this.active.set(task.task_id, { task: this.get(task.task_id), threadId, turnId, output: "", manifest, scriptAttempts: 0, visualBibleAttempts: 0 });
       await new Promise<void>((resolve) => this.completionWaiters.set(task.task_id, resolve));
       this.logger.step("Codex turn started", context);
     } catch (error) {
@@ -316,11 +317,13 @@ export class TaskManager extends EventEmitter {
       const visualBibleChanged = await step("Visual bible · locking continuity", 50, "GENERATE_VISUAL_BIBLE", async () => !(await this.hasReadyArtifact(task.channel_id, episodeId, "visual_bible.md")));
       const upstreamChanged = researchChanged || treatmentChanged || scriptChanged || visualBibleChanged;
 
+      await this.generatePipelineBundleImages(task, run);
+
       const scenes = await this.repository.readScenes(task.channel_id, episodeId);
       if (run.cancelled) throw new Error("Pipeline cancelled");
       const shotPlanFresh = await this.isShotPlanFresh(task.channel_id, episodeId);
       const regenerateShots = scenes.length === 0 || upstreamChanged || !shotPlanFresh;
-      await this.update(task.task_id, { progress_message: regenerateShots ? "Shot plan · generating sequences" : "Shot plan · already ready", progress_percent: 60 });
+      await this.update(task.task_id, { progress_message: regenerateShots ? "Shot plan · generating sequences" : "Shot plan · already ready", progress_percent: 65 });
       if (regenerateShots) {
         const script = await this.repository.getEpisodeFile(task.channel_id, episodeId, "script.md");
         const sections = extractNarrationSections(script.content);
@@ -342,6 +345,8 @@ export class TaskManager extends EventEmitter {
           children.forEach((child) => run.children.delete(child.task_id));
         }
       }
+
+      await this.attachPipelineBundleImages(task.channel_id, episodeId);
 
       if (run.cancelled) throw new Error("Pipeline cancelled");
       await this.update(task.task_id, { progress_message: "Narration · generating the master voice track", progress_percent: 88 });
@@ -368,6 +373,42 @@ export class TaskManager extends EventEmitter {
   private async hasReadyArtifact(channelId: string, episodeId: string, filename: string): Promise<boolean> {
     const file = await this.repository.getEpisodeFile(channelId, episodeId, filename);
     return !isPlaceholderArtifact(file.content);
+  }
+
+  private async generatePipelineBundleImages(task: Task, run: PipelineRun): Promise<void> {
+    if (!this.imageConfig.enabled) return;
+    const visualBible = await this.repository.getEpisodeFile(task.channel_id, task.episode_id!, "visual_bible.md");
+    const bundles = parseContinuityBundles(visualBible.content);
+    if (bundles.length === 0) return;
+
+    const existing = await this.repository.listBundleImages(task.channel_id, task.episode_id!);
+    const missing = bundles.flatMap((bundle) => Array.from({ length: this.imageConfig.images_per_bundle }, (_, variant) => ({ bundle, variant })))
+      .filter(({ bundle, variant }) => !existing.some((image) => image.bundle_id === bundle.bundle_id && image.variant === variant));
+    if (missing.length === 0) {
+      await this.update(task.task_id, { progress_message: "Style anchors · already ready", progress_percent: 58 });
+      return;
+    }
+
+    await this.update(task.task_id, { progress_message: `Style anchors · generating ${missing.length} continuity image${missing.length === 1 ? "" : "s"}`, progress_percent: 58 });
+    const children = missing.map(({ bundle, variant }) => this.submit("GENERATE_BUNDLE_IMAGE", task.channel_id, task.episode_id!, bundle.bundle_number, variant));
+    children.forEach((child) => run.children.add(child.task_id));
+    try {
+      for (const [index, child] of children.entries()) {
+        const completed = await this.waitForTaskTerminal(child.task_id, run);
+        if (completed.status !== "COMPLETED") throw new Error(`Style anchor ${index + 1}/${children.length} failed: ${completed.error ?? completed.status}`);
+        await this.update(task.task_id, { progress_message: `Style anchors · ${index + 1}/${children.length} ready`, progress_percent: 58 + Math.round(((index + 1) / children.length) * 5) });
+      }
+    } catch (error) {
+      await Promise.all(children.filter((child) => ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(this.get(child.task_id).status)).map((child) => this.cancel(child.task_id).catch(() => undefined)));
+      throw error;
+    } finally {
+      children.forEach((child) => run.children.delete(child.task_id));
+    }
+  }
+
+  private async attachPipelineBundleImages(channelId: string, episodeId: string): Promise<void> {
+    const images = await this.repository.listBundleImages(channelId, episodeId);
+    for (const image of images) await this.repository.attachBundleReference(channelId, episodeId, image.bundle_id, image.path);
   }
 
   private async hasReadyScript(channelId: string, episodeId: string): Promise<boolean> {
@@ -488,6 +529,12 @@ export class TaskManager extends EventEmitter {
       const delta = typeof params.delta === "string" ? params.delta : params.delta && typeof params.delta === "object" ? JSON.stringify(params.delta) : "";
       active.output += delta;
       void this.update(active.task.task_id, { progress_message: "Receiving output" });
+    } else if (active.task.task_type === "GENERATE_BUNDLE_IMAGE" && /^item\/(?:image|file|media|attachment|output)/i.test(method)) {
+      const media = JSON.stringify(params);
+      if (/(?:data:image|b64_json|base64|\.(?:png|jpe?g|webp)\b)/i.test(media)) {
+        active.output += media;
+        void this.update(active.task.task_id, { progress_message: "Receiving image output" });
+      }
     } else if (method === "turn/completed") {
       const turn = params.turn as { status?: string; error?: { message?: string } } | undefined;
       if (turn?.status === "failed") void this.finish(active.task.task_id, "FAILED", turn.error?.message ?? "Codex turn failed");
@@ -640,6 +687,15 @@ export class TaskManager extends EventEmitter {
           return;
         }
       }
+      if (active.task.task_type === "GENERATE_VISUAL_BIBLE" && active.visualBibleAttempts < 1 && message.startsWith("Visual bible quality gate failed")) {
+        try {
+          await this.retryVisualBible(active, message);
+          return;
+        } catch (retryError) {
+          await this.finish(active.task.task_id, "FAILED", retryError instanceof Error ? retryError.message : message);
+          return;
+        }
+      }
       await this.finish(active.task.task_id, "FAILED", message);
     }
   }
@@ -656,6 +712,18 @@ export class TaskManager extends EventEmitter {
     active.output = "";
     active.scriptAttempts += 1;
     await this.update(active.task.task_id, { codex_thread_id: threadId, codex_turn_id: turnId, progress_message: "Retrying script with strict word budget" });
+    if (previousThreadId !== threadId) void this.codex.deleteThread(previousThreadId).catch(() => undefined);
+  }
+
+  private async retryVisualBible(active: ActiveRun, reason: string): Promise<void> {
+    const previousThreadId = active.threadId;
+    const threadId = await this.codex.startThread();
+    const turnId = await this.codex.startTurn(threadId, `${active.manifest.prompt}\n\nSTRICT RETRY: The previous Visual Bible failed validation (${reason}). Start over in a fresh response. Return only the Markdown Episode Visual Bible, with no reasoning, research, treatment, tool output, JSON, or explanation. Include at least five stable bundles using exact second-level headings \`## Continuity bundle CB-01 — Title\`, \`CB-02\`, and so on. Every bundle must include Era, Location, Subjects, Palette, Lighting, Anchor-frame prompt, and Reference asset slots. Do not use alternative heading names. Do not omit bundle IDs.`);
+    active.threadId = threadId;
+    active.turnId = turnId;
+    active.output = "";
+    active.visualBibleAttempts += 1;
+    await this.update(active.task.task_id, { codex_thread_id: threadId, codex_turn_id: turnId, progress_message: "Retrying visual bible with strict continuity schema" });
     if (previousThreadId !== threadId) void this.codex.deleteThread(previousThreadId).catch(() => undefined);
   }
 
