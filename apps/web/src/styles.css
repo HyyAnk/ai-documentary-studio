@@ -147,15 +147,13 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
 .activity-heading { margin-top: 64px; }
 .channel-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .channel-grid-wide { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.channel-card { min-height: 230px; display: flex; flex-direction: column; align-items: flex-start; padding: 19px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink); text-align: left; transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
+.channel-card { min-height: 190px; display: flex; flex-direction: column; align-items: flex-start; padding: 19px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink); text-align: left; transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
 .channel-card:hover { border-color: var(--line-dark); transform: translateY(-2px); box-shadow: 0 8px 20px color-mix(in srgb, var(--ink) 5%, transparent); }
 .card-top, .card-bottom, .detail-actions, .panel-actions, .scene-tools, .modal-actions, .scene-notes { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.card-identity { display: flex; align-items: center; gap: 9px; }
-.channel-index { width: 20px; color: var(--accent); font: 500 10px "DM Mono", monospace; letter-spacing: .04em; }
-.channel-avatar { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; background: var(--soft-muted); color: var(--accent-deep); font: 500 11px "DM Mono", monospace; }
-.channel-card h3 { margin-top: 30px; }
-.channel-card p { flex: 1; margin: 9px 0 22px; color: var(--muted); font-size: 11px; line-height: 1.55; }
-.card-bottom { padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font: 400 10px "DM Mono", monospace; }
+.channel-card .card-top { justify-content: flex-end; }
+.channel-card h3 { margin-top: 22px; }
+.channel-card p { flex: 1; margin: 9px 0 18px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.card-bottom { width: 100%; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font: 400 10px "DM Mono", monospace; }
 .status-badge, .stage-badge, .task-status-label { display: inline-flex; align-items: center; padding: 4px 7px; border-radius: 5px; font: 500 9px "DM Mono", monospace; letter-spacing: .04em; text-transform: uppercase; }
 .status-badge.draft { background: var(--soft-muted); color: var(--muted); }
 .status-badge.active { background: var(--soft-green); color: var(--green); }
@@ -168,8 +166,7 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
 .activity-row.is-processing, .task-row.is-processing { background: color-mix(in srgb, var(--accent) 3%, transparent); }
 .activity-row > div:nth-child(2), .task-main { display: grid; gap: 4px; min-width: 0; flex: 1; }
 .activity-row strong, .task-main strong { font-size: 12px; }
-.activity-row span, .task-main span, .activity-status, .task-time { color: var(--muted); font-size: 10px; }
-.activity-status { font: 500 9px "DM Mono", monospace; text-transform: uppercase; }
+.activity-row span, .task-main span, .task-time { color: var(--muted); font-size: 10px; }
 .task-status-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: var(--line-dark); }
 .task-status-dot.running { background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent); }
 .task-status-dot.queued { background: var(--yellow); }
@@ -558,7 +555,7 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
   .scene-save-row { align-items: flex-start; flex-direction: column; }
   .file-meta { align-items: flex-start; flex-wrap: wrap; }
   .file-meta span { width: 100%; margin-left: 21px; }
-  .activity-status, .task-time { display: none; }
+  .task-time { display: none; }
   .form-grid, .choice-row, .dna-choice-row { grid-template-columns: 1fr; gap: 0; }
   .notice-banner { left: 18px; right: auto; bottom: 82px; max-width: calc(100% - 36px); }
 }
