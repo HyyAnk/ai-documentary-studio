@@ -20,6 +20,7 @@ import { StudioLogger } from "./logger.js";
 import { RepositoryError, RepositoryService } from "./repository.js";
 import { ChatterboxProvider, synthesizeWav, type ChatterboxTarget } from "./providers/chatterbox.js";
 import { CodexImageProvider } from "./providers/codexImage.js";
+import { ShopAiKeyImageProvider } from "./providers/shopAiKeyImage.js";
 import type { AudioProvider } from "./providers/index.js";
 import { optimizeShortScenes, packBeatsIntoScenes, type Beat } from "./sceneTiming.js";
 import { calibratedScriptTargetWords, countWords, extractNarration, extractNarrationChunks, extractNarrationSections, hasHumorPolicyMarker, scriptWordBounds } from "./production.js";
@@ -606,13 +607,15 @@ export class TaskManager extends EventEmitter {
         if (!this.imageConfig.enabled) throw new Error("Image generation is disabled in Settings");
         const bundleNumber = this.findSceneNumber(task.task_id);
         if (!bundleNumber) throw new Error("Bundle number is required");
-        const provider = new CodexImageProvider(this.repository, {
+        const imageTarget = {
           channelId: task.channel_id,
           episodeId: task.episode_id!,
           bundleNumber,
           variant: this.imageVariants.get(task.task_id) ?? 0,
-        }, output);
-        const image = await provider.generateReference(active.manifest.prompt);
+        };
+        const image = ShopAiKeyImageProvider.isConfigured()
+          ? await new ShopAiKeyImageProvider(this.repository, imageTarget).generateReference(active.manifest.prompt)
+          : await new CodexImageProvider(this.repository, imageTarget, output).generateReference(active.manifest.prompt);
         const bundleId = `CB-${String(bundleNumber).padStart(2, "0")}`;
         await this.repository.attachBundleReference(task.channel_id, task.episode_id!, bundleId, image.asset_path);
         outputFiles = [image.asset_path];

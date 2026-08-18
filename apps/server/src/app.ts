@@ -41,6 +41,7 @@ import { createStoredZip } from "./zip.js";
 import { composeMergedVisualPrompt, mergeEditorialOverlays, optimizeShortScenes } from "./sceneTiming.js";
 import { assessProduction, countWords, extractNarration, extractNarrationChunks, extractNarrationSections } from "./production.js";
 import { parseContinuityBundles } from "./visualBundles.js";
+import { loadServerEnv } from "./env.js";
 
 const VOICE_PREVIEW_TEXT = "This is a preview of this narrator voice for AI Documentary Studio.";
 
@@ -66,6 +67,7 @@ export type StudioApp = {
 };
 
 export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? process.cwd()): Promise<StudioApp> {
+  await loadServerEnv(rootDirectory);
   const configuredStorageRoot = await loadStorageRoot(rootDirectory);
   const logger = new StudioLogger(rootDirectory, process.env.STUDIO_DEBUG === "1");
   logger.setRuntimeRoot(path.join(configuredStorageRoot ?? rootDirectory, ".documentary-studio"));
