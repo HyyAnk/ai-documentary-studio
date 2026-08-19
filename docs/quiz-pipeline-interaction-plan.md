@@ -2,7 +2,7 @@
 
 ## Primary flows
 
-1. Open **Channels**, choose either **Quiz Channels** or **Documentary Channels**, then create or select a channel.
+1. Open **Channels**, choose the **Quiz Channels** or **Documentary Channels** tab, then create or select a channel inside that tab. Only the selected group's channels are rendered.
 2. Generate exactly five topic candidates. Each candidate carries a quiz format, age band, and question count.
 3. Confirm one candidate to create a Quiz episode.
 4. Set the question count, then run the production pipeline: research → Quiz plan → script → visual system → scenes → Chatterbox audio → HyperFrames MP4.
@@ -12,7 +12,7 @@
 ## State transitions
 
 - Channel: draft → active → archived/restored.
-- Channel groups: Quiz Channels and Documentary Channels each own their channel list and creation action; existing documentary channels remain in the Documentary Channels group.
+- Channel groups: Channels opens with one active group tab at a time. Quiz Channels and Documentary Channels each own their channel list and creation action; existing documentary channels remain in the Documentary Channels tab.
 - Channel deletion: card delete affordance → yes/no choice → typed `Yes` confirmation → deleting → removed from every channel list.
 - Topic: generated → selected.
 - Quiz episode: selected → research ready → Quiz plan ready → script ready → visual system ready → scenes ready → narration ready → video rendering → video ready.
@@ -43,8 +43,8 @@
 
 ## Desktop and mobile
 
-- Desktop/tablet: channel group summary, channel grid, task rail, artifacts, and video preview use the full content width.
-- Mobile: group metadata wraps, controls stack, task progress remains visible, and video scales to the viewport.
+- Desktop/tablet: the group tab strip stays above one active group summary and channel grid; task rail, artifacts, and video preview use the full content width.
+- Mobile: the tab strip scrolls horizontally when needed, group metadata wraps, controls stack, task progress remains visible, and video scales to the viewport.
 - Secondary actions stay inside artifact panels; the primary surface keeps only create, generate, render, retry, and download.
 - Delete is a secondary card action revealed on hover/focus on desktop and always available as a touch-friendly icon on mobile. The confirmation modal stacks cleanly at narrow widths.
 - Keyboard focus, touch targets, reduced motion, concise titles, and the required responsive footer credit are preserved.

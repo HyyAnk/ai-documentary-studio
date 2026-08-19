@@ -11,9 +11,13 @@ import { EpisodeDetail } from "./EpisodeView";
 import type { Notice } from "./types";
 
 export function ChannelsView({ selectedChannel, selectedEpisodeId, channels, tasks, onTaskSubmitted, openChannel, onCreate, onRefresh, onNotice, onDelete, openEpisode, maxDuration, narrationWordsPerSecond, imageGenerationEnabled, imagesPerBundle }: { selectedChannel: Channel | null; selectedEpisodeId: string | null; channels: Channel[]; tasks: Task[]; onTaskSubmitted: (task: Task) => void; openChannel: (id: string) => void; onCreate: (groupId?: ChannelGroupId) => void; onRefresh: () => Promise<void>; onNotice: (notice: NonNullable<Notice>) => void; onDelete: (channel: Channel) => void; openEpisode: (channelId: string, episodeId: string) => void; maxDuration: number; narrationWordsPerSecond: number; imageGenerationEnabled: boolean; imagesPerBundle: number }) {
+  const [activeGroup, setActiveGroup] = useState<ChannelGroupId>("quiz");
+  useEffect(() => {
+    if (selectedChannel) setActiveGroup(selectedChannel.engine === "quiz" ? "quiz" : "documentary");
+  }, [selectedChannel]);
   if (selectedChannel && selectedEpisodeId) return <EpisodeDetail channel={selectedChannel} episodeId={selectedEpisodeId} tasks={tasks} onTaskSubmitted={onTaskSubmitted} maxDuration={maxDuration} narrationWordsPerSecond={narrationWordsPerSecond} imageGenerationEnabled={imageGenerationEnabled} imagesPerBundle={imagesPerBundle} onBack={() => openChannel(selectedChannel.channel_id)} onNotice={onNotice} />;
   if (selectedChannel) return <ChannelDetail channel={selectedChannel} channels={channels} tasks={tasks} onTaskSubmitted={onTaskSubmitted} onBack={() => openChannel("")} onRefresh={onRefresh} onNotice={onNotice} onDelete={onDelete} openEpisode={openEpisode} />;
-  return <ChannelsListView channels={channels} onCreate={(groupId) => onCreate(groupId)} openChannel={openChannel} onDelete={onDelete} />;
+  return <ChannelsListView channels={channels} activeGroup={activeGroup} onActiveGroupChange={setActiveGroup} onCreate={(groupId) => onCreate(groupId)} openChannel={openChannel} onDelete={onDelete} />;
 }
 
 export function DeleteChannelModal({ channel, onClose, onDeleted, onError }: { channel: Channel; onClose: () => void; onDeleted: (channel: Channel) => Promise<void>; onError: (error: unknown) => void }) {

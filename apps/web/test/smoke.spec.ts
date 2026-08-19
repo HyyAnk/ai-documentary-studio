@@ -35,20 +35,24 @@ test("channel creation exposes uploaded DNA mode", async ({ page }) => {
   await expect(page.locator("form.modal").getByRole("button", { name: "Create channel", exact: true })).toBeDisabled();
 });
 
-test("channel library separates Quiz and Documentary groups", async ({ page }) => {
+test("channel library separates Quiz and Documentary groups into tabs", async ({ page }) => {
   const quiz = { channel_id: "ch_group_quiz", slug: "group-quiz", display_name: "Group quiz", description: "Quiz", target_audience: "Children", language: "English", market: "Global", channel_dna_path: "channels/group-quiz/channel_dna.md", style_guide_path: "channels/group-quiz/style_guide.md", status: "DRAFT", created_at: "2026-08-16T00:00:00.000Z", updated_at: "2026-08-16T00:00:00.000Z", episode_count: 0, group_id: "quiz", engine: "quiz" };
   const documentary = { ...quiz, channel_id: "ch_group_doc", slug: "group-doc", display_name: "Group documentary", description: "Documentary", group_id: "documentary", engine: "documentary" };
   await page.route("**/api/channels", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ channels: [quiz, documentary] }) }));
   await page.goto("/");
   await page.getByRole("button", { name: "View all", exact: true }).first().click();
   await expect(page.getByText("Quiz Channels", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("Documentary Channels", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "New Quiz channel", exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Documentary Channels", exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Quiz Channels", exact: true })).toHaveClass(/is-selected/);
+  await expect(page.getByRole("button", { name: "New Documentary channel", exact: true })).toHaveCount(0);
+  await page.getByRole("tab", { name: "Documentary Channels", exact: true }).click();
+  await expect(page.getByRole("tab", { name: "Documentary Channels", exact: true })).toHaveClass(/is-selected/);
+  await expect(page.getByText("Documentary Channels", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "New Documentary channel", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New Quiz channel", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "New Documentary channel", exact: true }).click();
   await expect(page.getByText("Documentary Engine keeps the existing research-to-video workflow", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Documentary Channels", exact: true })).toHaveClass(/is-selected/);
-  await expect(page.getByRole("button", { name: "Quiz Channels", exact: true })).not.toHaveClass(/is-selected/);
 });
 
 test("channel deletion requires an explicit Yes and typed confirmation", async ({ page }) => {
