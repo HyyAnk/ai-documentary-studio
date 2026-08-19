@@ -510,6 +510,11 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     if (start < 0 || start > end || start >= file.size) return reply.code(416).header("content-range", `bytes */${file.size}`).send();
     return reply.code(206).headers({ ...baseHeaders, "content-length": end - start + 1, "content-range": `bytes ${start}-${end}/${file.size}` }).send(createReadStream(file.absolutePath, { start, end }));
   });
+  server.get("/api/channels/:channelId/episodes/:episodeId/video", async (request, reply) => {
+    const params = request.params as { channelId: string; episodeId: string };
+    const file = await repository.getEpisodeVideoFile(params.channelId, params.episodeId);
+    return reply.headers({ "content-type": "video/mp4", "content-length": file.size, "content-disposition": `inline; filename="quiz-video.mp4"`, "last-modified": file.modified_at }).send(createReadStream(file.absolutePath));
+  });
   server.put("/api/channels/:channelId/episodes/:episodeId/scenes", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };
     const scenes = SceneSchema.array().parse(request.body);

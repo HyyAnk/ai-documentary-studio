@@ -27,6 +27,7 @@ export function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxD
   const [busy, setBusy] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [episodeClock, setEpisodeClock] = useState(() => Date.now());
+  const [questionCountDraft, setQuestionCountDraft] = useState(8);
   const [durationDraft, setDurationDraft] = useState(8);
   const episodeTasks = tasks.filter((task) => task.episode_id === episodeId);
   const sequenceShotTasks = episodeTasks.filter((task) => task.task_type === "GENERATE_SEQUENCE_SCENES");
@@ -37,7 +38,8 @@ export function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxD
   const pipelineTask = latestTask(episodeTasks, ["GENERATE_PIPELINE"]);
   const [observedTerminalTasks, setObservedTerminalTasks] = useState(() => new Set<string>());
 
-  useEffect(() => { if (episode) setDurationDraft(episode.target_duration_minutes); }, [episode?.episode_id, episode?.target_duration_minutes]);
+  const isQuiz = channel.engine === "quiz";
+  useEffect(() => { if (episode) { setQuestionCountDraft(episode.quiz_config?.question_count ?? 8); setDurationDraft(episode.target_duration_minutes); } }, [episode?.episode_id, episode?.quiz_config?.question_count, episode?.target_duration_minutes]);
   useEffect(() => { setObservedTerminalTasks(new Set(episodeTasks.filter(isTaskTerminal).map((task) => task.task_id))); }, [episodeId]);
   useEffect(() => { if (!episodeTasks.some(isTaskActive)) return; const timer = window.setInterval(() => setEpisodeClock(Date.now()), 1000); return () => window.clearInterval(timer); }, [episodeTasks.some(isTaskActive)]);
   useEffect(() => {
@@ -54,7 +56,8 @@ export function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxD
     visualBible: isReady(visualBible),
     scenes: scenes.length > 0,
     narration: Boolean(episode?.narration_asset_path),
-  }), [research, treatment, script, visualBible, scenes.length, episode?.narration_asset_path]);
+    video: Boolean(episode?.video_asset_path),
+  }), [research, treatment, script, visualBible, scenes.length, episode?.narration_asset_path, episode?.video_asset_path]);
 
   const createTask = async (taskType: Task["task_type"], sceneNumber?: number) => {
     if (taskType === "GENERATE_SCENES" && scenes.length > 0 && !window.confirm(`Replace all ${scenes.length} shots and clear their preview audio?`)) return;
@@ -87,10 +90,17 @@ export function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxD
     finally { setBusy(null); }
   };
 
+  const saveQuestionCount = async () => {
+    if (!episode || questionCountDraft === (episode.quiz_config?.question_count ?? 8)) return;
+    setBusy("question-count");
+    try { await api.updateEpisode(channel.channel_id, episodeId, { question_count: questionCountDraft }); await load(); onNotice({ tone: "good", message: "Question count updated" }); }
+    catch (error) { onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Could not update question count" }); }
+    finally { setBusy(null); }
+  };
   const saveDuration = async () => {
     if (!episode || durationDraft === episode.target_duration_minutes) return;
     setBusy("duration");
-    try { await api.updateEpisode(channel.channel_id, episodeId, durationDraft); await load(); onNotice({ tone: "good", message: "Duration target updated" }); }
+    try { await api.updateEpisode(channel.channel_id, episodeId, { target_duration_minutes: durationDraft }); await load(); onNotice({ tone: "good", message: "Duration target updated" }); }
     catch (error) { onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Could not update duration" }); }
     finally { setBusy(null); }
   };
@@ -131,12 +141,12 @@ export function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxD
   return <section className="page-wrap detail-page">
     <button className="back-button" onClick={onBack}><ArrowLeft size={16} />{channel.display_name}</button>
     <header className="detail-header episode-detail-header">
-      <div><p className="eyebrow">Production workspace</p><h1>{episode.topic.title}</h1><p className="detail-copy">{episode.topic.premise}</p></div>
-      <div className="detail-actions"><StageBadge stage={episode.stage} /><label className="duration-target">Target<input aria-label="Target duration in minutes" type="number" min="3" max="60" value={durationDraft} onChange={(event) => setDurationDraft(Number(event.target.value))} onBlur={() => void saveDuration()} />min</label><button className="primary-button" disabled={Boolean(activeEpisodeTask) || busy === "GENERATE_PIPELINE"} onClick={() => void createTask("GENERATE_PIPELINE")}>{activeEpisodeTask || busy === "GENERATE_PIPELINE" ? <CircleNotch className="spin" size={16} /> : <Play size={16} />}{activeEpisodeTask ? "Working…" : readiness.narration ? "Run pipeline again" : pipelineTask?.status === "FAILED" ? "Retry pipeline" : "Start production"}</button></div>
+      <div><p className="eyebrow">{isQuiz ? "Quiz production" : "Production workspace"}</p><h1>{episode.topic.title}</h1><p className="detail-copy">{episode.topic.premise}</p></div>
+      <div className="detail-actions"><StageBadge stage={episode.stage} />{isQuiz ? <label className="duration-target">Questions<input aria-label="Question count" type="number" min="3" max="30" value={questionCountDraft} onChange={(event) => setQuestionCountDraft(Number(event.target.value))} onBlur={() => void saveQuestionCount()} /></label> : <label className="duration-target">Target<input aria-label="Target duration in minutes" type="number" min="3" max="60" value={durationDraft} onChange={(event) => setDurationDraft(Number(event.target.value))} onBlur={() => void saveDuration()} />min</label>}<button className="primary-button" disabled={Boolean(activeEpisodeTask) || busy === "GENERATE_PIPELINE"} onClick={() => void createTask("GENERATE_PIPELINE")}>{activeEpisodeTask || busy === "GENERATE_PIPELINE" ? <CircleNotch className="spin" size={16} /> : <Play size={16} />}{activeEpisodeTask ? "Working…" : isQuiz && readiness.video ? "Render again" : pipelineTask?.status === "FAILED" ? "Retry pipeline" : isQuiz ? "Build video" : readiness.narration ? "Run pipeline again" : "Start production"}</button></div>
     </header>
 
     {pipelineTask ? <TaskProgressPanel task={pipelineTask} title="Production pipeline" activeLabel="Running the next step" completionLabel="Production pipeline complete" now={episodeClock} progressLabel="Production pipeline progress" /> : null}
-    <PipelineRail readiness={readiness} />
+    <PipelineRail readiness={readiness} quiz={isQuiz} />
     {assessment ? <AssessmentPanel assessment={assessment} /> : null}
 
     <div className="artifact-stack">
@@ -155,6 +165,12 @@ export function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxD
       {episode.narration_asset_path ? <div className="master-audio-row"><audio controls preload="metadata" src={`${api.narrationAudioUrl(channel.channel_id, episodeId)}?v=${encodeURIComponent(episode.narration_generated_at ?? "")}`} aria-label="Production narration audio" /><span>{formatDuration(episode.narration_duration_seconds ?? 0)} · {episode.narration_segment_count} segments · {(episode.measured_narration_words_per_second ?? narrationWordsPerSecond).toFixed(2)} words/sec</span><a className="quiet-button compact" href={api.narrationAudioUrl(channel.channel_id, episodeId)} download={`${episode.slug}-narration.wav`}><DownloadSimple size={15} />Download</a></div> : <p className="artifact-empty">Generate after the script is approved to preserve long-form phrasing and calibrate timing.</p>}
     </section>
 
+    {isQuiz ? <section className="panel quiz-video-panel">
+      <div className="panel-heading"><div><p className="eyebrow">Final output</p><h2>Quiz video</h2></div><button className="primary-button compact" disabled={!readiness.narration || !readiness.scenes || Boolean(activeEpisodeTask)} onClick={() => void createTask("GENERATE_VIDEO")}>{latestTask(episodeTasks, ["GENERATE_VIDEO"]) && isTaskActive(latestTask(episodeTasks, ["GENERATE_VIDEO"])!) ? <CircleNotch className="spin" size={15} /> : <FilmSlate size={15} />}{readiness.video ? "Render again" : "Render video"}</button></div>
+      {latestTask(episodeTasks, ["GENERATE_VIDEO"]) ? <TaskProgressPanel task={latestTask(episodeTasks, ["GENERATE_VIDEO"])!} title="HyperFrames render" activeLabel="Rendering Quiz video" completionLabel="Video ready" now={episodeClock} compact /> : null}
+      {episode.video_asset_path ? <div className="quiz-video-result"><video controls preload="metadata" src={`${api.videoUrl(channel.channel_id, episodeId)}?v=${encodeURIComponent(episode.video_generated_at ?? "")}`} aria-label="Rendered Quiz video" /><div><strong>MP4 with Chatterbox audio</strong><span>{formatDuration(episode.video_duration_seconds ?? 0)} · HyperFrames</span><a className="quiet-button compact" href={api.videoUrl(channel.channel_id, episodeId)} download={`${episode.slug}.mp4`}><DownloadSimple size={15} />Download</a></div></div> : <p className="artifact-empty">Render after narration and scenes are ready.</p>}
+    </section> : null}
+
     <section className="shot-plan-section">
       <div className="section-heading scene-heading"><div><p className="eyebrow">Edit timeline</p><h2>Shot plan</h2></div><div className="scene-heading-actions"><button className="primary-button" disabled={!readiness.visualBible || Boolean(activeEpisodeTask)} onClick={() => void createTask("GENERATE_SCENES")}>{latestTask(episodeTasks, ["GENERATE_SCENES"]) && isTaskActive(latestTask(episodeTasks, ["GENERATE_SCENES"])!) ? <CircleNotch className="spin" size={17} /> : <FilmSlate size={17} />}{scenes.length ? "Regenerate shots" : "Generate shots"}</button></div></div>
       {currentShotBatch.length > 0 ? <div className="batch-shot-progress" role="progressbar" aria-label="Shot sequence progress" aria-valuemin={0} aria-valuemax={currentShotBatch.length} aria-valuenow={completedShotSequences}><div><strong>{completedShotSequences} / {currentShotBatch.length} sequences</strong><span>{currentShotBatch.some((task) => task.status === "FAILED") ? "Retry failed sequences from Tasks" : currentShotBatch.some(isTaskActive) ? "Generating in parallel" : "Sequence batch complete"}</span></div><div><span style={{ transform: `scaleX(${completedShotSequences / currentShotBatch.length})` }} /></div></div> : latestTask(episodeTasks, ["GENERATE_SCENES"]) ? <TaskProgressPanel task={latestTask(episodeTasks, ["GENERATE_SCENES"])!} title="Shot generation" activeLabel="Building sequence-aware shots" completionLabel="Shot plan ready" now={episodeClock} /> : null}
@@ -163,8 +179,8 @@ export function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxD
   </section>;
 }
 
-function PipelineRail({ readiness }: { readiness: { research: boolean; treatment: boolean; script: boolean; visualBible: boolean; scenes: boolean; narration: boolean } }) {
-  const steps = [["Research", readiness.research], ["Treatment", readiness.treatment], ["Script", readiness.script], ["Visual bible", readiness.visualBible], ["Shots", readiness.scenes], ["Narration", readiness.narration]] as const;
+function PipelineRail({ readiness, quiz }: { readiness: { research: boolean; treatment: boolean; script: boolean; visualBible: boolean; scenes: boolean; narration: boolean; video: boolean }; quiz: boolean }) {
+  const steps = quiz ? [["Research", readiness.research], ["Quiz plan", readiness.treatment], ["Script", readiness.script], ["Design", readiness.visualBible], ["Scenes", readiness.scenes], ["Audio", readiness.narration], ["Video", readiness.video]] as const : [["Research", readiness.research], ["Treatment", readiness.treatment], ["Script", readiness.script], ["Visual bible", readiness.visualBible], ["Shots", readiness.scenes], ["Narration", readiness.narration]] as const;
   return <ol className="pipeline-rail" aria-label="Episode production progress">{steps.map(([label, ready], index) => <li className={ready ? "is-ready" : ""} key={label}><span>{ready ? <CheckCircle size={15} weight="fill" /> : index + 1}</span><strong>{label}</strong></li>)}</ol>;
 }
 
@@ -220,6 +236,7 @@ function taskLabel(type: Task["task_type"]): string {
     GENERATE_PIPELINE: "Start production",
     GENERATE_NARRATION: "Generate narration",
     GENERATE_AUDIO: "Generate preview",
+    GENERATE_VIDEO: "Render video",
   };
   return labels[type] ?? "Generate";
 }

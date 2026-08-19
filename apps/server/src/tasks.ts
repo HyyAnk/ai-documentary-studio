@@ -1,4 +1,6 @@
 import { readFile, readdir, writeFile, mkdir } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import path from "node:path";
 import { EventEmitter } from "node:events";
 import {
@@ -26,6 +28,7 @@ import { optimizeShortScenes, packBeatsIntoScenes, rebalanceEditorialOverlays, t
 import { calibratedScriptTargetWords, countWords, extractNarration, extractNarrationChunks, extractNarrationSections, hasHumorPolicyMarker, scriptWordBounds } from "./production.js";
 import { stripEditorialOverlayInstructions } from "./visualPrompt.js";
 import { parseContinuityBundles } from "./visualBundles.js";
+import { pathToFileURL } from "node:url";
 
 type ActiveRun = { task: Task; threadId: string; turnId: string; output: string; manifest: ContextManifest; scriptAttempts: number; visualBibleAttempts: number };
 type CodexCleanupConfig = { auto_delete_threads: boolean; failed_thread_retention_days: number };
@@ -33,6 +36,8 @@ type PipelineRun = { cancelled: boolean; children: Set<string> };
 
 const channelTaskTypes = new Set<TaskType>(["GENERATE_DNA", "SUGGEST_TOPICS"]);
 const audioTaskTypes = new Set<TaskType>(["GENERATE_AUDIO", "GENERATE_NARRATION"]);
+const execFileAsync = promisify(execFile);
+const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
 
 export class TaskManager extends EventEmitter {
   private readonly tasks = new Map<string, Task>();
@@ -49,7 +54,7 @@ export class TaskManager extends EventEmitter {
   private readonly activeAudio = new Set<string>();
   private audioConfig: AppConfig["audio_generation"];
   private imageConfig: AppConfig["image_generation"];
-  private videoConfig: Pick<AppConfig["video_generation"], "max_scene_duration_seconds" | "narration_words_per_second">;
+  private videoConfig: AppConfig["video_generation"];
   private readonly audioProviderFactory: (target: ChatterboxTarget, config: AppConfig["audio_generation"]) => AudioProvider;
   private codexCleanupConfig: CodexCleanupConfig;
   private cleanupTimer: NodeJS.Timeout | null = null;
@@ -77,7 +82,7 @@ export class TaskManager extends EventEmitter {
   ) {
     super();
     this.videoConfig = typeof videoConfigOrMaxSceneDuration === "number"
-      ? { max_scene_duration_seconds: videoConfigOrMaxSceneDuration, narration_words_per_second: 2.3 }
+      ? { provider: "hyperframes", model: "", hyperframes_command: "npx hyperframes", render_quality: "draft", fps: 30, max_scene_duration_seconds: videoConfigOrMaxSceneDuration, default_scene_duration_seconds: 6, narration_words_per_second: 2.3, aspect_ratio: "16:9" }
       : videoConfigOrMaxSceneDuration;
     this.audioConfig = audioConfig;
     this.imageConfig = imageConfig;
@@ -132,10 +137,7 @@ export class TaskManager extends EventEmitter {
   }
 
   updateVideoConfig(config: AppConfig["video_generation"]): void {
-    this.videoConfig = {
-      max_scene_duration_seconds: config.max_scene_duration_seconds,
-      narration_words_per_second: config.narration_words_per_second,
-    };
+    this.videoConfig = config;
   }
 
   updateImageConfig(config: AppConfig["image_generation"]): void {
@@ -277,6 +279,10 @@ export class TaskManager extends EventEmitter {
       await this.runPipelineTask(task);
       return;
     }
+    if (task.task_type === "GENERATE_VIDEO") {
+      await this.runVideoTask(task);
+      return;
+    }
     if (task.task_type === "GENERATE_BUNDLE_IMAGE" && ShopAiKeyImageProvider.isConfigured()) {
       await this.runShopAiKeyImageTask(task);
       return;
@@ -407,12 +413,62 @@ export class TaskManager extends EventEmitter {
           run.children.delete(child.task_id);
         }
       }
+      const channel = await this.repository.getChannel(task.channel_id);
+      if (channel.engine === "quiz") {
+        await this.update(task.task_id, { progress_message: "Video · linting Quiz composition", progress_percent: 92 });
+        const videoChild = this.submit("GENERATE_VIDEO", task.channel_id, episodeId);
+        run.children.add(videoChild.task_id);
+        try {
+          const completed = await this.waitForTaskTerminal(videoChild.task_id, run);
+          if (completed.status !== "COMPLETED") throw new Error(`Video render failed: ${completed.error ?? completed.status}`);
+        } finally {
+          run.children.delete(videoChild.task_id);
+        }
+      }
       await this.finish(task.task_id, "COMPLETED", null, []);
     } catch (error) {
       const cancelled = run.cancelled || (error instanceof Error && error.message === "Pipeline cancelled");
       await this.finish(task.task_id, cancelled ? "CANCELLED" : "FAILED", cancelled ? "Cancelled by user" : error instanceof Error ? error.message : "Production pipeline failed");
     } finally {
       this.pipelineRuns.delete(task.task_id);
+    }
+  }
+
+  private async runVideoTask(task: Task): Promise<void> {
+    const context = { profileId: task.channel_id, workerId: task.task_id, step: "render_video" };
+    try {
+      await this.update(task.task_id, { status: "RUNNING", started_at: nowIso(), queue_position: null, progress_message: "Preparing Quiz composition", progress_percent: 5 });
+      if (!task.episode_id) throw new RepositoryError("Episode is required", "EPISODE_REQUIRED");
+      const episode = await this.repository.getEpisode(task.channel_id, task.episode_id);
+      const scenes = await this.repository.readScenes(task.channel_id, task.episode_id);
+      if (!episode.narration_asset_path) throw new RepositoryError("Generate the Chatterbox narration before rendering video", "NARRATION_REQUIRED");
+      if (scenes.length === 0) throw new RepositoryError("Generate Quiz scenes before rendering video", "SCENES_REQUIRED");
+      const narration = await this.repository.getEpisodeAudioFile(task.channel_id, task.episode_id, path.basename(episode.narration_asset_path));
+      const renderRoot = this.repository.resolvePath("runtime", "hyperframes", episode.episode_id);
+      await mkdir(renderRoot, { recursive: true });
+      const compositionPath = path.join(renderRoot, "index.html");
+      const outputPath = path.join(renderRoot, "quiz-video.mp4");
+      const html = buildQuizComposition(episode.quiz_config, scenes, narration.absolutePath, episode.narration_duration_seconds ?? undefined);
+      await writeFile(compositionPath, html, "utf8");
+      const manifestPath = await this.repository.writeRenderManifest(task.channel_id, task.episode_id, JSON.stringify({ engine: "hyperframes", composition: compositionPath, question_count: episode.quiz_config.question_count, format: episode.quiz_config.quiz_format, generated_at: nowIso() }));
+      await this.update(task.task_id, { progress_message: "Video · checking layout and media", progress_percent: 20 });
+      await execFileAsync(npxCommand, ["--yes", "hyperframes", "lint", renderRoot, "--json"], { cwd: this.repository.rootDirectory, timeout: 180_000, windowsHide: true });
+      await execFileAsync(npxCommand, ["--yes", "hyperframes", "inspect", renderRoot, "--json", "--samples", "5"], { cwd: this.repository.rootDirectory, timeout: 300_000, windowsHide: true });
+      await this.update(task.task_id, { progress_message: "Video · rendering MP4 with narration", progress_percent: 45 });
+      await execFileAsync(npxCommand, ["--yes", "hyperframes", "render", renderRoot, "--output", outputPath, "--fps", String(this.videoConfig.fps), "--quality", this.videoConfig.render_quality, "--strict", "--json"], { cwd: this.repository.rootDirectory, timeout: 30 * 60_000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 });
+      await this.update(task.task_id, { progress_message: "Video · verifying MP4 and audio track", progress_percent: 90 });
+      const probe = await execFileAsync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", outputPath], { cwd: this.repository.rootDirectory, timeout: 60_000, windowsHide: true });
+      const duration = Number.parseFloat(probe.stdout.trim());
+      if (!Number.isFinite(duration) || duration <= 0) throw new Error("Rendered MP4 has no readable duration");
+      const videoPath = await this.repository.writeVideoArtifact(task.channel_id, task.episode_id, await readFile(outputPath));
+      await this.repository.saveVideoMetadata(task.channel_id, task.episode_id, videoPath, Number(duration.toFixed(3)), manifestPath);
+      await this.update(task.task_id, { progress_message: "Quiz video ready", progress_percent: 100 });
+      await this.finish(task.task_id, "COMPLETED", null, [videoPath, manifestPath]);
+      this.logger.ok("Quiz video rendered", { ...context, step: "render_video" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Video render failed";
+      await this.finish(task.task_id, "FAILED", message);
+      this.logger.error(message, context);
     }
   }
 
@@ -615,6 +671,8 @@ export class TaskManager extends EventEmitter {
     try {
       const output = active.output.trim();
       const task = active.task;
+      const channel = await this.repository.getChannel(task.channel_id);
+      const isQuiz = channel.engine === "quiz";
       let outputFiles: string[] = [];
       if (task.task_type === "GENERATE_DNA") {
         await this.repository.saveChannelDna(task.channel_id, extractMarkdown(output, "# Channel DNA"));
@@ -625,26 +683,29 @@ export class TaskManager extends EventEmitter {
         outputFiles = [`channels/${(await this.repository.getChannel(task.channel_id)).slug}/topics/`];
       } else if (task.task_type === "GENERATE_RESEARCH") {
         const research = extractMarkdown(output, "# Research Dossier");
-        validateResearch(research);
+        const episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
+        if (isQuiz) validateQuizResearch(research, episode.quiz_config.question_count); else validateResearch(research);
         await this.repository.saveEpisodeFile(task.channel_id, task.episode_id!, "research.md", research);
         await this.repository.updateEpisodeStage(task.channel_id, task.episode_id!, "RESEARCH_READY");
         outputFiles = [(await this.repository.getEpisodeFile(task.channel_id, task.episode_id!, "research.md")).path];
       } else if (task.task_type === "GENERATE_TREATMENT") {
         const treatment = extractMarkdown(output, "# Documentary Treatment");
-        validateTreatment(treatment);
+        const episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
+        if (isQuiz) validateQuizTreatment(treatment, episode.quiz_config.question_count); else validateTreatment(treatment);
         await this.repository.saveEpisodeFile(task.channel_id, task.episode_id!, "treatment.md", treatment);
         await this.repository.updateEpisodeStage(task.channel_id, task.episode_id!, "TREATMENT_READY");
         outputFiles = [(await this.repository.getEpisodeFile(task.channel_id, task.episode_id!, "treatment.md")).path];
       } else if (task.task_type === "GENERATE_SCRIPT") {
         const episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
         const script = extractScriptMarkdown(output, episode.topic.title);
-        validateScript(script, calibratedScriptTargetWords(episode, this.videoConfig.narration_words_per_second));
+        if (isQuiz) validateQuizScript(script, episode.quiz_config.question_count); else validateScript(script, calibratedScriptTargetWords(episode, this.videoConfig.narration_words_per_second));
         await this.repository.saveEpisodeFile(task.channel_id, task.episode_id!, "script.md", script);
         await this.repository.updateEpisodeStage(task.channel_id, task.episode_id!, "SCRIPT_READY");
         outputFiles = [`${(await this.repository.getEpisodeFile(task.channel_id, task.episode_id!, "script.md")).path}`];
       } else if (task.task_type === "GENERATE_VISUAL_BIBLE") {
         const visualBible = extractMarkdown(output, "# Episode Visual Bible");
-        validateVisualBible(visualBible);
+        const episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
+        if (isQuiz) validateQuizVisualBible(visualBible, episode.quiz_config.question_count); else validateVisualBible(visualBible);
         await this.repository.saveEpisodeFile(task.channel_id, task.episode_id!, "visual_bible.md", visualBible);
         await this.repository.updateEpisodeStage(task.channel_id, task.episode_id!, "VISUAL_BIBLE_READY");
         outputFiles = [(await this.repository.getEpisodeFile(task.channel_id, task.episode_id!, "visual_bible.md")).path];
@@ -668,7 +729,7 @@ export class TaskManager extends EventEmitter {
         const sequenceNumber = this.findSceneNumber(task.task_id);
         if (!sequenceNumber) throw new Error("Sequence number is required");
         const beats = parseBeatsOutput(output);
-        validateBeatOutput(beats, 1);
+        validateBeatOutput(beats, 1, isQuiz);
         const episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
         const script = await this.repository.getEpisodeFile(task.channel_id, task.episode_id!, "script.md");
         const scriptSections = extractNarrationSections(script.content);
@@ -692,7 +753,7 @@ export class TaskManager extends EventEmitter {
         }
       } else if (task.task_type === "GENERATE_SCENES") {
         const beats = parseBeatsOutput(output);
-        validateBeatOutput(beats);
+        validateBeatOutput(beats, 5, isQuiz);
         const episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
         const script = await this.repository.getEpisodeFile(task.channel_id, task.episode_id!, "script.md");
         validateNarrationCoverage(script.content, beats, 0.975);
@@ -887,6 +948,8 @@ function parseTopicCandidates(output: string, channelId: string) {
   const raw = parseJson(output);
   const list = Array.isArray(raw) ? raw : (raw as { candidates?: unknown[] }).candidates;
   if (!Array.isArray(list) || list.length !== 5) throw new Error("Codex topic output must contain exactly 5 candidates");
+  const formats = ["knowledge", "image_guess", "multiple_choice", "true_false", "odd_one_out"] as const;
+  const ages = ["4-6", "7-9", "10-12", "family"] as const;
   return list.map((item, index) => {
     const candidate = item as Record<string, unknown>;
     return {
@@ -899,8 +962,48 @@ function parseTopicCandidates(output: string, channelId: string) {
       estimated_potential: String(candidate.estimated_potential ?? candidate.estimatedPotential ?? "").trim(),
       generated_at: nowIso(),
       selected: false,
+      quiz_format: formats.includes(String(candidate.quiz_format) as typeof formats[number]) ? String(candidate.quiz_format) as typeof formats[number] : "knowledge",
+      question_count: Math.max(3, Math.min(30, Number(candidate.question_count) || 8)),
+      age_band: ages.includes(String(candidate.age_band) as typeof ages[number]) ? String(candidate.age_band) as typeof ages[number] : "7-9",
     };
   });
+}
+
+export function buildQuizComposition(config: { question_count: number; quiz_format: string; age_band: string; visual_theme: string }, scenes: Scene[], audioPath: string, narrationDurationSeconds?: number): string {
+  const sceneDuration = Math.max(0.1, scenes.reduce((sum, scene) => sum + scene.duration_seconds, 0));
+  const totalDuration = Math.max(3, narrationDurationSeconds ?? sceneDuration);
+  const durationScale = totalDuration / sceneDuration;
+  const audioSrc = escapeHtml(pathToFileURL(audioPath).href);
+  let cursor = 0;
+  const clips = scenes.map((scene, index) => {
+    const start = cursor;
+    const scaledDuration = scene.duration_seconds * durationScale;
+    cursor += scaledDuration;
+    const isWelcome = index === 0 || /welcome|intro|opening/i.test(scene.sequence_title);
+    const quiz = scene.quiz;
+    const questionNumber = quiz?.question_number ?? Math.min(config.question_count, Math.max(1, index));
+    const label = isWelcome ? "READY TO PLAY" : `QUESTION ${questionNumber}`;
+    const safeDialogue = escapeHtml((quiz?.explanation || scene.dialogue).replace(/\s+/g, " ").trim().slice(0, 240));
+    const safeTitle = escapeHtml(quiz?.question || scene.sequence_title || label);
+    const choices = (quiz?.choices.length ? quiz.choices : ["A", "B", "C"]).slice(0, 3).map((choice, choiceIndex) => `<div class="answer-choice answer-${choiceIndex + 1}"><b>${String.fromCharCode(65 + choiceIndex)}</b><span>${escapeHtml(choice)}</span></div>`).join("");
+    const phaseLabel = quiz?.phase === "reveal" ? "ANSWER REVEAL" : quiz?.phase === "explanation" ? "WHY IT'S TRUE" : label;
+    return `<section id="quiz-scene-${index + 1}" class="clip quiz-scene ${isWelcome ? "welcome" : ""}" data-start="${start.toFixed(3)}" data-duration="${scaledDuration.toFixed(3)}" data-track-index="0">
+      <div class="scene-kicker">${phaseLabel}</div>
+      <h1>${safeTitle}</h1>
+      <div class="answer-grid">${choices}</div>
+      <p class="voice-line">${safeDialogue}</p>
+      <div class="countdown"><span></span><span></span><span></span></div>
+      <div class="sparkle sparkle-one">✦</div><div class="sparkle sparkle-two">✦</div>
+    </section>`;
+  }).join("\n");
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>Quiz composition</title><style>
+:root{color-scheme:dark;--ink:#18212b;--cream:#fff8e8;--yellow:#ffd65a;--coral:#ff7866;--mint:#73d6bd;--blue:#78b9ff}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--ink);font-family:Arial,sans-serif}body{color:var(--cream)}#stage{position:relative;width:1920px;height:1080px;overflow:hidden;background:radial-gradient(circle at 18% 10%,#31445c 0,#18212b 45%,#111820 100%)}#stage:before{content:"";position:absolute;inset:0;opacity:.17;background-image:radial-gradient(#fff 1px,transparent 1px);background-size:34px 34px}section.clip{position:absolute;inset:0;padding:125px 160px 100px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}.scene-kicker{padding:14px 24px;border:4px solid var(--yellow);border-radius:999px;color:var(--yellow);font-size:34px;font-weight:800;letter-spacing:.14em}section.clip h1{max-width:1420px;margin:36px 0 42px;color:var(--cream);font-size:82px;line-height:1.04;letter-spacing:-.04em;text-wrap:balance}.answer-grid{display:grid;grid-template-columns:repeat(3,260px);gap:24px;margin-bottom:38px}.answer-grid div{min-width:220px;display:grid;gap:8px;padding:22px 16px;border-radius:26px;color:var(--ink);font-size:58px;font-weight:900}.answer-grid div span{font-size:22px;line-height:1.15;font-weight:700}.answer-grid div:nth-child(1){background:var(--coral)}.answer-grid div:nth-child(2){background:var(--mint)}.answer-grid div:nth-child(3){background:var(--blue)}.voice-line{max-width:1180px;margin:0;color:#dce7ef;font-size:31px;line-height:1.35}.countdown{display:flex;gap:14px;margin-top:34px}.countdown span{width:18px;height:18px;border-radius:50%;background:var(--yellow)}.sparkle{position:absolute;color:var(--yellow);font-size:88px}.sparkle-one{top:120px;left:190px}.sparkle-two{right:210px;bottom:150px;color:var(--coral)}
+</style></head><body><main id="stage" data-composition-id="quiz" data-no-timeline data-start="0" data-width="1920" data-height="1080" data-duration="${totalDuration.toFixed(3)}" data-fps="${30}">${clips}<audio id="quiz-narration" class="clip" data-start="0" data-duration="${totalDuration.toFixed(3)}" data-track-index="2" data-volume="1" src="${audioSrc}"></audio></main><script>window.__playerReady=true;window.__renderReady=true;</script></body></html>`;
+}
+
+function escapeHtml(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 
 export function parseBeatsOutput(output: string): Beat[] {
@@ -929,6 +1032,7 @@ export function parseBeatsOutput(output: string): Beat[] {
       reconstruction: typeof beat.reconstruction === "boolean" ? beat.reconstruction : String(beat.asset_type ?? "").toLowerCase() === "ai_reconstruction",
       sound_cue: String(beat.sound_cue ?? "").trim(),
       editorial_overlay: parseEditorialOverlay(beat.editorial_overlay),
+      quiz: parseQuizSceneContent(beat.quiz),
     };
   });
 }
@@ -969,6 +1073,7 @@ function parseRegeneration(output: string): Partial<Scene> {
     reconstruction: typeof raw.reconstruction === "boolean" ? raw.reconstruction : undefined,
     sound_cue: typeof raw.sound_cue === "string" ? raw.sound_cue : undefined,
     editorial_overlay: raw.editorial_overlay === undefined ? undefined : parseEditorialOverlay(raw.editorial_overlay),
+    quiz: raw.quiz === undefined ? undefined : parseQuizSceneContent(raw.quiz),
   };
 }
 
@@ -986,6 +1091,22 @@ function parseEditorialOverlay(value: unknown): Beat["editorial_overlay"] {
     : [];
   const duration = typeof raw.duration_seconds === "number" && Number.isFinite(raw.duration_seconds) ? Math.max(0.1, Math.min(20, raw.duration_seconds)) : null;
   return EditorialOverlaySchema.parse({ kind, text: String(raw.text ?? "").trim(), motion, placement, duration_seconds: duration, data, source_ids: parseStringList(raw.source_ids) });
+}
+
+function parseQuizSceneContent(value: unknown): Scene["quiz"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const phases = ["intro", "question", "reveal", "explanation", "outro"] as const;
+  const phaseValue = String(raw.phase ?? "question") as typeof phases[number];
+  return {
+    phase: phases.includes(phaseValue) ? phaseValue : "question",
+    question_number: Number.isInteger(Number(raw.question_number)) && Number(raw.question_number) > 0 ? Number(raw.question_number) : null,
+    question: String(raw.question ?? "").trim(),
+    choices: Array.isArray(raw.choices) ? raw.choices.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 4) : [],
+    answer: String(raw.answer ?? "").trim(),
+    explanation: String(raw.explanation ?? "").trim(),
+    image_prompt: String(raw.image_prompt ?? "").trim(),
+  };
 }
 
 function parseWavDuration(buffer: Uint8Array): number {
@@ -1013,6 +1134,32 @@ function validateResearch(markdown: string): void {
   const claimCount = new Set(markdown.match(/\bC\d{2,}\b/g) ?? []).size;
   if (sourceCount < 5) throw new Error(`Research quality gate failed: found ${sourceCount} source URLs; at least 5 are required`);
   if (claimCount < 5) throw new Error(`Research quality gate failed: found ${claimCount} claim IDs; at least 5 are required`);
+}
+
+function validateQuizResearch(markdown: string, questionCount: number): void {
+  const sourceCount = new Set(markdown.match(/https?:\/\/[^\s)>\]]+/g) ?? []).size;
+  const claimCount = new Set(markdown.match(/\bC\d{2,}\b/g) ?? []).size;
+  if (sourceCount < Math.max(3, Math.ceil(questionCount / 2))) throw new Error(`Quiz research quality gate failed: found ${sourceCount} source URLs`);
+  if (claimCount < questionCount) throw new Error(`Quiz research quality gate failed: found ${claimCount} claim IDs for ${questionCount} questions`);
+}
+
+function validateQuizTreatment(markdown: string, questionCount: number): void {
+  const headings = new Set(markdown.match(/^##\s+Question\s+\d+/gim) ?? []).size;
+  if (headings < questionCount) throw new Error(`Quiz treatment quality gate failed: found ${headings} question blocks for ${questionCount} questions`);
+  if (!/time budget/i.test(markdown) || !/correct answer/i.test(markdown)) throw new Error("Quiz treatment quality gate failed: each question needs time budget and correct answer");
+}
+
+function validateQuizScript(markdown: string, questionCount: number): void {
+  if (!hasHumorPolicyMarker(markdown)) throw new Error("Quiz script quality gate failed: HUMOR_POLICY v1 marker is missing");
+  const numbered = new Set(markdown.match(/(?:^|\n)\s*(?:Question\s*)?\d+[.)—:-]/gi) ?? []).size;
+  if (numbered < questionCount) throw new Error(`Quiz script quality gate failed: found ${numbered} numbered question blocks for ${questionCount} questions`);
+  if (!/answer|correct/i.test(markdown) || !/guess|think/i.test(markdown)) throw new Error("Quiz script quality gate failed: guess and answer beats are required");
+}
+
+function validateQuizVisualBible(markdown: string, questionCount: number): void {
+  const bundles = new Set(markdown.match(/\bCB[-_ ]?\d{1,2}\b/gi) ?? []).size;
+  if (bundles < questionCount) throw new Error(`Quiz visual bible quality gate failed: found ${bundles} continuity bundles for ${questionCount} questions`);
+  for (const required of ["palette", "countdown", "answer", "safe motion"]) if (!markdown.toLowerCase().includes(required)) throw new Error(`Quiz visual bible quality gate failed: missing ${required}`);
 }
 
 function validateTreatment(markdown: string): void {
@@ -1051,7 +1198,7 @@ function validateVisualBible(markdown: string): void {
   }
 }
 
-function validateBeatOutput(beats: Beat[], minimumSequences = 5): void {
+function validateBeatOutput(beats: Beat[], minimumSequences = 5, quiz = false): void {
   const sequences = new Set(beats.map((beat) => beat.sequence_id));
   if (sequences.size < minimumSequences) throw new Error(`Shot-plan quality gate failed: found ${sequences.size} sequences; at least ${minimumSequences} are required`);
   const prompts = beats.map((beat) => beat.visual_prompt.replace(/\s+/g, " ").trim().toLowerCase());
@@ -1065,6 +1212,10 @@ function validateBeatOutput(beats: Beat[], minimumSequences = 5): void {
   if (overlayCoverage > 0.45) throw new Error(`Shot-plan quality gate failed: editorial overlays cover ${Math.round(overlayCoverage * 100)}% of beats; keep overlays selective and below 45%`);
   const invalidCharts = beats.filter((beat) => ["bar_chart", "line_chart"].includes(beat.editorial_overlay.kind) && beat.editorial_overlay.data.length < 2);
   if (invalidCharts.length) throw new Error("Shot-plan quality gate failed: charts require at least two sourced data points");
+  if (quiz) {
+    const incompleteQuiz = beats.filter((beat) => !beat.quiz || (!["intro", "outro"].includes(beat.quiz.phase) && (!beat.quiz.question_number || !beat.quiz.question || !beat.quiz.answer)));
+    if (incompleteQuiz.length) throw new Error(`Quiz scene quality gate failed: ${incompleteQuiz.length} beats lack structured question or answer data`);
+  }
 }
 
 function validateNarrationCoverage(script: string, beats: Beat[], threshold: number): void {

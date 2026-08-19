@@ -143,7 +143,7 @@ export class RepositoryService {
     await mkdir(path.join(directory, "assets"), { recursive: true });
     await writeFile(path.join(directory, "topic_database.json"), "[]\n", "utf8");
 
-    const dna = await this.getTemplate("example_channel_dna.md");
+    const dna = await this.getTemplate(input.group_id === "quiz" ? "quiz_channel_dna.md" : "example_channel_dna.md");
     const styleGuide = await this.getTemplate("example_style_guide.md");
     const dnaContent = input.dna_mode === "upload" && input.dna_content?.trim()
       ? input.dna_content
@@ -151,7 +151,8 @@ export class RepositoryService {
         .replace("- Primary audience: ", `- Primary audience: ${input.target_audience}`)
         .replace("- Market: ", `- Market: ${input.market}`)
         .replace("- Language: ", `- Language: ${input.language}`)
-        .replace("Describe the channel's documentary territory in one clear paragraph.", input.description || "Describe the channel's documentary territory in one clear paragraph.");
+      .replace("Describe the channel's documentary territory in one clear paragraph.", input.description || "A playful, fact-checked quiz channel that turns broad knowledge into short moments of discovery.")
+      .replace("Describe the quiz channel territory in one clear paragraph.", input.description || "A playful, fact-checked quiz channel that turns broad knowledge into short moments of discovery.");
     await writeFile(path.join(directory, "channel_dna.md"), `${dnaContent.trim()}\n`, "utf8");
     await writeFile(path.join(directory, "style_guide.md"), `${styleGuide.trim()}\n`, "utf8");
 
@@ -169,6 +170,8 @@ export class RepositoryService {
       created_at: timestamp,
       updated_at: timestamp,
       episode_count: 0,
+      group_id: input.group_id === "quiz" ? "quiz" : "documentary",
+      engine: input.group_id === "quiz" ? "quiz" : "documentary",
     });
     await this.writeJsonAtomic(path.join(directory, "channel.json"), channel);
     return channel;
@@ -392,6 +395,13 @@ export class RepositoryService {
       video_prompts_path: `channels/${channel.slug}/episodes/${episodeSlug}/video_prompts.md`,
       target_duration_minutes: 8,
       target_word_count: 1050,
+      quiz_config: {
+        question_count: candidate.question_count,
+        quiz_format: candidate.quiz_format,
+        age_band: candidate.age_band,
+        answer_mode: "voice_and_reveal",
+        visual_theme: candidate.quiz_format === "image_guess" ? "jungle_jamboree" : "candy_pop",
+      },
       created_at: timestamp,
       updated_at: timestamp,
     });
@@ -415,11 +425,21 @@ export class RepositoryService {
   async updateEpisodeSettings(channelId: string, episodeId: string, input: EpisodeSettingsInput, wordsPerSecond: number): Promise<Episode> {
     const episode = await this.getEpisode(channelId, episodeId);
     const channel = await this.getChannel(channelId);
-    const targetWordCount = Math.round(input.target_duration_minutes * 60 * Math.max(0.1, episode.measured_narration_words_per_second ?? wordsPerSecond) * 0.95);
+    const nextQuizConfig = {
+      ...episode.quiz_config,
+      ...(input.question_count === undefined ? {} : { question_count: input.question_count }),
+      ...(input.quiz_format === undefined ? {} : { quiz_format: input.quiz_format }),
+      ...(input.age_band === undefined ? {} : { age_band: input.age_band }),
+      ...(input.answer_mode === undefined ? {} : { answer_mode: input.answer_mode }),
+      ...(input.visual_theme === undefined ? {} : { visual_theme: input.visual_theme }),
+    };
+    const targetDurationMinutes = input.target_duration_minutes ?? Math.max(3, Math.round((nextQuizConfig.question_count * 18) / 60));
+    const targetWordCount = Math.round(targetDurationMinutes * 60 * Math.max(0.1, episode.measured_narration_words_per_second ?? wordsPerSecond) * 0.95);
     const next = EpisodeSchema.parse({
       ...episode,
-      target_duration_minutes: input.target_duration_minutes,
+      target_duration_minutes: targetDurationMinutes,
       target_word_count: targetWordCount,
+      quiz_config: nextQuizConfig,
       updated_at: nowIso(),
     });
     await this.writeJsonAtomic(this.resolvePath("channels", channel.slug, "episodes", episode.slug, "episode.json"), next);
@@ -589,6 +609,59 @@ export class RepositoryService {
     const absolutePath = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets", filename);
     await this.writeBinaryAtomic(absolutePath, content);
     return `channels/${channel.slug}/episodes/${episode.slug}/assets/${filename}`;
+  }
+
+  async writeVideoArtifact(channelId: string, episodeId: string, content: Uint8Array, filename = "quiz-video.mp4"): Promise<string> {
+    if (!/^[a-z0-9][a-z0-9._-]*\.mp4$/i.test(filename)) throw new RepositoryError("Unsupported video file", "FILE_NOT_ALLOWED");
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const assetsDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets");
+    await mkdir(assetsDirectory, { recursive: true });
+    await this.assertRealPathInside(this.resolvePath("channels", channel.slug, "episodes", episode.slug), assetsDirectory);
+    const absolutePath = path.join(assetsDirectory, filename);
+    await this.writeBinaryAtomic(absolutePath, content);
+    return `channels/${channel.slug}/episodes/${episode.slug}/assets/${filename}`;
+  }
+
+  async getEpisodeVideoFile(channelId: string, episodeId: string, filename = "quiz-video.mp4"): Promise<{ absolutePath: string; path: string; size: number; modified_at: string }> {
+    if (!/^[a-z0-9][a-z0-9._-]*\.mp4$/i.test(filename)) throw new RepositoryError("Unsupported video file", "FILE_NOT_ALLOWED");
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const assetsDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets");
+    const absolutePath = path.join(assetsDirectory, filename);
+    try {
+      await this.assertRealPathInside(assetsDirectory, absolutePath);
+      const metadata = await stat(absolutePath);
+      return { absolutePath, path: `channels/${channel.slug}/episodes/${episode.slug}/assets/${filename}`, size: metadata.size, modified_at: metadata.mtime.toISOString() };
+    } catch {
+      throw new RepositoryError("Video asset not found", "VIDEO_NOT_FOUND");
+    }
+  }
+
+  async writeRenderManifest(channelId: string, episodeId: string, content: string): Promise<string> {
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const assetsDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets");
+    await mkdir(assetsDirectory, { recursive: true });
+    const absolutePath = path.join(assetsDirectory, "render-manifest.json");
+    await this.writeTextAtomic(absolutePath, content.endsWith("\n") ? content : `${content}\n`);
+    return `channels/${channel.slug}/episodes/${episode.slug}/assets/render-manifest.json`;
+  }
+
+  async saveVideoMetadata(channelId: string, episodeId: string, assetPath: string, durationSeconds: number, renderManifestPath: string): Promise<Episode> {
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const next = EpisodeSchema.parse({
+      ...episode,
+      stage: "VIDEO_READY",
+      video_asset_path: assetPath,
+      video_generated_at: nowIso(),
+      video_duration_seconds: durationSeconds,
+      render_manifest_path: renderManifestPath,
+      updated_at: nowIso(),
+    });
+    await this.writeJsonAtomic(this.resolvePath("channels", channel.slug, "episodes", episode.slug, "episode.json"), next);
+    return next;
   }
 
   async getEpisodeAudioFile(channelId: string, episodeId: string, filename: string): Promise<{ absolutePath: string; path: string; size: number; modified_at: string }> {
@@ -857,6 +930,7 @@ export function parseScenes(markdown: string, episodeId: string): Scene[] {
     const audioGeneratedAt = block.match(/<!--\s*Audio generated at:\s*(.*?)\s*-->/i)?.[1]?.trim() || null;
     const audioDuration = block.match(/<!--\s*Audio duration:\s*([\d.]+)\s*-->/i)?.[1];
     const overlayData = parseOverlayData(notes.match(/- Overlay data:[ \t]*(.*)/i)?.[1] ?? "");
+    const quizData = parseQuizData(notes.match(/- Quiz data:[ \t]*(.*)/i)?.[1] ?? "");
     return SceneSchema.parse({
       scene_id: `${episodeId}_scene_${index + 1}`,
       episode_id: episodeId,
@@ -884,6 +958,7 @@ export function parseScenes(markdown: string, episodeId: string): Scene[] {
         data: overlayData,
         source_ids: listValue("Overlay sources"),
       },
+      quiz: quizData,
       audio_asset_path: audioAssetPath,
       audio_generated_at: audioGeneratedAt,
       audio_duration_seconds: audioDuration ? Number(audioDuration) : null,
@@ -918,6 +993,7 @@ export function serializeScenes(scenes: Scene[]): string {
     `- Overlay duration: ${scene.editorial_overlay.duration_seconds ?? ""}`,
     `- Overlay data: ${JSON.stringify(scene.editorial_overlay.data)}`,
     `- Overlay sources: ${scene.editorial_overlay.source_ids.join(", ")}`,
+    `- Quiz data: ${JSON.stringify(scene.quiz)}`,
     scene.audio_asset_path ? `<!-- Audio asset: ${scene.audio_asset_path} -->\n<!-- Audio generated at: ${scene.audio_generated_at ?? ""} -->\n<!-- Audio duration: ${scene.audio_duration_seconds ?? ""} -->` : "",
   ].join("\n\n")}\n`).join("\n");
 }
@@ -944,4 +1020,9 @@ function parseOverlayData(value: string): Array<{ label: string; value: string |
   } catch {
     return [];
   }
+}
+
+function parseQuizData(value: string): Scene["quiz"] {
+  if (!value.trim() || value.trim() === "null") return null;
+  try { return SceneSchema.shape.quiz.parse(JSON.parse(value)); } catch { return null; }
 }

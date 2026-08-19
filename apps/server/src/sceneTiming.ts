@@ -17,6 +17,7 @@ export type Beat = {
   reconstruction: boolean;
   sound_cue: string;
   editorial_overlay: Scene["editorial_overlay"];
+  quiz?: Scene["quiz"];
 };
 
 export type PackedBeat = Beat & { estSeconds: number };
@@ -204,6 +205,7 @@ function finalizeScene(group: PackedBeat[], sceneNumber: number, episodeId: stri
     reconstruction: group.some((beat) => beat.reconstruction),
     sound_cue: group.map((beat) => beat.sound_cue).filter(Boolean).join("; "),
     editorial_overlay: group.map((beat) => beat.editorial_overlay).reduce(mergeEditorialOverlays, EditorialOverlaySchema.parse({})),
+    quiz: group.find((beat) => beat.quiz)?.quiz ?? null,
     audio_asset_path: null,
     audio_generated_at: null,
     audio_duration_seconds: null,

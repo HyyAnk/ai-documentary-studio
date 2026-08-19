@@ -4,8 +4,11 @@ import { AppConfigSchema, AudioSettingsInputSchema, CodexSettingsInputSchema, Im
 
 export const DEFAULT_CONFIG: AppConfig = {
   video_generation: {
-    provider: "none",
+    provider: "hyperframes",
     model: "",
+    hyperframes_command: "npx hyperframes",
+    render_quality: "draft",
+    fps: 30,
     max_scene_duration_seconds: 8,
     default_scene_duration_seconds: 6,
     narration_words_per_second: 2.3,

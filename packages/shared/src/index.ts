@@ -18,6 +18,8 @@ export const EpisodeStageSchema = z.enum([
   "SCENE_READY",
   "NARRATION_READY",
   "READY_FOR_GENERATION",
+  "VIDEO_RENDERING",
+  "VIDEO_READY",
 ]);
 export type EpisodeStage = z.infer<typeof EpisodeStageSchema>;
 
@@ -47,6 +49,7 @@ export const TaskTypeSchema = z.enum([
   "GENERATE_NARRATION",
   "GENERATE_AUDIO",
   "GENERATE_BUNDLE_IMAGE",
+  "GENERATE_VIDEO",
 ]);
 export type TaskType = z.infer<typeof TaskTypeSchema>;
 
@@ -67,6 +70,8 @@ export const ChannelSchema = z.object({
   updated_at: IsoDate,
   episode_count: z.number().int().nonnegative().default(0),
   voice_reference_path: z.string().nullable().default(null),
+  group_id: z.enum(["documentary", "quiz"]).default("documentary"),
+  engine: z.enum(["documentary", "quiz"]).default("documentary"),
 });
 export type Channel = z.infer<typeof ChannelSchema>;
 
@@ -80,6 +85,9 @@ export const TopicCandidateSchema = z.object({
   estimated_potential: z.string().min(1),
   generated_at: IsoDate,
   selected: z.boolean().default(false),
+  quiz_format: z.enum(["knowledge", "image_guess", "multiple_choice", "true_false", "odd_one_out"]).default("knowledge"),
+  question_count: z.number().int().min(3).max(30).default(8),
+  age_band: z.enum(["4-6", "7-9", "10-12", "family"]).default("7-9"),
 });
 export type TopicCandidate = z.infer<typeof TopicCandidateSchema>;
 
@@ -88,6 +96,15 @@ export const EpisodeTopicSchema = z.object({
   premise: z.string().min(1),
   hook: z.string().min(1),
 });
+
+export const QuizConfigSchema = z.object({
+  question_count: z.number().int().min(3).max(30).default(8),
+  quiz_format: z.enum(["knowledge", "image_guess", "multiple_choice", "true_false", "odd_one_out"]).default("knowledge"),
+  age_band: z.enum(["4-6", "7-9", "10-12", "family"]).default("7-9"),
+  answer_mode: z.enum(["voice_and_reveal", "voice_only"]).default("voice_and_reveal"),
+  visual_theme: z.enum(["candy_pop", "space_lab", "jungle_jamboree", "ocean_explorer"]).default("candy_pop"),
+});
+export type QuizConfig = z.infer<typeof QuizConfigSchema>;
 
 export const EditorialOverlaySchema = z.object({
   kind: z.enum(["none", "caption", "stat_card", "timeline", "bar_chart", "line_chart", "map_callout", "comparison", "quote"]).default("none"),
@@ -99,6 +116,17 @@ export const EditorialOverlaySchema = z.object({
   source_ids: z.array(z.string()).default([]),
 }).default({ kind: "none", motion: "none", placement: "lower_third" });
 export type EditorialOverlay = z.infer<typeof EditorialOverlaySchema>;
+
+export const QuizSceneContentSchema = z.object({
+  phase: z.enum(["intro", "question", "reveal", "explanation", "outro"]).default("question"),
+  question_number: z.number().int().positive().nullable().default(null),
+  question: z.string().default(""),
+  choices: z.array(z.string()).max(4).default([]),
+  answer: z.string().default(""),
+  explanation: z.string().default(""),
+  image_prompt: z.string().default(""),
+});
+export type QuizSceneContent = z.infer<typeof QuizSceneContentSchema>;
 
 export const SceneSchema = z.object({
   scene_id: z.string().min(1),
@@ -119,6 +147,7 @@ export const SceneSchema = z.object({
   reconstruction: z.boolean().default(true),
   sound_cue: z.string().default(""),
   editorial_overlay: EditorialOverlaySchema,
+  quiz: QuizSceneContentSchema.nullable().default(null),
   audio_asset_path: z.string().nullable().default(null),
   audio_generated_at: IsoDate.nullable().default(null),
   audio_duration_seconds: z.number().nonnegative().nullable().default(null),
@@ -145,6 +174,11 @@ export const EpisodeSchema = z.object({
   narration_duration_seconds: z.number().positive().nullable().default(null),
   narration_segment_count: z.number().int().nonnegative().default(0),
   measured_narration_words_per_second: z.number().positive().nullable().default(null),
+  quiz_config: QuizConfigSchema.default({}),
+  video_asset_path: z.string().nullable().default(null),
+  video_generated_at: IsoDate.nullable().default(null),
+  video_duration_seconds: z.number().positive().nullable().default(null),
+  render_manifest_path: z.string().nullable().default(null),
   created_at: IsoDate,
   updated_at: IsoDate,
 });
@@ -206,8 +240,11 @@ export type Task = z.infer<typeof TaskSchema>;
 
 export const AppConfigSchema = z.object({
   video_generation: z.object({
-    provider: z.string().default("none"),
+    provider: z.string().default("hyperframes"),
     model: z.string().default(""),
+    hyperframes_command: z.string().default("npx hyperframes"),
+    render_quality: z.enum(["draft", "standard", "high"]).default("draft"),
+    fps: z.number().int().min(24).max(60).default(30),
     max_scene_duration_seconds: z.number().positive().default(8),
     default_scene_duration_seconds: z.number().positive().default(6),
     narration_words_per_second: z.number().positive().default(2.3),
@@ -355,6 +392,7 @@ export const CreateChannelInputSchema = z.object({
   market: z.string().trim().max(120).default(""),
   dna_mode: z.enum(["example", "ai", "upload"]).default("example"),
   dna_content: z.string().optional(),
+  group_id: z.enum(["documentary", "quiz"]).default("documentary"),
 });
 export type CreateChannelInput = z.infer<typeof CreateChannelInputSchema>;
 
@@ -372,7 +410,12 @@ export const SaveTextInputSchema = z.object({ content: z.string() });
 export const TopicConfirmInputSchema = z.object({ topic_id: z.string().min(1) });
 
 export const EpisodeSettingsInputSchema = z.object({
-  target_duration_minutes: z.number().min(3).max(60),
+  target_duration_minutes: z.number().min(3).max(60).optional(),
+  question_count: z.number().int().min(3).max(30).optional(),
+  quiz_format: z.enum(["knowledge", "image_guess", "multiple_choice", "true_false", "odd_one_out"]).optional(),
+  age_band: z.enum(["4-6", "7-9", "10-12", "family"]).optional(),
+  answer_mode: z.enum(["voice_and_reveal", "voice_only"]).optional(),
+  visual_theme: z.enum(["candy_pop", "space_lab", "jungle_jamboree", "ocean_explorer"]).optional(),
 });
 export type EpisodeSettingsInput = z.infer<typeof EpisodeSettingsInputSchema>;
 
