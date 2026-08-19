@@ -39,7 +39,7 @@ export class ContextEngine {
     const dnaPath = `channels/${channel.slug}/channel_dna.md`;
     const stylePath = `channels/${channel.slug}/style_guide.md`;
     if (taskType === "GENERATE_DNA") {
-      const template = await read("templates/example_channel_dna.md", "canonical DNA schema");
+      const template = await read(isQuiz ? "templates/quiz_channel_dna.md" : "templates/example_channel_dna.md", "canonical DNA schema");
       const prompt = this.compose(taskType, channel, null, files, {
         user_description: channel.description,
         metadata: { name: channel.display_name, audience: channel.target_audience, language: channel.language, market: channel.market },

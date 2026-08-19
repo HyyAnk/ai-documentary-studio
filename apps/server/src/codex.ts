@@ -326,13 +326,17 @@ export class CodexAppServerClient extends EventEmitter {
 
   private async resolveCommand(): Promise<string> {
     if (this.resolvedCommand) return this.resolvedCommand;
-    const configured = this.config.codex.command || "codex";
+    const configured = this.config.codex.command.trim() || "codex";
     if (await this.canExecute(configured)) {
       this.resolvedCommand = configured;
       return configured;
     }
-    if (process.platform === "win32" && configured === "codex") {
-      const located = await execFileAsync("where.exe", [configured], { cwd: this.rootDirectory, timeout: 5_000, windowsHide: true }).catch(() => ({ stdout: "" }));
+    if (process.platform === "win32" && /(^|[\\/])codex(?:\.exe)?$/i.test(configured)) {
+      const cacheDirectory = path.join(this.rootDirectory, ".documentary-studio", "codex");
+      const cached = path.join(cacheDirectory, "codex.exe");
+      const tried: string[] = [configured];
+
+      const located = await this.locateWindowsCodexCommands();
       const packageRoot = path.join(process.env.ProgramFiles ?? "C:\\Program Files", "WindowsApps");
       const packageNames = await readdir(packageRoot).catch(() => [] as string[]);
       const packageCandidates = packageNames
@@ -340,31 +344,71 @@ export class CodexAppServerClient extends EventEmitter {
         .sort()
         .reverse()
         .map((name) => path.join(packageRoot, name, "app", "resources", "codex.exe"));
-      const candidates = [
-        ...located.stdout.split(/\r?\n/).map((value) => value.trim()).filter((value) => value.toLowerCase().endsWith("codex.exe")),
-        ...packageCandidates,
-      ];
+      const candidates = [...new Set([...located, ...packageCandidates])];
+
       for (const source of candidates) {
+        if (!source || tried.includes(source)) continue;
+        tried.push(source);
         const sourceStats = await stat(source).catch(() => null);
         if (!sourceStats) continue;
-        const cacheDirectory = path.join(this.rootDirectory, ".documentary-studio", "codex");
-        const cached = path.join(cacheDirectory, "codex.exe");
+
+        // A .cmd wrapper can be executed directly. Binary paths from
+        // WindowsApps are copied to a workspace-local path because Windows'
+        // package ACL may reject direct execution from an un-packaged Node
+        // process (EPERM/Access denied).
+        if (/\.(cmd|bat)$/i.test(source) && await this.canExecute(source)) {
+          this.resolvedCommand = source;
+          this.logger.info("Using the Codex command wrapper discovered on PATH", { step: "codex_resolve" });
+          return source;
+        }
+
         await mkdir(cacheDirectory, { recursive: true });
         const cachedStats = await stat(cached).catch(() => null);
-        if (!cachedStats || sourceStats.mtimeMs > cachedStats.mtimeMs || sourceStats.size !== cachedStats.size) await copyFile(source, cached);
+        if (!cachedStats || sourceStats.mtimeMs > cachedStats.mtimeMs || sourceStats.size !== cachedStats.size) {
+          await copyFile(source, cached).catch((error) => {
+            this.logger.debug(`Could not cache Codex candidate ${source}: ${error instanceof Error ? error.message : "copy failed"}`, { step: "codex_resolve" });
+          });
+        }
         if (await this.canExecute(cached)) {
           this.resolvedCommand = cached;
           this.logger.info("Using a local Codex binary copied from the Windows package", { step: "codex_resolve" });
           return cached;
         }
       }
+
+      // Keep the last known-good binary as a fallback. This covers a server
+      // launched with a PATH that cannot see the Windows Store execution alias.
+      if (await this.canExecute(cached)) {
+        this.resolvedCommand = cached;
+        this.logger.info("Using the cached Codex binary", { step: "codex_resolve" });
+        return cached;
+      }
+
+      const suffix = tried.length > 1 ? ` (tried ${tried.slice(0, 6).join(", ")}${tried.length > 7 ? ", …" : ""})` : "";
+      throw new CodexUnavailableError(`Codex command could not be executed: ${configured}${suffix}`);
     }
     throw new CodexUnavailableError(`Codex command could not be executed: ${configured}`);
   }
 
+  private async locateWindowsCodexCommands(): Promise<string[]> {
+    const located: string[] = [];
+    for (const name of ["codex.exe", "codex"]) {
+      const result = await execFileAsync("where.exe", [name], { cwd: this.rootDirectory, timeout: 5_000, windowsHide: true }).catch(() => null);
+      if (!result) continue;
+      located.push(...result.stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean));
+    }
+    return [...new Set(located)];
+  }
+
   private async canExecute(command: string): Promise<boolean> {
+    if (!command) return false;
     try {
-      await execFileAsync(command, ["--version"], { cwd: this.rootDirectory, timeout: 5_000, windowsHide: true });
+      await execFileAsync(command, ["--version"], {
+        cwd: this.rootDirectory,
+        timeout: 5_000,
+        windowsHide: true,
+        shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(command),
+      });
       return true;
     } catch {
       return false;

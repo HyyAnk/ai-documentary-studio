@@ -148,8 +148,13 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
 .activity-heading { margin-top: 64px; }
 .channel-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .channel-grid-wide { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.channel-card { min-height: 190px; display: flex; flex-direction: column; align-items: flex-start; padding: 19px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink); text-align: left; transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
+.channel-card { position: relative; min-height: 190px; display: flex; flex-direction: column; align-items: stretch; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink); text-align: left; transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
 .channel-card:hover { border-color: var(--line-dark); transform: translateY(-2px); box-shadow: 0 8px 20px color-mix(in srgb, var(--ink) 5%, transparent); }
+.channel-card > .card-top { padding: 12px 19px 0; }
+.channel-card-open { min-height: 150px; width: 100%; display: flex; flex: 1; flex-direction: column; align-items: flex-start; padding: 16px 19px 19px; border: 0; border-radius: inherit; background: transparent; color: inherit; text-align: left; }
+.channel-card-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.channel-card-delete { flex: 0 0 auto; opacity: 0; pointer-events: none; visibility: hidden; transition: opacity .16s ease, color .16s ease, border-color .16s ease, background .16s ease, visibility .16s ease; }
+.channel-card:hover .channel-card-delete, .channel-card:focus-within .channel-card-delete { opacity: 1; pointer-events: auto; visibility: visible; }
 .card-top, .card-bottom, .detail-actions, .panel-actions, .scene-tools, .modal-actions, .scene-notes { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .channel-card .card-top { justify-content: flex-end; }
 .channel-card h3 { margin-top: 22px; }
@@ -414,6 +419,12 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
 .storage-hint { margin: 12px 21px 0; color: var(--muted); font-size: 10px; line-height: 1.55; }
 .storage-hint code { color: var(--ink); font: 500 10px "DM Mono", monospace; }
 .modal-copy { margin: -9px 0 20px; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.confirm-modal { width: min(100%, 430px); }
+.confirm-modal .modal-copy strong { color: var(--ink); }
+.danger-confirm { border-color: var(--accent-deep); background: var(--accent-deep); color: var(--paper); }
+.danger-confirm:hover:not(:disabled) { border-color: var(--ink); background: var(--ink); color: var(--paper); }
+.danger-confirm:disabled { opacity: .48; cursor: not-allowed; }
+.form-error { margin: -4px 0 0; color: var(--accent-deep); font-size: 10px; line-height: 1.5; }
 .storage-setup-modal { width: min(100%, 590px); }
 .panel-footnote { margin: 19px 21px 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .empty-state { min-height: 300px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28px; border: 1px dashed var(--line-dark); border-radius: var(--radius); text-align: center; }
@@ -470,12 +481,19 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
 @keyframes spin { to { transform: rotate(360deg); } }
 .app-credit { padding: 0 46px 24px; color: var(--muted); font: 500 9px "DM Mono", monospace; letter-spacing: .03em; text-align: right; }
 .app-credit-mobile { display: none; }
-.channel-group-card { width: 100%; display: grid; grid-template-columns: auto minmax(140px, 1fr) minmax(260px, auto); align-items: center; gap: 16px; margin: 0 0 24px; padding: 18px 20px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--soft-accent) 65%, var(--surface)); color: var(--ink); text-align: left; }
+.channel-groups { display: grid; gap: 34px; }
+.channel-group-card { width: 100%; display: grid; grid-template-columns: auto minmax(140px, 1fr) minmax(260px, auto) auto; align-items: center; gap: 16px; margin: 0 0 18px; padding: 18px 20px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--soft-accent) 65%, var(--surface)); color: var(--ink); text-align: left; }
 .channel-group-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.documentary-group-card { border-color: color-mix(in srgb, var(--purple) 34%, var(--line)); background: color-mix(in srgb, var(--purple) 5%, var(--surface)); }
 .channel-group-icon { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 12px; background: var(--accent); color: var(--paper); }
+.documentary-group-card .channel-group-icon { background: var(--purple); }
 .channel-group-card strong, .channel-group-card span { display: block; }
 .channel-group-card strong { font-size: 16px; }
 .channel-group-card span { margin-top: 5px; color: var(--muted); font: 500 10px "DM Mono", monospace; }
+.group-create-button { justify-self: end; }
+.group-picker { display: flex; gap: 7px; flex-wrap: wrap; }
+.group-picker-option { padding: 7px 9px; border: 1px solid var(--line-dark); border-radius: 6px; background: var(--surface); color: var(--muted); font-size: 10px; font-weight: 700; }
+.group-picker-option.is-selected { border-color: var(--accent); background: var(--soft-accent); color: var(--ink); }
 .group-format-list { display: flex; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
 .group-format-list span { margin: 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--surface); }
 .quiz-channel-card .card-top { align-items: center; }
@@ -534,6 +552,9 @@ h3 { margin-bottom: 0; font-size: 15px; line-height: 1.25; letter-spacing: -.035
   .metric:first-child { padding-left: 14px; }
   .metric strong { font-size: 29px; }
   .channel-grid, .channel-grid-wide, .topic-grid, .detail-grid, .settings-grid { grid-template-columns: 1fr; }
+  .channel-group-card { grid-template-columns: auto 1fr; }
+  .channel-group-card .group-format-list, .channel-group-card .group-create-button { grid-column: 1 / -1; justify-self: stretch; }
+  .channel-card-delete { opacity: 1; pointer-events: auto; visibility: visible; }
   .bundle-image-card { grid-template-columns: 1fr; }
   .bundle-image-assets { flex-wrap: wrap; }
   .sequence-anchor { margin-left: 0; }

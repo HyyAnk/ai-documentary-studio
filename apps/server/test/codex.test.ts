@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -39,6 +39,33 @@ describe("Cockpit OpenAI-compatible transport", () => {
       { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
       { id: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
     ]);
+  });
+
+  it("uses a workspace-cached Codex binary when the Windows alias is not executable", async () => {
+    if (process.platform !== "win32") return;
+    temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "documentary-studio-codex-"));
+    const cachedPath = path.join(temporaryRoot, ".documentary-studio", "codex", "codex.exe");
+    await mkdir(path.dirname(cachedPath), { recursive: true });
+    await copyFile(process.execPath, cachedPath);
+    const logger = new StudioLogger(temporaryRoot);
+    await logger.init();
+    const client = new CodexAppServerClient(temporaryRoot, DEFAULT_CONFIG, logger);
+    const originalPath = process.env.PATH;
+    const originalPathAlias = process.env.Path;
+    try {
+      // Keep where.exe available while hiding the machine's Codex alias so the
+      // test exercises the cache fallback deterministically.
+      process.env.PATH = `${path.dirname(process.execPath)};C:\\Windows\\System32`;
+      process.env.Path = process.env.PATH;
+      const installation = await client.detectInstallation();
+      expect(installation.installed).toBe(true);
+      expect(path.resolve(installation.command)).toBe(path.resolve(cachedPath));
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      if (originalPathAlias === undefined) delete process.env.Path;
+      else process.env.Path = originalPathAlias;
+    }
   });
 
   it("lists models and bridges a Responses API output into Codex notifications", async () => {

@@ -35,6 +35,58 @@ test("channel creation exposes uploaded DNA mode", async ({ page }) => {
   await expect(page.locator("form.modal").getByRole("button", { name: "Create channel", exact: true })).toBeDisabled();
 });
 
+test("channel library separates Quiz and Documentary groups", async ({ page }) => {
+  const quiz = { channel_id: "ch_group_quiz", slug: "group-quiz", display_name: "Group quiz", description: "Quiz", target_audience: "Children", language: "English", market: "Global", channel_dna_path: "channels/group-quiz/channel_dna.md", style_guide_path: "channels/group-quiz/style_guide.md", status: "DRAFT", created_at: "2026-08-16T00:00:00.000Z", updated_at: "2026-08-16T00:00:00.000Z", episode_count: 0, group_id: "quiz", engine: "quiz" };
+  const documentary = { ...quiz, channel_id: "ch_group_doc", slug: "group-doc", display_name: "Group documentary", description: "Documentary", group_id: "documentary", engine: "documentary" };
+  await page.route("**/api/channels", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ channels: [quiz, documentary] }) }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "View all", exact: true }).first().click();
+  await expect(page.getByText("Quiz Channels", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Documentary Channels", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "New Quiz channel", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "New Documentary channel", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "New Documentary channel", exact: true }).click();
+  await expect(page.getByText("Documentary Engine keeps the existing research-to-video workflow", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Documentary Channels", exact: true })).toHaveClass(/is-selected/);
+  await expect(page.getByRole("button", { name: "Quiz Channels", exact: true })).not.toHaveClass(/is-selected/);
+});
+
+test("channel deletion requires an explicit Yes and typed confirmation", async ({ page }) => {
+  const channel = { channel_id: "ch_delete", slug: "delete-demo", display_name: "Delete demo", description: "A channel used to verify safe deletion.", target_audience: "Viewers", language: "English", market: "Global", channel_dna_path: "channels/delete-demo/channel_dna.md", style_guide_path: "channels/delete-demo/style_guide.md", status: "ACTIVE", created_at: "2026-08-16T00:00:00.000Z", updated_at: "2026-08-16T00:00:00.000Z", episode_count: 0, group_id: "quiz", engine: "quiz" };
+  let deleted = false;
+  await page.route("**/api/channels", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ channels: deleted ? [] : [channel] }) }));
+  await page.route(`**/api/channels/${channel.channel_id}?confirm=true`, async (route) => {
+    if (route.request().method() !== "DELETE") return route.continue();
+    deleted = true;
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
+  });
+
+  await page.goto("/");
+  const card = page.locator(".channel-card").filter({ hasText: "Delete demo" });
+  await card.hover();
+  const deleteButton = card.getByRole("button", { name: "Delete channel", exact: true });
+  await expect(deleteButton).toBeVisible();
+  await deleteButton.click();
+  await expect(page.getByRole("heading", { name: "Delete this channel", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "No", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  await card.hover();
+  await deleteButton.click();
+  await page.getByRole("button", { name: "Yes", exact: true }).click();
+  const confirmation = page.getByRole("textbox", { name: "Type Yes to confirm", exact: true });
+  const finalDelete = page.getByRole("dialog").getByRole("button", { name: "Delete channel", exact: true });
+  await expect(confirmation).toBeVisible();
+  await expect(finalDelete).toBeDisabled();
+  await confirmation.fill("yes");
+  await expect(finalDelete).toBeDisabled();
+  await confirmation.fill("Yes");
+  await expect(finalDelete).toBeEnabled();
+  await finalDelete.click();
+  await expect(page.getByText("Delete demo", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("status")).toContainText("Channel deleted: Delete demo");
+});
+
 test("channel detail keeps topic generation progress visible", async ({ page }) => {
   const channel = { channel_id: "ch_demo", slug: "demo", display_name: "Demo channel", description: "A demo channel", target_audience: "Viewers", language: "English", market: "Global", channel_dna_path: "channels/demo/channel_dna.md", style_guide_path: "channels/demo/style_guide.md", status: "ACTIVE", created_at: "2026-08-16T00:00:00.000Z", updated_at: "2026-08-16T00:00:00.000Z", episode_count: 0 };
   const task = { task_id: "task_demo", task_type: "SUGGEST_TOPICS", channel_id: "ch_demo", episode_id: null, status: "RUNNING", created_at: "2026-08-16T00:00:00.000Z", started_at: "2026-08-16T00:00:05.000Z", completed_at: null, codex_thread_id: "thread_demo", codex_turn_id: "turn_demo", error: null, output_files: [], lock_key: "ch_demo", queue_position: null, progress_message: "Receiving output", scene_number: null };
@@ -45,7 +97,7 @@ test("channel detail keeps topic generation progress visible", async ({ page }) 
   await page.route("**/api/channels/ch_demo/episodes", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ episodes: [] }) }));
   await page.goto("/");
   await expect(page.getByRole("button", { name: /01.*Demo channel/ })).toBeVisible();
-  await page.getByRole("button", { name: /Demo channel/ }).click();
+  await page.getByRole("button", { name: /01.*Demo channel/ }).click();
   await expect(page.getByRole("heading", { name: "Production status" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "At a glance" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "View DNA", exact: true })).toBeVisible();
@@ -98,7 +150,7 @@ test("episode generation stays visible and refreshes completed work without F5",
   await page.route(`**/api/channels/${channel.channel_id}/episodes/${episode.episode_id}/production-assessment`, (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ assessment }) }));
 
   await page.goto("/");
-  await page.getByRole("button", { name: /Episode demo/ }).click();
+  await page.getByRole("button", { name: /01.*Episode demo/ }).click();
   await page.getByRole("button", { name: /The Demo Story/ }).click();
 
   await expect(page.getByRole("button", { name: "Working…", exact: true })).toBeDisabled();
@@ -162,7 +214,7 @@ test("scene audio updates inline and exposes the duration match action", async (
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: /Audio demo/ }).click();
+  await page.getByRole("button", { name: /01.*Audio demo/ }).click();
   await page.getByRole("button", { name: /The Audio Story/ }).click();
   await expect(page.getByRole("button", { name: "Preview audio", exact: true })).toBeVisible();
   await expect(page.getByText("6s · 2 cuts", { exact: true })).toBeVisible();

@@ -39,6 +39,25 @@ describe("ContextEngine", () => {
     expect(context.excluded_categories).toContain("research/script/scene work for candidates");
   });
 
+  it("uses the Quiz Engine DNA template for AI DNA generation", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "documentary-quiz-dna-context-"));
+    roots.push(root);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# Documentary DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "quiz_channel_dna.md"), "# Quiz Channel DNA\n\n## Quiz formats\n\n- Knowledge quiz\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
+    const repository = new RepositoryService(root);
+    const channel = await repository.createChannel({ name: "Quiz DNA", description: "A quiz test", target_audience: "Children", language: "English", market: "Global", group_id: "quiz", dna_mode: "ai" });
+    const logger = new StudioLogger(root, true);
+    await logger.init();
+
+    const context = await new ContextEngine(repository, logger).build("GENERATE_DNA", channel.channel_id, null);
+
+    expect(context.included_files.some((file) => file.path === "templates/quiz_channel_dna.md")).toBe(true);
+    expect(context.prompt).toContain("Knowledge quiz");
+    expect(context.prompt).not.toContain("# Documentary DNA");
+  });
+
   it("writes target-aware script contracts for every 3–8 minute duration", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "documentary-script-context-"));
     roots.push(root);
