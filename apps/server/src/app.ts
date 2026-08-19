@@ -280,6 +280,12 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     return reply.code(201).send({ episode: await repository.confirmTopic(params.channelId, params.topicId) });
   });
   server.get("/api/channels/:channelId/episodes", async (request) => ({ episodes: await repository.listEpisodes((request.params as { channelId: string }).channelId) }));
+  server.delete("/api/channels/:channelId/episodes/:episodeId", async (request) => {
+    const params = request.params as { channelId: string; episodeId: string };
+    const query = request.query as { confirm?: string };
+    await repository.deleteEpisode(params.channelId, params.episodeId, query.confirm === "true");
+    return { ok: true };
+  });
   server.patch("/api/channels/:channelId/episodes/:episodeId", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };
     const input = EpisodeSettingsInputSchema.parse(request.body);

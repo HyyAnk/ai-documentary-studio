@@ -266,6 +266,17 @@ export class RepositoryService {
     await this.removeTree(directory);
   }
 
+  async deleteEpisode(channelId: string, episodeId: string, confirmed: boolean): Promise<void> {
+    if (!confirmed) throw new RepositoryError("Delete confirmation is required", "CONFIRMATION_REQUIRED");
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const episodesRoot = this.resolvePath("channels", channel.slug, "episodes");
+    const directory = this.resolvePath("channels", channel.slug, "episodes", episode.slug);
+    await this.assertRealPathInside(episodesRoot, directory);
+    await this.removeTree(directory);
+    await this.updateChannel(channelId, { updated_at: nowIso() });
+  }
+
   async getChannelDna(channelId: string): Promise<{ content: string; path: string; modified_at: string }> {
     const channel = await this.getChannel(channelId);
     const absolutePath = this.resolvePath("channels", channel.slug, "channel_dna.md");

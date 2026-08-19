@@ -84,6 +84,18 @@ describe("RepositoryService", () => {
     expect(episode.stage).toBe("SELECTED");
     expect((await repository.getEpisodeFile(channel.channel_id, episode.episode_id, "brief.md")).content).toContain("Topic 0");
   });
+
+  it("deletes an episode only after explicit confirmation", async () => {
+    const repository = await fixture();
+    const channel = await repository.createChannel({ name: "Delete Episode", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });
+    const topics = Array.from({ length: 5 }, (_, index) => ({ topic_id: `delete_topic_${index}`, channel_id: channel.channel_id, title: `Delete Topic ${index}`, premise: "Premise", why_it_fits: "Fits", hook: "Hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false }));
+    await repository.saveTopicRun(channel.channel_id, topics);
+    const episode = await repository.confirmTopic(channel.channel_id, topics[0].topic_id);
+    await expect(repository.deleteEpisode(channel.channel_id, episode.episode_id, false)).rejects.toThrow("Delete confirmation is required");
+    await repository.deleteEpisode(channel.channel_id, episode.episode_id, true);
+    expect(await repository.listEpisodes(channel.channel_id)).toHaveLength(0);
+    expect((await repository.getChannel(channel.channel_id)).episode_count).toBe(0);
+  });
 });
 
 describe("scene markdown", () => {
