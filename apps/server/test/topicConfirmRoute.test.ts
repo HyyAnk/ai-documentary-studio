@@ -47,6 +47,44 @@ describe("topic confirmation", () => {
       await app.close();
     }
   });
+
+  it("accepts 50 questions and rejects values above the product limit", async () => {
+    const root = await createTestRoot();
+    const app = await buildApp(root);
+    try {
+      const channel = await app.repository.createChannel({ name: "Question limit", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });
+      const topics = Array.from({ length: 5 }, (_, index) => ({
+        topic_id: `question-limit-${index}`,
+        channel_id: channel.channel_id,
+        title: `Question limit topic ${index}`,
+        premise: "Premise",
+        why_it_fits: "Fits",
+        hook: "Hook",
+        estimated_potential: "High",
+        generated_at: new Date().toISOString(),
+        selected: false,
+        question_count: 8,
+      }));
+      await app.repository.saveTopicRun(channel.channel_id, topics);
+
+      const accepted = await app.server.inject({
+        method: "POST",
+        url: `/api/channels/${channel.channel_id}/topics/${topics[0].topic_id}/confirm`,
+        payload: { question_count: 50 },
+      });
+      expect(accepted.statusCode).toBe(201);
+      expect(accepted.json().episode).toMatchObject({ quiz_config: { question_count: 50 }, target_duration_minutes: 28 });
+
+      const rejected = await app.server.inject({
+        method: "POST",
+        url: `/api/channels/${channel.channel_id}/topics/${topics[1].topic_id}/confirm`,
+        payload: { question_count: 51 },
+      });
+      expect(rejected.statusCode).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
 });
 
 async function createTestRoot(): Promise<string> {

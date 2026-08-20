@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Episode, ProductionAssessment, Scene } from "@studio/shared";
 import { api, type QuizV2State } from "../api";
 import type { BundleImage } from "../api";
@@ -13,7 +13,9 @@ export function useEpisode(channelId: string, episodeId: string, onError: (error
   const [assessment, setAssessment] = useState<ProductionAssessment | null>(null);
   const [bundleImages, setBundleImages] = useState<BundleImage[]>([]);
   const [quizV2, setQuizV2] = useState<QuizV2State | null>(null);
+  const loadVersion = useRef(0);
   const load = useCallback(async () => {
+    const version = ++loadVersion.current;
     const [episodesResponse, researchResponse, treatmentResponse, scriptResponse, visualBibleResponse, scenesResponse, assessmentResponse, bundleImagesResponse, quizV2Response] = await Promise.all([
       api.episodes(channelId),
       api.file(channelId, episodeId, "research.md"),
@@ -25,6 +27,7 @@ export function useEpisode(channelId: string, episodeId: string, onError: (error
       api.bundleImages(channelId, episodeId).catch(() => ({ images: [] })),
       api.quizV2(channelId, episodeId).catch(() => null),
     ]);
+    if (version !== loadVersion.current) return;
     setEpisode(episodesResponse.episodes.find((item) => item.episode_id === episodeId) ?? null);
     setResearch(researchResponse.content);
     setTreatment(treatmentResponse.content);
@@ -35,6 +38,6 @@ export function useEpisode(channelId: string, episodeId: string, onError: (error
     setBundleImages(bundleImagesResponse.images);
     setQuizV2(quizV2Response);
   }, [channelId, episodeId]);
-  useEffect(() => { void load().catch((error: Error) => onError(error)); }, [load, onError]);
+  useEffect(() => { void load().catch((error: Error) => onError(error)); return () => { loadVersion.current += 1; }; }, [load, onError]);
   return { episode, setEpisode, research, setResearch, treatment, setTreatment, script, setScript, visualBible, setVisualBible, scenes, setScenes, assessment, setAssessment, bundleImages, setBundleImages, quizV2, setQuizV2, load };
 }

@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export const QUIZ_MIN_QUESTION_COUNT = 3;
+export const QUIZ_MAX_QUESTION_COUNT = 50;
+
 export const ChannelStatusSchema = z.enum(["DRAFT", "ACTIVE", "PAUSED", "ARCHIVED"]);
 export type ChannelStatus = z.infer<typeof ChannelStatusSchema>;
 
@@ -86,7 +89,7 @@ export const TopicCandidateSchema = z.object({
   generated_at: IsoDate,
   selected: z.boolean().default(false),
   quiz_format: z.enum(["knowledge", "image_guess", "multiple_choice", "true_false", "odd_one_out"]).default("knowledge"),
-  question_count: z.number().int().min(3).max(30).default(8),
+  question_count: z.number().int().min(QUIZ_MIN_QUESTION_COUNT).max(QUIZ_MAX_QUESTION_COUNT).default(8),
   age_band: z.enum(["4-6", "7-9", "10-12", "family"]).default("7-9"),
 });
 export type TopicCandidate = z.infer<typeof TopicCandidateSchema>;
@@ -101,7 +104,7 @@ export const QuizVisualThemeSchema = z.enum(["candy_arcade", "candy_pop", "space
 export type QuizVisualTheme = z.infer<typeof QuizVisualThemeSchema>;
 
 export const QuizConfigSchema = z.object({
-  question_count: z.number().int().min(3).max(30).default(8),
+  question_count: z.number().int().min(QUIZ_MIN_QUESTION_COUNT).max(QUIZ_MAX_QUESTION_COUNT).default(8),
   quiz_format: z.enum(["knowledge", "image_guess", "multiple_choice", "true_false", "odd_one_out"]).default("knowledge"),
   age_band: z.enum(["4-6", "7-9", "10-12", "family"]).default("7-9"),
   answer_mode: z.enum(["voice_and_reveal", "voice_only"]).default("voice_and_reveal"),
@@ -165,7 +168,7 @@ export const QuizV2Schema = z.object({
   episode_id: z.string().min(1),
   age_band: QuizAgeBandSchema,
   language: z.string().trim().min(1).max(80),
-  questions: QuizQuestionSchema.array().min(1).max(30),
+  questions: QuizQuestionSchema.array().min(1).max(QUIZ_MAX_QUESTION_COUNT),
 }).superRefine((quiz, ctx) => {
   const ids = new Set<string>();
   const numbers = new Set<number>();
@@ -250,7 +253,7 @@ export const DirectorPlanSchema = z.object({
   schema_version: z.literal(2),
   episode_id: z.string().min(1),
   archetype_family: z.string().min(1).max(80),
-  beats: DirectorBeatSchema.array().min(1).max(30),
+  beats: DirectorBeatSchema.array().min(1).max(QUIZ_MAX_QUESTION_COUNT),
   midpoint_question_id: z.string().nullable().default(null),
   final_challenge_question_id: z.string().nullable().default(null),
 }).superRefine((plan, ctx) => {
@@ -754,12 +757,12 @@ export const SaveTextInputSchema = z.object({ content: z.string() });
 
 export const TopicConfirmInputSchema = z.object({
   topic_id: z.string().min(1),
-  question_count: z.number().int().min(3).max(30).optional(),
+  question_count: z.number().int().min(QUIZ_MIN_QUESTION_COUNT).max(QUIZ_MAX_QUESTION_COUNT).optional(),
 });
 
 export const EpisodeSettingsInputSchema = z.object({
   target_duration_minutes: z.number().min(3).max(60).optional(),
-  question_count: z.number().int().min(3).max(30).optional(),
+  question_count: z.number().int().min(QUIZ_MIN_QUESTION_COUNT).max(QUIZ_MAX_QUESTION_COUNT).optional(),
   quiz_format: z.enum(["knowledge", "image_guess", "multiple_choice", "true_false", "odd_one_out"]).optional(),
   age_band: z.enum(["4-6", "7-9", "10-12", "family"]).optional(),
   answer_mode: z.enum(["voice_and_reveal", "voice_only"]).optional(),

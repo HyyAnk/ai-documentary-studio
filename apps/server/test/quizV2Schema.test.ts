@@ -31,6 +31,18 @@ describe("Quiz V2 shared schemas", () => {
     expect(validQuiz().questions[0].correct_choice_id).toBe("a");
   });
 
+  it("accepts the 50-question production ceiling", () => {
+    const question = validQuiz().questions[0];
+    const quiz = QuizV2Schema.parse({
+      ...validQuiz(),
+      questions: Array.from({ length: 50 }, (_, index) => ({ ...question, id: `q${index + 1}`, number: index + 1, source_ids: [`C${String(index + 1).padStart(2, "0")}`] })),
+    });
+    const beat = { question_id: "q1", archetype: "text_multiple_choice" as const, energy: "curious" as const, visual_density: "focused" as const, thinking_seconds: 5, beat_intents: ["thinking" as const], asset_intents: [], mascot_state: null, sfx_intents: [], transition_intent: "cut" as const, reward_intensity: "small" as const };
+    const director = DirectorPlanSchema.parse({ schema_version: 2, episode_id: "episode-1", archetype_family: "quiz", beats: Array.from({ length: 50 }, (_, index) => ({ ...beat, question_id: `q${index + 1}` })) });
+    expect(quiz.questions).toHaveLength(50);
+    expect(director.beats).toHaveLength(50);
+  });
+
   it("rejects a canonical answer that is not visible", () => {
     expect(() => QuizV2Schema.parse({ ...validQuiz(), questions: [{ ...validQuiz().questions[0], correct_choice_id: "z" }] })).toThrow("Canonical answer must reference a visible choice");
   });

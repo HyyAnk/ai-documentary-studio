@@ -1,6 +1,6 @@
 import { ArrowLeft, CheckCircle, CircleNotch, DownloadSimple, FilmSlate, FloppyDisk, FolderOpen, PencilSimple, Play, SpeakerHigh, WarningCircle, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Channel, ProductionAssessment, Scene, Task } from "@studio/shared";
+import { QUIZ_MAX_QUESTION_COUNT, QUIZ_MIN_QUESTION_COUNT, type Channel, type ProductionAssessment, type Scene, type Task } from "@studio/shared";
 import { api, type BundleImage, type QuizV2Stages } from "../api";
 import { isTaskActive, isTaskTerminal, latestTask } from "../lib/utils";
 import { parseContinuityBundles } from "../lib/continuity";
@@ -93,6 +93,11 @@ export function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxD
 
   const saveQuestionCount = async () => {
     if (!episode || questionCountDraft === (episode.quiz_config?.question_count ?? 8)) return;
+    if (!Number.isInteger(questionCountDraft) || questionCountDraft < QUIZ_MIN_QUESTION_COUNT || questionCountDraft > QUIZ_MAX_QUESTION_COUNT) {
+      onNotice({ tone: "bad", message: `Questions must be between ${QUIZ_MIN_QUESTION_COUNT} and ${QUIZ_MAX_QUESTION_COUNT}` });
+      setQuestionCountDraft(episode.quiz_config?.question_count ?? 8);
+      return;
+    }
     setBusy("question-count");
     try { await api.updateEpisode(channel.channel_id, episodeId, { question_count: questionCountDraft }); await load(); onNotice({ tone: "good", message: "Question count updated" }); }
     catch (error) { onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Could not update question count" }); }
@@ -174,7 +179,7 @@ export function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxD
     <button className="back-button" onClick={onBack}><ArrowLeft size={16} />{channel.display_name}</button>
     <header className="detail-header episode-detail-header">
       <div><p className="eyebrow">{isQuiz ? "Quiz production" : "Production workspace"}</p><h1>{episode.topic.title}</h1><p className="detail-copy">{episode.topic.premise}</p></div>
-      <div className="detail-actions"><StageBadge stage={episode.stage} />{isQuiz ? <label className="duration-target">Questions<input aria-label="Question count" type="number" min="3" max="30" value={questionCountDraft} onChange={(event) => setQuestionCountDraft(Number(event.target.value))} onBlur={() => void saveQuestionCount()} /></label> : <label className="duration-target">Target<input aria-label="Target duration in minutes" type="number" min="3" max="60" value={durationDraft} onChange={(event) => setDurationDraft(Number(event.target.value))} onBlur={() => void saveDuration()} />min</label>}<button className="primary-button" disabled={Boolean(activeEpisodeTask) || busy === "GENERATE_PIPELINE"} onClick={() => void createTask("GENERATE_PIPELINE")}>{activeEpisodeTask || busy === "GENERATE_PIPELINE" ? <CircleNotch className="spin" size={16} /> : <Play size={16} />}{activeEpisodeTask ? "Working…" : isQuiz && readiness.video ? "Render again" : pipelineTask?.status === "FAILED" ? "Retry pipeline" : isQuiz ? "Build video" : readiness.narration ? "Run pipeline again" : "Start production"}</button></div>
+      <div className="detail-actions"><StageBadge stage={episode.stage} />{isQuiz ? <label className="duration-target">Questions<input aria-label="Question count" type="number" min={QUIZ_MIN_QUESTION_COUNT} max={QUIZ_MAX_QUESTION_COUNT} value={questionCountDraft} onChange={(event) => setQuestionCountDraft(Number(event.target.value))} onBlur={() => void saveQuestionCount()} /></label> : <label className="duration-target">Target<input aria-label="Target duration in minutes" type="number" min="3" max="60" value={durationDraft} onChange={(event) => setDurationDraft(Number(event.target.value))} onBlur={() => void saveDuration()} />min</label>}<button className="primary-button" disabled={Boolean(activeEpisodeTask) || busy === "GENERATE_PIPELINE"} onClick={() => void createTask("GENERATE_PIPELINE")}>{activeEpisodeTask || busy === "GENERATE_PIPELINE" ? <CircleNotch className="spin" size={16} /> : <Play size={16} />}{activeEpisodeTask ? "Working…" : isQuiz && readiness.video ? "Render again" : pipelineTask?.status === "FAILED" ? "Retry pipeline" : isQuiz ? "Build video" : readiness.narration ? "Run pipeline again" : "Start production"}</button></div>
     </header>
 
     {pipelineTask ? <TaskProgressPanel task={pipelineTask} title="Production pipeline" activeLabel="Running the next step" completionLabel="Production pipeline complete" now={episodeClock} progressLabel="Production pipeline progress" /> : null}

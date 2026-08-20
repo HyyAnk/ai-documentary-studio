@@ -7,7 +7,7 @@ import { ContextEngine } from "../src/context.js";
 import { StudioLogger } from "../src/logger.js";
 import { RepositoryService } from "../src/repository.js";
 import { calibratedScriptTargetWords, countWords, extractNarration, scriptWordBounds } from "../src/production.js";
-import { extractScriptMarkdown, TaskManager, validateScript } from "../src/tasks.js";
+import { extractScriptMarkdown, TaskManager, validateQuizScript, validateScript } from "../src/tasks.js";
 
 const roots: string[] = [];
 
@@ -55,6 +55,12 @@ describe("script quality gates", () => {
     expect(script).toContain("## Sequence 1 — The promise");
     expect(script).not.toContain("Research Dossier");
     expect(script).not.toContain("Assistant Notes");
+  });
+
+  it("counts quiz question headings through the 50-question ceiling", () => {
+    const script = ["# Quiz script", "<!-- HUMOR_POLICY: v1 -->", ...Array.from({ length: 50 }, (_, index) => `## Question ${index + 1} — Question ${index + 1}\nGuess now. The correct answer is ready.`)].join("\n\n");
+    expect(() => validateQuizScript(script, 15)).not.toThrow();
+    expect(() => validateQuizScript(script, 50)).not.toThrow();
   });
 });
 

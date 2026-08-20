@@ -13,6 +13,8 @@ import {
   type TaskEvent,
   type TaskStatus,
   type TaskType,
+  QUIZ_MAX_QUESTION_COUNT,
+  QUIZ_MIN_QUESTION_COUNT,
   makeId,
   nowIso,
 } from "@studio/shared";
@@ -36,7 +38,7 @@ import { resolveQuizAssets } from "./quiz/assets/resolveQuizAssets.js";
 
 export { buildQuizComposition };
 
-type ActiveRun = { task: Task; threadId: string; turnId: string; output: string; manifest: ContextManifest; scriptAttempts: number; visualBibleAttempts: number };
+type ActiveRun = { task: Task; threadId: string; turnId: string; output: string; manifest: ContextManifest; researchAttempts: number; scriptAttempts: number; visualBibleAttempts: number };
 type CodexCleanupConfig = { auto_delete_threads: boolean; failed_thread_retention_days: number };
 type PipelineRun = { cancelled: boolean; children: Set<string> };
 
@@ -304,7 +306,7 @@ export class TaskManager extends EventEmitter {
       await this.update(task.task_id, { codex_thread_id: threadId, progress_message: "Generating" });
       const turnId = await this.codex.startTurn(threadId, manifest.prompt);
       await this.update(task.task_id, { codex_turn_id: turnId });
-      this.active.set(task.task_id, { task: this.get(task.task_id), threadId, turnId, output: "", manifest, scriptAttempts: 0, visualBibleAttempts: 0 });
+      this.active.set(task.task_id, { task: this.get(task.task_id), threadId, turnId, output: "", manifest, researchAttempts: 0, scriptAttempts: 0, visualBibleAttempts: 0 });
       await new Promise<void>((resolve) => this.completionWaiters.set(task.task_id, resolve));
       this.logger.step("Codex turn started", context);
     } catch (error) {
@@ -862,7 +864,16 @@ export class TaskManager extends EventEmitter {
       await this.finish(task.task_id, "COMPLETED", null, outputFiles);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not persist Codex output";
-      if (active.task.task_type === "GENERATE_SCRIPT" && active.scriptAttempts < 1 && message.startsWith("Script quality gate failed")) {
+      if (active.task.task_type === "GENERATE_RESEARCH" && active.researchAttempts < 1 && message.startsWith("Quiz research quality gate failed")) {
+        try {
+          await this.retryQuizResearch(active, message);
+          return;
+        } catch (retryError) {
+          await this.finish(active.task.task_id, "FAILED", retryError instanceof Error ? retryError.message : message);
+          return;
+        }
+      }
+      if (active.task.task_type === "GENERATE_SCRIPT" && active.scriptAttempts < 1 && (message.startsWith("Script quality gate failed") || message.startsWith("Quiz script quality gate failed"))) {
         try {
           await this.retryScript(active, message);
           return;
@@ -884,6 +895,22 @@ export class TaskManager extends EventEmitter {
     }
   }
 
+  private async retryQuizResearch(active: ActiveRun, reason: string): Promise<void> {
+    const episode = await this.repository.getEpisode(active.task.channel_id, active.task.episode_id!);
+    const questionCount = episode.quiz_config.question_count;
+    const lastClaimId = `C${String(questionCount).padStart(2, "0")}`;
+    const sourceMinimum = Math.max(3, Math.ceil(questionCount / 2));
+    const previousThreadId = active.threadId;
+    const threadId = await this.codex.startThread();
+    const turnId = await this.codex.startTurn(threadId, `${active.manifest.prompt}\n\nSTRICT RETRY: The previous Quiz Research response failed validation (${reason}). Start over in a fresh response. The episode has exactly ${questionCount} questions. Return a complete Markdown quiz research dossier with exactly one ledger entry per question and exactly one unique claim ID for each question: C01, C02, ... ${lastClaimId}. Include every ID in order; do not stop at an earlier ID, reuse an ID, or count a source URL as a claim. Every entry must include the question number, canonical answer, child-friendly explanation, direct authoritative URL(s), and ambiguity or safety note. Include at least ${sourceMinimum} distinct direct authoritative URLs. Silently verify the full C01–${lastClaimId} sequence and all ${questionCount} question entries before returning. Return only the dossier, with no planning notes, reasoning, JSON, or explanation outside the Markdown document.`);
+    active.threadId = threadId;
+    active.turnId = turnId;
+    active.output = "";
+    active.researchAttempts += 1;
+    await this.update(active.task.task_id, { codex_thread_id: threadId, codex_turn_id: turnId, progress_message: "Retrying research with complete claim ledger" });
+    if (previousThreadId !== threadId) void this.codex.deleteThread(previousThreadId).catch(() => undefined);
+  }
+
   private async retryScript(active: ActiveRun, reason: string): Promise<void> {
     const episode = await this.repository.getEpisode(active.task.channel_id, active.task.episode_id!);
     const targetWords = calibratedScriptTargetWords(episode, this.videoConfig.narration_words_per_second);
@@ -895,7 +922,7 @@ export class TaskManager extends EventEmitter {
     active.turnId = turnId;
     active.output = "";
     active.scriptAttempts += 1;
-    await this.update(active.task.task_id, { codex_thread_id: threadId, codex_turn_id: turnId, progress_message: "Retrying script with strict word budget" });
+    await this.update(active.task.task_id, { codex_thread_id: threadId, codex_turn_id: turnId, progress_message: active.task.task_type === "GENERATE_SCRIPT" && reason.startsWith("Quiz script quality gate failed") ? "Retrying quiz script with strict question format" : "Retrying script with strict word budget" });
     if (previousThreadId !== threadId) void this.codex.deleteThread(previousThreadId).catch(() => undefined);
   }
 
@@ -1038,7 +1065,7 @@ function parseTopicCandidates(output: string, channelId: string) {
       generated_at: nowIso(),
       selected: false,
       quiz_format: formats.includes(String(candidate.quiz_format) as typeof formats[number]) ? String(candidate.quiz_format) as typeof formats[number] : "knowledge",
-      question_count: Math.max(3, Math.min(30, Number(candidate.question_count) || 8)),
+      question_count: Math.max(QUIZ_MIN_QUESTION_COUNT, Math.min(QUIZ_MAX_QUESTION_COUNT, Number(candidate.question_count) || 8)),
       age_band: ages.includes(String(candidate.age_band) as typeof ages[number]) ? String(candidate.age_band) as typeof ages[number] : "7-9",
     };
   });
@@ -1193,10 +1220,14 @@ function validateQuizTreatment(markdown: string, questionCount: number): void {
   if (!/time budget/i.test(markdown) || !/correct answer/i.test(markdown)) throw new Error("Quiz treatment quality gate failed: each question needs time budget and correct answer");
 }
 
-function validateQuizScript(markdown: string, questionCount: number): void {
+export function validateQuizScript(markdown: string, questionCount: number): void {
   if (!hasHumorPolicyMarker(markdown)) throw new Error("Quiz script quality gate failed: HUMOR_POLICY v1 marker is missing");
-  const numbered = new Set(markdown.match(/(?:^|\n)\s*(?:Question\s*)?\d+[.)—:-]/gi) ?? []).size;
+  const headingNumbers = [...markdown.matchAll(/^##\s+Question\s+(\d+)\b/gim)].map((match) => Number(match[1]));
+  const listNumbers = [...markdown.matchAll(/(?:^|\n)\s*(?:Question\s*)?(\d+)[.)—:-]\s*/gi)].map((match) => Number(match[1]));
+  const questionNumbers = new Set(headingNumbers.length > 0 ? headingNumbers : listNumbers);
+  const numbered = questionNumbers.size;
   if (numbered < questionCount) throw new Error(`Quiz script quality gate failed: found ${numbered} numbered question blocks for ${questionCount} questions`);
+  if (!Array.from({ length: questionCount }, (_, index) => index + 1).every((number) => questionNumbers.has(number))) throw new Error(`Quiz script quality gate failed: question blocks must be numbered 1-${questionCount}`);
   if (!/answer|correct/i.test(markdown) || !/guess|think/i.test(markdown)) throw new Error("Quiz script quality gate failed: guess and answer beats are required");
 }
 

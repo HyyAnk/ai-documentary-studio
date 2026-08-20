@@ -26,12 +26,17 @@ class FakeCodex extends EventEmitter {
     setTimeout(() => {
       const visualBible = prompt.includes("Task type: GENERATE_VISUAL_BIBLE");
       const strictVisualRetry = visualBible && prompt.includes("STRICT RETRY");
+      const quizResearchCount = Number(prompt.match(/The episode has exactly (\d+) questions/)?.[1] ?? 0);
+      const quizResearch = quizResearchCount > 0;
+      const strictQuizResearchRetry = quizResearch && prompt.includes("STRICT RETRY");
       const validVisualBible = "# Episode Visual Bible\n\n" + Array.from({ length: 5 }, (_, index) => `## Continuity bundle CB-0${index + 1} — Bundle ${index + 1}\n\n- Era: 1950s\n- Location: Test location\n- Subjects: Test subject\n- Palette: Warm neutral\n- Lighting: Soft side light\n- Anchor-frame prompt: A coherent documentary environment for bundle ${index + 1}.\n- Reference asset slots: anchor`).join("\n\n");
       const delta = prompt.includes("Generate exactly one reference image")
         ? "data:image/png;base64,iVBORw0KGgo="
         : visualBible
           ? strictVisualRetry ? validVisualBible : "# Episode Visual Bible\n\nThe visual bible needs revision."
-          : "# Research Dossier\n\nC01 https://example.com/1\nC02 https://example.com/2\nC03 https://example.com/3\nC04 https://example.com/4\nC05 https://example.com/5";
+          : quizResearch
+            ? `# Research Dossier\n\n${Array.from({ length: strictQuizResearchRetry ? quizResearchCount : Math.max(1, quizResearchCount - 7) }, (_, index) => `C${String(index + 1).padStart(2, "0")} https://example.com/quiz-${index + 1}`).join("\n")}`
+            : "# Research Dossier\n\nC01 https://example.com/1\nC02 https://example.com/2\nC03 https://example.com/3\nC04 https://example.com/4\nC05 https://example.com/5";
       this.emit("notification", { method: "item/agentMessage/delta", params: { threadId, turnId, delta } });
       this.activeTurns -= 1;
       this.emit("notification", { method: "turn/completed", params: { turn: { id: turnId, status: "completed" } } });
@@ -198,6 +203,35 @@ describe("TaskManager locks", () => {
     const visualBible = await repository.getEpisodeFile(channel.channel_id, episode.episode_id, "visual_bible.md");
     expect(visualBible.content).toContain("## Continuity bundle CB-05");
     expect(manager.get(task.task_id).progress_message).toBe("Completed");
+  });
+
+  it("retries quiz research when a question claim is missing", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "documentary-quiz-research-retry-"));
+    roots.push(root);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await mkdir(path.join(root, "shared"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "quiz_channel_dna.md"), "# Quiz DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
+    await writeFile(path.join(root, "shared", "research_rules.md"), "# Research\n", "utf8");
+    const repository = new RepositoryService(root);
+    const channel = await repository.createChannel({ name: "Quiz Research Retry", description: "", target_audience: "Children", language: "English", market: "Global", group_id: "quiz", dna_mode: "example" });
+    const topics = Array.from({ length: 5 }, (_, index) => ({ topic_id: `quiz_research_topic_${index}`, channel_id: channel.channel_id, title: `Quiz Research ${index}`, premise: "Premise", why_it_fits: "Fits", hook: "Hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false, quiz_format: "multiple_choice" as const, question_count: 15, age_band: "10-12" as const }));
+    await repository.saveTopicRun(channel.channel_id, topics);
+    const episode = await repository.confirmTopic(channel.channel_id, topics[0].topic_id);
+    const logger = new StudioLogger(root, true);
+    await logger.init();
+    const fake = new FakeCodex();
+    const manager = new TaskManager(repository, new ContextEngine(repository, logger), fake as never, 1, 8, logger);
+    await manager.load();
+
+    const task = manager.submit("GENERATE_RESEARCH", channel.channel_id, episode.episode_id);
+    await waitFor(() => manager.get(task.task_id).status === "COMPLETED");
+
+    const research = await repository.getEpisodeFile(channel.channel_id, episode.episode_id, "research.md");
+    expect(research.content).toContain("C15");
+    expect(manager.get(task.task_id).progress_message).toBe("Completed");
+    expect(fake.deletedThreads).toContain("thread_1");
   });
 
   it("runs the one-click pipeline and skips artifacts that are already ready", async () => {

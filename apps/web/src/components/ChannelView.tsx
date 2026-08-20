@@ -1,6 +1,6 @@
 import { Archive, ArrowLeft, ArrowUpRight, CaretDown, CircleNotch, FileText, FilmSlate, FloppyDisk, Lightbulb, PencilSimple, Plus, Play, Sparkle, Trash, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { QUIZ_SECONDS_PER_QUESTION, type Channel, type Episode, type Task, type TopicCandidate } from "@studio/shared";
+import { QUIZ_MAX_QUESTION_COUNT, QUIZ_MIN_QUESTION_COUNT, QUIZ_SECONDS_PER_QUESTION, type Channel, type Episode, type Task, type TopicCandidate } from "@studio/shared";
 import { api } from "../api";
 import { formatDate, isTaskActive, isTaskTerminal, latestTask } from "../lib/utils";
 import { EmptyState } from "./EmptyState";
@@ -72,7 +72,7 @@ export function DeleteEpisodeModal({ channel, episode, onClose, onDeleted, onErr
 
 export function TopicCard({ topic, onConfirm, busy, disabled }: { topic: TopicCandidate; onConfirm: (questionCount: number) => void; busy: boolean; disabled: boolean }) {
   const [questionCount, setQuestionCount] = useState(topic.question_count);
-  const isQuestionCountValid = Number.isInteger(questionCount) && questionCount >= 3 && questionCount <= 30;
+  const isQuestionCountValid = Number.isInteger(questionCount) && questionCount >= QUIZ_MIN_QUESTION_COUNT && questionCount <= QUIZ_MAX_QUESTION_COUNT;
   const estimatedDurationMinutes = Math.max(3, Math.round((questionCount * QUIZ_SECONDS_PER_QUESTION) / 60));
   const inputId = `topic-question-count-${topic.topic_id}`;
 
@@ -84,8 +84,8 @@ export function TopicCard({ topic, onConfirm, busy, disabled }: { topic: TopicCa
     <div className="topic-detail"><span>Hook</span><p>{topic.hook}</p></div>
     <div className="topic-question-picker">
       <label htmlFor={inputId}>Questions</label>
-      <input id={inputId} type="number" min={3} max={30} step={1} inputMode="numeric" value={questionCount} aria-label={`Question count for ${topic.title}`} aria-invalid={!isQuestionCountValid} disabled={disabled} onChange={(event) => setQuestionCount(Number(event.target.value))} />
-      <span aria-live="polite">{isQuestionCountValid ? `About ${estimatedDurationMinutes} min` : "Choose 3-30"}</span>
+      <input id={inputId} type="number" min={QUIZ_MIN_QUESTION_COUNT} max={QUIZ_MAX_QUESTION_COUNT} step={1} inputMode="numeric" value={questionCount} aria-label={`Question count for ${topic.title}`} aria-invalid={!isQuestionCountValid} disabled={disabled} onChange={(event) => setQuestionCount(Number(event.target.value))} />
+      <span aria-live="polite">{isQuestionCountValid ? `About ${estimatedDurationMinutes} min` : `Choose ${QUIZ_MIN_QUESTION_COUNT}-${QUIZ_MAX_QUESTION_COUNT}`}</span>
     </div>
     <div className="topic-footer"><span>{topic.estimated_potential}</span><button className="text-button" disabled={disabled || !isQuestionCountValid} onClick={() => onConfirm(questionCount)}>{busy ? <CircleNotch className="spin" size={15} /> : <Play size={14} />}{busy ? "Creating…" : "Use this topic"}</button></div>
   </article>;

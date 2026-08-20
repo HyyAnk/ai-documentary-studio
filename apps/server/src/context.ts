@@ -6,6 +6,8 @@ import {
   type Episode,
   type Scene,
   type TaskType,
+  QUIZ_MAX_QUESTION_COUNT,
+  QUIZ_MIN_QUESTION_COUNT,
 } from "@studio/shared";
 import { RepositoryService } from "./repository.js";
 import { StudioLogger } from "./logger.js";
@@ -66,7 +68,7 @@ export class ContextEngine {
         content: JSON.stringify(episodes.map((episode) => episode.topic.title)),
       });
       const prompt = this.compose(taskType, channel, null, [...files, ...sharedFiles], { output_contract: isQuiz
-        ? "Return exactly 5 JSON candidates with title, premise, why_it_fits, hook, estimated_potential, quiz_format (knowledge|image_guess|multiple_choice|true_false|odd_one_out), question_count (3-30), and age_band (4-6|7-9|10-12|family). Use five different formats where possible. Do not research or develop them further."
+        ? `Return exactly 5 JSON candidates with title, premise, why_it_fits, hook, estimated_potential, quiz_format (knowledge|image_guess|multiple_choice|true_false|odd_one_out), question_count (${QUIZ_MIN_QUESTION_COUNT}-${QUIZ_MAX_QUESTION_COUNT}), and age_band (4-6|7-9|10-12|family). Use five different formats where possible. Do not research or develop them further.`
         : "Return exactly 5 JSON candidates with title, premise, why_it_fits, hook, and estimated_potential. Do not research or develop them further." });
       return this.finalize(taskType, channelId, null, [...files, ...sharedFiles], excluded.concat("research/script/scene work for candidates"), prompt);
     }
@@ -94,6 +96,9 @@ export class ContextEngine {
     const maxBeatWords = Math.max(1, Math.floor((runtimeConfig.video_generation?.max_scene_duration_seconds ?? 8) * (episode.measured_narration_words_per_second ?? runtimeConfig.video_generation?.narration_words_per_second ?? 2.3)));
     const humorGuidance = humorGuidanceForDuration(episode.target_duration_minutes);
     const sequenceGuidance = sequenceGuidanceForDuration(episode.target_duration_minutes);
+    const quizQuestionCount = episode.quiz_config.question_count;
+    const quizLastClaimId = `C${String(quizQuestionCount).padStart(2, "0")}`;
+    const quizSourceMinimum = Math.max(3, Math.ceil(quizQuestionCount / 2));
 
     if (taskType === "GENERATE_RESEARCH") {
       await read(stylePath, "channel style guide");
@@ -161,7 +166,7 @@ export class ContextEngine {
     }
 
     const outputContract = isQuiz && taskType === "GENERATE_RESEARCH"
-      ? "Return only a completed Markdown quiz research dossier. Build a source-backed answer ledger for every planned question, with claim IDs C01..., direct authoritative URLs, canonical answer, one child-friendly explanation, and a note about ambiguity or safety. Include enough evidence for every answer."
+      ? `Return only a completed Markdown quiz research dossier. The episode has exactly ${quizQuestionCount} questions. Build an answer ledger with exactly ${quizQuestionCount} entries, one entry for every question in order, and assign each entry one unique claim ID exactly once from C01 through ${quizLastClaimId}. Do not stop early, merge questions, reuse a claim ID, or invent extra question numbers. Every ledger entry must include Question number, Claim ID, canonical answer, one child-friendly explanation, direct authoritative URL(s), and a note about ambiguity or safety. Include at least ${quizSourceMinimum} distinct direct authoritative URLs and enough evidence for every answer. Before returning, silently check that every ID in the complete sequence C01, C02, ... ${quizLastClaimId} appears in the ledger and that each question has evidence.`
       : isQuiz && taskType === "GENERATE_TREATMENT"
         ? `Return only a completed Markdown quiz treatment. Define the episode format, age band, ${episode.quiz_config.question_count} question blocks, and visual/audio rhythm. Use one second-level heading per question exactly like \`## Question 1 — Title\`. Each block must include Purpose, Question, Answer choices or visual clue, Correct answer, Think time, Reveal beat, Explanation, Claim IDs, and Time budget. Keep the total runtime appropriate for ${episode.quiz_config.question_count} questions.`
         : isQuiz && taskType === "GENERATE_SCRIPT"

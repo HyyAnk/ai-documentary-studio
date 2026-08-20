@@ -5,9 +5,19 @@ export type QuizV2Stages = Record<"research" | "questions" | "director" | "asset
 export type QuizV2State = { quiz: QuizV2 | null; director_plan: DirectorPlan | null; asset_plan: QuizAssetPlan | null; voice_plan: VoicePlan | null; timeline: QuizTimeline | null; assessment: QuizAssessment | null; stages: QuizV2Stages };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, { headers: { "content-type": "application/json", ...(init?.headers ?? {}) }, ...init });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error ?? "The studio could not complete that action");
+  const headers = new Headers(init?.headers);
+  headers.set("accept", "application/json");
+  if (init?.body !== undefined && init.body !== null && !headers.has("content-type")) headers.set("content-type", "application/json");
+  const response = await fetch(url, { ...init, headers });
+  const rawBody = await response.text();
+  let body: unknown = {};
+  try { body = rawBody ? JSON.parse(rawBody) : {}; } catch { body = {}; }
+  if (!response.ok) {
+    const message = body && typeof body === "object" && "error" in body && typeof body.error === "string"
+      ? body.error
+      : rawBody.trim() || `${response.status} ${response.statusText}`;
+    throw new Error(message);
+  }
   return body as T;
 }
 

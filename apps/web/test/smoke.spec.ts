@@ -58,9 +58,11 @@ test("channel library separates Quiz and Documentary groups into tabs", async ({
 test("channel deletion requires an explicit Yes and typed confirmation", async ({ page }) => {
   const channel = { channel_id: "ch_delete", slug: "delete-demo", display_name: "Delete demo", description: "A channel used to verify safe deletion.", target_audience: "Viewers", language: "English", market: "Global", channel_dna_path: "channels/delete-demo/channel_dna.md", style_guide_path: "channels/delete-demo/style_guide.md", status: "ACTIVE", created_at: "2026-08-16T00:00:00.000Z", updated_at: "2026-08-16T00:00:00.000Z", episode_count: 0, group_id: "quiz", engine: "quiz" };
   let deleted = false;
+  let deleteContentType: string | null = null;
   await page.route("**/api/channels", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ channels: deleted ? [] : [channel] }) }));
   await page.route(`**/api/channels/${channel.channel_id}?confirm=true`, async (route) => {
     if (route.request().method() !== "DELETE") return route.continue();
+    deleteContentType = route.request().headers()["content-type"] ?? null;
     deleted = true;
     await route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
   });
@@ -89,6 +91,30 @@ test("channel deletion requires an explicit Yes and typed confirmation", async (
   await finalDelete.click();
   await expect(page.getByText("Delete demo", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("status")).toContainText("Channel deleted: Delete demo");
+  expect(deleteContentType).toBeNull();
+});
+
+test("failed tasks expose a retry path with the original task scope", async ({ page }) => {
+  const channel = { channel_id: "ch_retry", slug: "retry-demo", display_name: "Retry demo", description: "A channel used to verify task recovery.", target_audience: "Viewers", language: "English", market: "Global", channel_dna_path: "channels/retry-demo/channel_dna.md", style_guide_path: null, status: "ACTIVE", created_at: "2026-08-16T00:00:00.000Z", updated_at: "2026-08-16T00:00:00.000Z", episode_count: 0, group_id: "quiz", engine: "quiz" };
+  const failedTask = { task_id: "task_retry_failed", task_type: "GENERATE_DNA", channel_id: channel.channel_id, episode_id: null, status: "FAILED", created_at: "2026-08-16T00:00:00.000Z", started_at: "2026-08-16T00:00:01.000Z", completed_at: "2026-08-16T00:00:02.000Z", codex_thread_id: null, codex_turn_id: null, error: "Codex App Server unavailable", output_files: [], lock_key: channel.channel_id, queue_position: null, progress_message: "Codex App Server unavailable", scene_number: null };
+  const retryTask = { ...failedTask, task_id: "task_retry_queued", status: "QUEUED", completed_at: null, error: null, progress_message: "Queued" };
+  let tasks = [failedTask];
+  let retryBody: Record<string, unknown> | null = null;
+  await page.route("**/api/channels", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ channels: [channel] }) }));
+  await page.route("**/api/tasks", async (route) => {
+    if (route.request().method() === "POST") {
+      retryBody = route.request().postDataJSON();
+      tasks = [retryTask, failedTask];
+      return route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ task: retryTask }) });
+    }
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify({ tasks, codex_status: "connected" }) });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Tasks", exact: true }).click();
+  await expect(page.getByText("Codex App Server unavailable", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect.poll(() => retryBody).toEqual({ task_type: "GENERATE_DNA", channel_id: channel.channel_id, episode_id: null, scene_number: null });
+  await expect(page.locator(".notice-banner.good")).toContainText("retry queued");
 });
 
 test("episode deletion uses a direct Yes or No confirmation", async ({ page }) => {
@@ -177,6 +203,11 @@ test("topic confirmation sends the selected question count before episode genera
   await page.getByRole("button", { name: /01.*Topic count/ }).click();
   const topicCard = page.locator(".topic-card").filter({ hasText: topic.title });
   const questionPicker = topicCard.getByRole("spinbutton", { name: `Question count for ${topic.title}` });
+  await expect(questionPicker).toHaveAttribute("min", "3");
+  await expect(questionPicker).toHaveAttribute("max", "50");
+  await questionPicker.fill("51");
+  await expect(topicCard.getByRole("button", { name: "Use this topic", exact: true })).toBeDisabled();
+  await expect(topicCard.getByText("Choose 3-50", { exact: true })).toBeVisible();
   await questionPicker.fill("12");
   await expect(questionPicker).toHaveValue("12");
   await expect(topicCard.getByText("About 7 min", { exact: true })).toBeVisible();
