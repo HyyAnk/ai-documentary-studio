@@ -935,15 +935,16 @@ export class RepositoryService {
     await this.writeJsonAtomic(path.join(directory, `sequence-${String(sequenceNumber).padStart(2, "0")}.json`), normalized);
   }
 
-  async readSequenceDrafts(episodeId: string): Promise<Array<{ sequenceNumber: number; scenes: Scene[] }>> {
+  async readSequenceDrafts(episodeId: string): Promise<Array<{ sequenceNumber: number; scenes: Scene[]; modified_at: string }>> {
     const directory = this.resolvePath("runtime", "shot-drafts", episodeId);
     const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
-    const drafts: Array<{ sequenceNumber: number; scenes: Scene[] }> = [];
+    const drafts: Array<{ sequenceNumber: number; scenes: Scene[]; modified_at: string }> = [];
     for (const entry of entries.filter((item) => item.isFile() && /^sequence-\d+\.json$/i.test(item.name))) {
       const sequenceNumber = Number(entry.name.match(/\d+/)?.[0]);
       try {
-        const payload = JSON.parse(await readFile(path.join(directory, entry.name), "utf8")) as unknown;
-        drafts.push({ sequenceNumber, scenes: SceneSchema.array().parse(payload) });
+        const filePath = path.join(directory, entry.name);
+        const [payload, metadata] = await Promise.all([readFile(filePath, "utf8"), stat(filePath)]);
+        drafts.push({ sequenceNumber, scenes: SceneSchema.array().parse(JSON.parse(payload) as unknown), modified_at: metadata.mtime.toISOString() });
       } catch {
         // An incomplete draft remains isolated and cannot corrupt the committed scene plan.
       }

@@ -21,9 +21,12 @@ Quiz V2 is part of the single Quiz production pipeline. Operators click **Build 
 
 ## Desktop and mobile
 
-- Desktop shows a compact horizontal rail for Research, Questions, Director, Assets, Voice, Timeline, QA, and Render.
+- Desktop shows a compact horizontal rail for Research, Treatment, Script, Visual bible, Scenes, Questions, Director, Assets, Voice, Timeline, QA, and Render.
 - Mobile stacks the rail into a scrollable status list; the single Build video action remains in the episode header.
 - Stage regeneration and retry are internal pipeline behavior; the UI does not expose per-stage production buttons. Download remains available only for confirmed output files.
+- The rail reconciles repository readiness with the live pipeline task: completed stages are ready, the current stage is running, downstream stages wait, and a failed pipeline marks the exact stage where it stopped.
+- Each stage also exposes a live completion summary beneath its status: completed/total tasks for batched work, or completed/total questions, assets, beats, segments, or checks for artifact-level work, with a compact percentage bar.
+- Quiz episodes show only the Quiz V2 QA card. Before Timeline and QA complete, the score is explicitly `Not assessed`; the documentary `Production score` panel is not shown for Quiz.
 - Long question, QA, and timeline content wraps without horizontal page overflow.
 - The responsive footer exposes exactly `Develop - Design - Deliver by HyyAnk | Dư Ngọc Minh Hoàng` on desktop/tablet and `HyyAnk | Dư Ngọc Minh Hoàng` on mobile.
 

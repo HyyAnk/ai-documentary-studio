@@ -26,6 +26,9 @@ test("Quiz Engine V2 rail is status-only and Build video is the single productio
   await page.getByRole("button", { name: /01.*Quiz V2 channel/ }).click();
   await page.getByRole("button", { name: /Quiz Story/ }).click();
   await expect(page.getByRole("heading", { name: "Production rail", exact: true })).toBeVisible();
+  await expect(page.getByText("Production score", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Quiz QA score", { exact: true })).toBeVisible();
+  await expect(page.getByText("Not assessed", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Production narration", exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Rendered video")).toBeVisible();
   await expect(page.locator(".quiz-v2-panel").getByRole("button")).toHaveCount(0);
@@ -36,7 +39,11 @@ test("Quiz Engine V2 rail is status-only and Build video is the single productio
   await page.getByRole("button", { name: "Open folder", exact: true }).click();
   await expect.poll(() => folderOpened).toBe(true);
   await expect(page.getByRole("status")).toContainText("Video folder opened");
-  await expect(page.getByRole("list", { name: "Quiz Engine V2 production stages" }).getByText("Questions", { exact: true })).toBeVisible();
+  const rail = page.getByRole("list", { name: "Quiz production stages" });
+  await expect(rail.getByText("Scenes", { exact: true })).toBeVisible();
+  await expect(rail.getByText("Questions", { exact: true })).toBeVisible();
+  await expect(rail.getByText("Timeline", { exact: true })).toBeVisible();
+  await expect(rail.getByLabel(/Questions: 0 of 3 questions complete, 0%/).getByText("0/3 questions · 0%", { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   const mobileWidth = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
   expect(mobileWidth.scrollWidth).toBeLessThanOrEqual(mobileWidth.clientWidth);

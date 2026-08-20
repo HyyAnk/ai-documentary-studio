@@ -161,8 +161,8 @@ export function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxD
     </header>
 
     {pipelineTask ? <TaskProgressPanel task={pipelineTask} title="Production pipeline" activeLabel="Running the next step" completionLabel="Production pipeline complete" now={episodeClock} progressLabel="Production pipeline progress" /> : null}
-    {isQuiz ? <QuizV2Panel state={quizV2} /> : <PipelineRail readiness={readiness} quiz={false} />}
-    {assessment ? <AssessmentPanel assessment={assessment} /> : null}
+    {isQuiz ? <QuizV2Panel state={quizV2} readiness={readiness} pipelineTask={pipelineTask} tasks={episodeTasks} questionCount={episode.quiz_config?.question_count ?? 0} /> : <PipelineRail readiness={readiness} quiz={false} />}
+    {assessment && !isQuiz ? <AssessmentPanel assessment={assessment} /> : null}
 
     <div className="artifact-stack">
       {artifactConfig.map((config, index) => {

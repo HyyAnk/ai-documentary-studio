@@ -42,6 +42,7 @@ export { buildQuizComposition };
 type ActiveRun = { task: Task; threadId: string; turnId: string; output: string; manifest: ContextManifest; researchAttempts: number; scriptAttempts: number; visualBibleAttempts: number; sequenceAttempts: number };
 type CodexCleanupConfig = { auto_delete_threads: boolean; failed_thread_retention_days: number };
 type PipelineRun = { cancelled: boolean; children: Set<string> };
+type SequenceDraftSnapshot = { sequenceNumber: number; modified_at: string };
 
 const channelTaskTypes = new Set<TaskType>(["GENERATE_DNA", "SUGGEST_TOPICS"]);
 const audioTaskTypes = new Set<TaskType>(["GENERATE_AUDIO", "GENERATE_NARRATION"]);
@@ -389,8 +390,15 @@ export class TaskManager extends EventEmitter {
         const sections = extractNarrationSections(script.content);
         if (sections.length === 0) throw new Error("Shot plan failed: a completed script is required");
         await this.repository.backupEpisodeFile(task.channel_id, episodeId, "scene_plan.md");
-        await this.repository.clearSequenceDrafts(episodeId);
-        const children = sections.map((_, index) => this.submit("GENERATE_SEQUENCE_SCENES", task.channel_id, episodeId, index + 1));
+        const existingDrafts = await this.repository.readSequenceDrafts(episodeId);
+        const resumePlan = planSequenceResume(sections.length, existingDrafts, script.modified_at, upstreamChanged);
+        if (resumePlan.shouldClearDrafts) await this.repository.clearSequenceDrafts(episodeId);
+        await this.update(task.task_id, { progress_message: resumePlan.reusedSequenceNumbers.length ? `Shot plan · resuming ${resumePlan.reusedSequenceNumbers.length}/${sections.length} completed sequences` : "Shot plan · generating sequences", progress_percent: 65 });
+        if (resumePlan.pendingSequenceNumbers.length === 0) {
+          const committed = await this.repository.commitSequenceDrafts(task.channel_id, episodeId, sections.length);
+          if (!committed) throw new Error("Shot plan failed: completed sequence drafts could not be committed");
+        }
+        const children = resumePlan.pendingSequenceNumbers.map((sequenceNumber) => this.submit("GENERATE_SEQUENCE_SCENES", task.channel_id, episodeId, sequenceNumber));
         children.forEach((child) => run.children.add(child.task_id));
         try {
           await Promise.all(children.map(async (child) => {
@@ -950,7 +958,7 @@ export class TaskManager extends EventEmitter {
           return;
         }
       }
-      if (active.task.task_type === "GENERATE_SEQUENCE_SCENES" && active.sequenceAttempts < 1 && isSequenceOutputFailure(message)) {
+      if (active.task.task_type === "GENERATE_SEQUENCE_SCENES" && active.sequenceAttempts < 2 && isSequenceOutputFailure(message)) {
         try {
           await this.retrySequenceScenes(active, message);
           return;
@@ -1019,12 +1027,16 @@ export class TaskManager extends EventEmitter {
     const channel = await this.repository.getChannel(active.task.channel_id);
     const isQuiz = channel.engine === "quiz";
     const sequenceNumber = active.task.scene_number ?? 1;
+    const script = await this.repository.getEpisodeFile(active.task.channel_id, active.task.episode_id!, "script.md");
+    const section = extractNarrationSections(script.content)[sequenceNumber - 1];
+    const exactNarration = section?.text.trim() ?? "";
     const strictContract = isQuiz
-      ? `Preserve every quiz field and return only a JSON array. Every beat must use a non-empty continuity_bundle_id exactly "CB-${String(sequenceNumber).padStart(2, "0")}", a non-empty continuity_note, and a distinct visual_prompt with the exact uppercase sections CAMERA, ACTION, LIGHTING, ATMOSPHERE, and CONTINUITY. Every non-intro/outro beat must also include complete quiz question, choices, answer, and explanation data.`
-      : "Return only a JSON array. Every beat must use a non-empty continuity_bundle_id, a non-empty continuity_note, and a distinct visual_prompt with the exact uppercase sections CAMERA, ACTION, LIGHTING, ATMOSPHERE, and CONTINUITY.";
+      ? `Preserve every quiz field and return only a JSON array. Copy every word from the exact narration below verbatim and in order into one or more dialogue fields. Split only at natural boundaries; never paraphrase, shorten, add, or omit words. The final narration coverage must be at least 97.5%. Every beat must use a non-empty continuity_bundle_id exactly "CB-${String(sequenceNumber).padStart(2, "0")}", a non-empty continuity_note, and a distinct visual_prompt with the exact uppercase sections CAMERA, ACTION, LIGHTING, ATMOSPHERE, and CONTINUITY. Every non-intro/outro beat must also include complete quiz question, choices, answer, and explanation data.`
+      : "Return only a JSON array. Copy every word from the exact narration below verbatim and in order into one or more dialogue fields. Split only at natural boundaries; never paraphrase, shorten, add, or omit words. The final narration coverage must be at least 97.5%. Every beat must use a non-empty continuity_bundle_id, a non-empty continuity_note, and a distinct visual_prompt with the exact uppercase sections CAMERA, ACTION, LIGHTING, ATMOSPHERE, and CONTINUITY.";
+    const narrationBlock = exactNarration ? `\n\nEXACT NARRATION TO COVER VERBATIM:\n<NARRATION>\n${exactNarration}\n</NARRATION>` : "";
     const previousThreadId = active.threadId;
     const threadId = await this.codex.startThread();
-    const turnId = await this.codex.startTurn(threadId, `${active.manifest.prompt}\n\nSTRICT RETRY: The previous ${isQuiz ? "Quiz " : ""}shot-plan response failed validation (${reason}). Start over in a fresh response. ${strictContract} Do not omit metadata, use empty strings, repeat prompts, add Markdown fences, add commentary, or return anything except the JSON array.`);
+    const turnId = await this.codex.startTurn(threadId, `${active.manifest.prompt}\n\nSTRICT RETRY: The previous ${isQuiz ? "Quiz " : ""}shot-plan response failed validation (${reason}). Start over in a fresh response. ${strictContract}${narrationBlock}\n\nDo not omit metadata, use empty strings, repeat prompts, add Markdown fences, add commentary, or return anything except the JSON array.`);
     active.threadId = threadId;
     active.turnId = turnId;
     active.output = "";
@@ -1105,6 +1117,21 @@ export class TaskManager extends EventEmitter {
   private emitEvent(event: TaskEvent): void {
     this.emit("event", event);
   }
+}
+
+export function planSequenceResume(sectionCount: number, drafts: SequenceDraftSnapshot[], scriptModifiedAt: string, invalidateDrafts: boolean): { shouldClearDrafts: boolean; reusedSequenceNumbers: number[]; pendingSequenceNumbers: number[] } {
+  const expected = Array.from({ length: Math.max(0, sectionCount) }, (_, index) => index + 1);
+  const scriptTimestamp = Date.parse(scriptModifiedAt);
+  const validDrafts = drafts.filter((draft) => expected.includes(draft.sequenceNumber));
+  const hasUnexpectedDraft = drafts.some((draft) => !expected.includes(draft.sequenceNumber));
+  const hasStaleDraft = validDrafts.some((draft) => {
+    const draftTimestamp = Date.parse(draft.modified_at);
+    return !Number.isFinite(scriptTimestamp) || !Number.isFinite(draftTimestamp) || draftTimestamp < scriptTimestamp;
+  });
+  const shouldClearDrafts = invalidateDrafts || hasUnexpectedDraft || hasStaleDraft;
+  const reusable = shouldClearDrafts ? [] : [...new Set(validDrafts.map((draft) => draft.sequenceNumber))].sort((a, b) => a - b);
+  const reusableSet = new Set(reusable);
+  return { shouldClearDrafts, reusedSequenceNumbers: reusable, pendingSequenceNumbers: expected.filter((sequenceNumber) => !reusableSet.has(sequenceNumber)) };
 }
 
 function extractMarkdown(output: string, fallbackHeading: string): string {

@@ -40,6 +40,9 @@
 
 - Local repository files remain the source of truth.
 - Task events are reconciled with API refetches after terminal state to prevent stale responses from overwriting newer artifacts.
+- The Quiz production rail derives its current stage from the live parent task progress and reconciles it with saved artifacts so the visual status cannot remain at `Not started` while a later pipeline step is running.
+- Retrying a failed Shot plan preserves fresh completed sequence drafts and queues only missing or failed sequences; task history remains available. Research, treatment, script, or visual bible changes invalidate the draft set and correctly restart all affected sequences.
+- Documentary production assessment is scoped to documentary episodes. Quiz episodes use the Quiz V2 QA assessment, and a missing shot plan reports only the missing plan until shots exist; it does not invent duplicate-prompt or coverage failures from a zero-item denominator.
 - Per-episode locks serialize mutations; sequence/image work may run concurrently under distinct sub-locks.
 - Reconnect uses bounded backoff and automatically reconciles tasks when the WebSocket returns.
 - Channel deletion invalidates the local channel list and selected channel context after server confirmation; a failed delete keeps the dialog open with a retryable error.

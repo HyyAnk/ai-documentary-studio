@@ -45,6 +45,28 @@ describe("production assessment", () => {
     expect(assessment.rating).toBe("production_ready");
     expect(assessment.score).toBeGreaterThanOrEqual(85);
   });
+
+  it("reports a missing shot plan without inventing shot-level failures", () => {
+    const anchors = "In 1956 C01 changed the plan. In 1960 C02 proved 25 percent. In 1964 C03 recorded 30 vehicles. In 1971 C04 ended the program. In 1987 C05 changed standards. In 1997 C06 demonstrated the replacement.";
+    const narration = `${anchors} ${Array.from({ length: 100 - countWords(anchors) }, (_, index) => `evidence${index + 1}`).join(" ")}`;
+    const assessment = assessProduction({
+      episode: episode(),
+      research: Array.from({ length: 5 }, (_, index) => `C0${index + 1} https://example.com/source-${index + 1}`).join("\n"),
+      treatment: Array.from({ length: 5 }, (_, index) => `## Sequence ${index + 1}\nTime budget and claim C0${index + 1}`).join("\n"),
+      visualBible: "# Visual Bible\n\nContinuity bundle CB-01",
+      script: `# Script\n\n${narration}`,
+      scenes: [],
+      fallbackWordsPerSecond: 2.3,
+    });
+
+    const codes = new Set(assessment.issues.map((issue) => issue.code));
+    expect(codes.has("scene_plan")).toBe(true);
+    expect(codes.has("duplicate_prompts")).toBe(false);
+    expect(codes.has("prompt_structure")).toBe(false);
+    expect(codes.has("continuity_coverage")).toBe(false);
+    expect(codes.has("source_coverage")).toBe(false);
+    expect(codes.has("narration_coverage")).toBe(false);
+  });
 });
 
 describe("narration utilities", () => {

@@ -7,7 +7,7 @@ import { QuizAssessmentSchema, QuizAssetPlanSchema, QuizAssetResolutionSchema } 
 import { ContextEngine } from "../src/context.js";
 import { StudioLogger } from "../src/logger.js";
 import { RepositoryService } from "../src/repository.js";
-import { TaskManager } from "../src/tasks.js";
+import { TaskManager, planSequenceResume } from "../src/tasks.js";
 import type { AudioProvider } from "../src/providers/index.js";
 import { buildQuizVoicePlan } from "../src/quiz/audio/voicePlan.js";
 import { createDefaultDirectorPlan } from "../src/quiz/director/parseDirectorPlan.js";
@@ -16,16 +16,37 @@ import { compileQuizTimeline } from "../src/quiz/timeline/compileTimeline.js";
 
 const roots: string[] = [];
 
+describe("sequence retry planning", () => {
+  it("reuses fresh sequence drafts and queues only missing sequences", () => {
+    const scriptModifiedAt = "2026-08-20T10:00:00.000Z";
+    const plan = planSequenceResume(4, [
+      { sequenceNumber: 1, modified_at: "2026-08-20T10:00:01.000Z" },
+      { sequenceNumber: 2, modified_at: "2026-08-20T10:00:02.000Z" },
+    ], scriptModifiedAt, false);
+
+    expect(plan).toEqual({ shouldClearDrafts: false, reusedSequenceNumbers: [1, 2], pendingSequenceNumbers: [3, 4] });
+  });
+
+  it("invalidates every draft when an upstream artifact changed or a draft is stale", () => {
+    const scriptModifiedAt = "2026-08-20T10:00:00.000Z";
+    expect(planSequenceResume(3, [{ sequenceNumber: 1, modified_at: "2026-08-20T09:59:59.000Z" }], scriptModifiedAt, false)).toEqual({ shouldClearDrafts: true, reusedSequenceNumbers: [], pendingSequenceNumbers: [1, 2, 3] });
+    expect(planSequenceResume(3, [{ sequenceNumber: 1, modified_at: "2026-08-20T10:00:01.000Z" }], scriptModifiedAt, true)).toEqual({ shouldClearDrafts: true, reusedSequenceNumbers: [], pendingSequenceNumbers: [1, 2, 3] });
+    expect(planSequenceResume(2, [{ sequenceNumber: 1, modified_at: "2026-08-20T10:00:01.000Z" }, { sequenceNumber: 3, modified_at: "2026-08-20T10:00:02.000Z" }], scriptModifiedAt, false)).toEqual({ shouldClearDrafts: true, reusedSequenceNumbers: [], pendingSequenceNumbers: [1, 2] });
+  });
+});
+
 class FakeCodex extends EventEmitter {
   private turnNumber = 0;
   activeTurns = 0;
   maxActiveTurns = 0;
   deletedThreads: string[] = [];
+  prompts: string[] = [];
   async connect(): Promise<void> { this.emit("status", "connected"); }
   async startThread(): Promise<string> { return `thread_${this.turnNumber + 1}`; }
   async resumeThread(threadId: string): Promise<string> { return threadId; }
   async startTurn(threadId: string, prompt = ""): Promise<string> {
     const turnId = `turn_${++this.turnNumber}`;
+    this.prompts.push(prompt);
     this.activeTurns += 1;
     this.maxActiveTurns = Math.max(this.maxActiveTurns, this.activeTurns);
     setTimeout(() => {
@@ -304,6 +325,7 @@ describe("TaskManager locks", () => {
     expect(scenes[0]!.continuity_note).toContain("CB-01");
     expect(manager.get(task.task_id).progress_message).toBe("Completed");
     expect(fake.deletedThreads).toContain("thread_1");
+    expect(fake.prompts.some((prompt) => prompt.includes("EXACT NARRATION TO COVER VERBATIM") && prompt.includes("Opening narration."))).toBe(true);
   });
 
   it("retries quiz research when a question claim is missing", async () => {
