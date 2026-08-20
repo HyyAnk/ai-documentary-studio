@@ -1,5 +1,21 @@
 import { expect, test } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/tasks", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ tasks: [], codex_status: "connected" }) }));
+  await page.addInitScript(() => {
+    class MockWebSocket extends EventTarget {
+      static OPEN = 1;
+      readyState = 1;
+      constructor() {
+        super();
+        window.setTimeout(() => this.dispatchEvent(new Event("open")), 0);
+      }
+      close() { this.readyState = 3; }
+    }
+    Object.defineProperty(window, "WebSocket", { value: MockWebSocket, configurable: true });
+  });
+});
+
 const assessment = {
   score: 62,
   rating: "needs_work",

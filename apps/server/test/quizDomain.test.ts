@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Scene } from "@studio/shared";
 import { createDefaultDirectorPlan, parseDirectorPlanOutput } from "../src/quiz/director/parseDirectorPlan.js";
 import { validateDirectorPlan } from "../src/quiz/director/validateDirectorPlan.js";
-import { deriveQuizV2FromScenes } from "../src/quiz/domain/quiz.js";
+import { deriveQuizV2FromScenes, resolveVisibleQuizChoice } from "../src/quiz/domain/quiz.js";
 import { assessQuiz } from "../src/quiz/qa/quizAssessment.js";
 
 const scene = (number: number, answer = "Tiger"): Scene => ({
@@ -40,6 +40,23 @@ describe("Quiz V2 domain and Director", () => {
 
   it("blocks a legacy scene answer that is not one visible choice", () => {
     expect(() => deriveQuizV2FromScenes({ episodeId: "episode-1", language: "English", ageBand: "7-9", format: "multiple_choice", scenes: [scene(1, "Lion")] })).toThrow("does not match exactly one visible choice");
+  });
+
+  it("normalizes a labeled answer to the referenced visible choice", () => {
+    const quiz = deriveQuizV2FromScenes({ episodeId: "episode-1", language: "English", ageBand: "7-9", format: "multiple_choice", scenes: [scene(1, "A — Tiger")] });
+    expect(quiz.questions[0].correct_choice_id).toBe("choice-a");
+    expect(resolveVisibleQuizChoice(["Lever", "Inclined plane", "Pulley"], "B — Inclined plane")).toBe(1);
+    expect(resolveVisibleQuizChoice(["A. Lever", "B. Inclined plane", "C. Pulley"], "B — Inclined plane")).toBe(1);
+    expect(resolveVisibleQuizChoice(["A. Lever", "B. Second-class lever", "C. Third-class lever"], "B — Second-class lever.")).toBe(1);
+    expect(resolveVisibleQuizChoice(["Lever", "Inclined plane", "Pulley"], "B — Wedge")).toBeNull();
+  });
+
+  it("strips labels from generated choices before storing canonical Quiz V2 facts", () => {
+    const labeled = scene(1, "B — Inclined plane");
+    labeled.quiz = { ...labeled.quiz!, choices: ["A. Lever", "B. Inclined plane", "C. Pulley"] };
+    const quiz = deriveQuizV2FromScenes({ episodeId: "episode-1", language: "English", ageBand: "7-9", format: "multiple_choice", scenes: [labeled] });
+    expect(quiz.questions[0].choices.map((choice) => choice.text)).toEqual(["Lever", "Inclined plane", "Pulley"]);
+    expect(quiz.questions[0].correct_choice_id).toBe("choice-b");
   });
 
   it("creates an episode-level plan without copying fact fields", () => {

@@ -1,16 +1,33 @@
 import { expect, test } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/tasks", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ tasks: [], codex_status: "connected" }) }));
+  await page.addInitScript(() => {
+    class MockWebSocket extends EventTarget {
+      static OPEN = 1;
+      readyState = 1;
+      constructor() {
+        super();
+        window.setTimeout(() => this.dispatchEvent(new Event("open")), 0);
+      }
+      close() { this.readyState = 3; }
+    }
+    Object.defineProperty(window, "WebSocket", { value: MockWebSocket, configurable: true });
+  });
+});
+
 test("Quiz Engine V2 rail is status-only and Build video is the single production action", async ({ page }) => {
   const channel = { channel_id: "ch_quiz_v2", slug: "quiz-v2", display_name: "Quiz V2 channel", description: "Quiz", target_audience: "Children", language: "English", market: "Global", channel_dna_path: "channels/quiz-v2/channel_dna.md", style_guide_path: null, status: "ACTIVE", created_at: "2026-08-16T00:00:00.000Z", updated_at: "2026-08-16T00:00:00.000Z", episode_count: 1, group_id: "quiz", engine: "quiz" };
   const episode = { episode_id: "ep_quiz_v2", channel_id: channel.channel_id, slug: "quiz-story", topic: { title: "Quiz Story", premise: "A deterministic quiz episode.", hook: "Can you spot the answer?" }, stage: "VIDEO_READY", script_path: "channels/quiz-v2/episodes/quiz-story/script.md", research_path: "channels/quiz-v2/episodes/quiz-story/research.md", treatment_path: "channels/quiz-v2/episodes/quiz-story/treatment.md", visual_bible_path: "channels/quiz-v2/episodes/quiz-story/visual_bible.md", scene_plan_path: "channels/quiz-v2/episodes/quiz-story/scene_plan.md", dialogue_script_path: "channels/quiz-v2/episodes/quiz-story/dialogue_script.md", video_prompts_path: "channels/quiz-v2/episodes/quiz-story/video_prompts.md", target_duration_minutes: 8, target_word_count: 1050, narration_asset_path: null, narration_generated_at: null, narration_duration_seconds: null, narration_segment_count: 0, measured_narration_words_per_second: null, quiz_config: { question_count: 3, quiz_format: "multiple_choice", age_band: "7-9", answer_mode: "voice_and_reveal", visual_theme: "candy_pop" }, video_asset_path: "channels/quiz-v2/episodes/quiz-story/assets/quiz-video.mp4", video_generated_at: channel.updated_at, video_duration_seconds: 42, render_manifest_path: "channels/quiz-v2/episodes/quiz-story/assets/render-manifest.json", created_at: channel.created_at, updated_at: channel.updated_at };
   const v2 = { quiz: { schema_version: 2, episode_id: episode.episode_id, age_band: "7-9", language: "English", questions: [] }, director_plan: null, asset_plan: null, voice_plan: null, timeline: null, assessment: null, stages: { research: "ready", questions: "ready", director: "not_started", assets: "not_started", voice: "not_started", timeline: "not_started", qa: "not_started", render: "not_started" } };
+  let taskList: Array<Record<string, unknown>> = [];
 
   await page.route("**/api/config", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ video_generation: { provider: "none", model: "", max_scene_duration_seconds: 8, default_scene_duration_seconds: 6, hyperframes_command: "npx hyperframes", render_quality: "draft", fps: 30, narration_words_per_second: 2.3, aspect_ratio: "16:9" }, image_generation: { enabled: true, images_per_bundle: 1 }, codex: { max_concurrent_tasks: 3, transport: "app_server", app_server_endpoint: "stdio://", command: "codex", model: "", experimental_api: false, api_base_url: "", api_key: "", auto_delete_threads: true, failed_thread_retention_days: 7 }, audio_generation: { provider: "chatterbox", service_url: "http://127.0.0.1:8890", exaggeration: 0.5, cfg_weight: 0.5, max_concurrent_tasks: 2, merge_gap_ms: 300, match_target_duration: true } }) }));
   await page.route("**/api/git", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ branch: "main", dirty: false, changed_files: 0 }) }));
   await page.route("**/api/storage", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ path: "D:/Studio", default_path: "D:/Project", channel_path: "D:/Studio/channels", configured: true }) }));
   await page.route("**/api/codex/settings", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ settings: { transport: "app_server", model: "", api_base_url: "", has_api_key: false, app_server_endpoint: "stdio://", command: "codex", auto_delete_threads: true, failed_thread_retention_days: 7 }, models: [], installation: { installed: false, command: "codex", version: null } }) }));
   await page.route("**/api/channels", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ channels: [channel] }) }));
-  await page.route("**/api/tasks", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ tasks: [], codex_status: "connected" }) }));
+  await page.route("**/api/tasks", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ tasks: taskList, codex_status: "connected" }) }));
   await page.route("**/api/channels/" + channel.channel_id + "/dna", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ content: "# DNA", path: channel.channel_dna_path, modified_at: channel.updated_at }) }));
   await page.route("**/api/channels/" + channel.channel_id + "/topics", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ topics: [] }) }));
   await page.route("**/api/channels/" + channel.channel_id + "/episodes", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ episodes: [episode] }) }));
@@ -38,12 +55,27 @@ test("Quiz Engine V2 rail is status-only and Build video is the single productio
   await expect(page.getByRole("button", { name: "Render again", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Open folder", exact: true }).click();
   await expect.poll(() => folderOpened).toBe(true);
-  await expect(page.getByRole("status")).toContainText("Video folder opened");
+  await expect(page.locator(".notice-banner.good")).toContainText("Video folder opened");
   const rail = page.getByRole("list", { name: "Quiz production stages" });
   await expect(rail.getByText("Scenes", { exact: true })).toBeVisible();
   await expect(rail.getByText("Questions", { exact: true })).toBeVisible();
   await expect(rail.getByText("Timeline", { exact: true })).toBeVisible();
   await expect(rail.getByLabel(/Questions: 0 of 3 questions complete, 0%/).getByText("0/3 questions · 0%", { exact: true })).toBeVisible();
+
+  taskList = [
+    { task_id: "pipeline_assets", task_type: "GENERATE_PIPELINE", channel_id: channel.channel_id, episode_id: episode.episode_id, status: "RUNNING", created_at: "2026-08-16T03:00:00.000Z", started_at: "2026-08-16T03:00:01.000Z", completed_at: null, codex_thread_id: null, codex_turn_id: null, error: null, output_files: [], lock_key: episode.episode_id, queue_position: null, progress_message: "Quiz · resolving assets 2/3", scene_number: null },
+    { task_id: "scene_cancelled", task_type: "GENERATE_SEQUENCE_SCENES", channel_id: channel.channel_id, episode_id: episode.episode_id, status: "CANCELLED", created_at: "2026-08-16T01:00:00.000Z", started_at: "2026-08-16T01:00:01.000Z", completed_at: "2026-08-16T01:00:02.000Z", codex_thread_id: null, codex_turn_id: null, error: "Cancelled by user", output_files: [], lock_key: episode.episode_id, queue_position: null, progress_message: "Cancelled by user", scene_number: 1 },
+    ...[1, 2, 3].map((sceneNumber) => ({ task_id: `scene_complete_${sceneNumber}`, task_type: "GENERATE_SEQUENCE_SCENES", channel_id: channel.channel_id, episode_id: episode.episode_id, status: "COMPLETED", created_at: `2026-08-16T02:00:0${sceneNumber}.000Z`, started_at: "2026-08-16T02:00:00.000Z", completed_at: "2026-08-16T02:01:00.000Z", codex_thread_id: null, codex_turn_id: null, error: null, output_files: [], lock_key: episode.episode_id, queue_position: null, progress_message: "Completed", scene_number: sceneNumber })),
+  ];
+  await page.reload();
+  await page.getByRole("button", { name: /01.*Quiz V2 channel/ }).click();
+  await page.getByRole("button", { name: /Quiz Story/ }).click();
+  const refreshedRail = page.getByRole("list", { name: "Quiz production stages" });
+  const scenesStage = refreshedRail.getByLabel("Scenes: 3 of 3 tasks complete, 100%");
+  await expect(scenesStage).toHaveClass(/is-ready/);
+  await expect(scenesStage).not.toHaveClass(/is-failed/);
+  await expect(refreshedRail.getByLabel("Assets: 0 of 1 task complete, 0%")).toHaveClass(/is-running/);
+
   await page.setViewportSize({ width: 390, height: 844 });
   const mobileWidth = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
   expect(mobileWidth.scrollWidth).toBeLessThanOrEqual(mobileWidth.clientWidth);

@@ -70,19 +70,7 @@ export function buildCandyArcadeComposition(input: CandyArcadeCompositionInput):
     const rewardStart = eventAt(question.id, "reward.play", revealStart + .8);
     const transition = eventOf(question.id, "transition.start");
     const end = Math.min(duration, nextQuestion ? eventAt(nextQuestion.id, "question.enter", duration) : transition?.at_seconds ?? outroStart ?? duration);
-    const segments: Array<[number, number, Phase, string | undefined, { start: number; end: number } | undefined]> = [
-      [start, choicesStart, "question", undefined, undefined],
-      [choicesStart, thinkingStart, "choices", undefined, undefined],
-      // Keep one timer clip for the whole thinking interval. Splitting this
-      // into per-tick clips restarted independent fill/marker clocks and
-      // caused the visible progress jump reported in the V2 review.
-      [thinkingStart, revealStart, "think", undefined, undefined],
-      [revealStart, rewardStart, "reveal", undefined, undefined],
-      [rewardStart, end, "explain", undefined, undefined],
-    ];
-    for (const [clipStart, clipEnd, phase, countdownValue, thinkingProgress] of segments) {
-      if (clipEnd - clipStart > .04) clips.push(questionClip({ start: clipStart, end: clipEnd, phase, countdownValue, thinkingProgress, question, questionIndex: index, count: input.quiz.questions.length, visual, copy, assets: input.assets ?? {}, isFinal: index === input.quiz.questions.length - 1 }));
-    }
+    if (end - start > .04) clips.push(questionClip({ start, choicesStart, thinkingStart, revealStart, rewardStart, end, question, questionIndex: index, count: input.quiz.questions.length, visual, copy, assets: input.assets ?? {}, isFinal: index === input.quiz.questions.length - 1 }));
     if (transition) clips.push(transitionClip({ start: transition.at_seconds, end: transition.at_seconds + transition.duration_seconds, visual, nextPalette: nextQuestion ? template.resolveScene({ question: nextQuestion, questionIndex: index + 1, totalQuestions: input.quiz.questions.length, archetype: input.director.beats.find((candidate) => candidate.question_id === nextQuestion.id)?.archetype ?? "text_multiple_choice", requestedPalette: input.director.beats.find((candidate) => candidate.question_id === nextQuestion.id)?.palette_id ?? "auto", requestedLayout: "auto", requestedMotion: "auto", requestedTransition: "auto", previousPaletteId: visual.palette.id }).palette : visual.palette }));
   });
   if (typeof outroStart === "number" && outroStart < duration - .04) clips.push(outroClip(outroStart, duration, input.quiz.questions.length, copy));
@@ -100,22 +88,20 @@ function outroClip(start: number, end: number, count: number, copy: Copy): strin
   return `<section id="candy-outro" class="clip candy-scene candy-outro" data-start="${start.toFixed(3)}" data-duration="${Math.max(.04, end - start).toFixed(3)}" data-track-index="0"><div class="intro-rays"></div><div class="outro-blob blob-a"></div><div class="outro-blob blob-b"></div><div class="outro-card"><span>${esc(copy.scorePrompt)}</span><h1>${esc(copy.playAgain)}</h1><p>${count} ${esc(copy.questions(count))}</p><div class="outro-stars">★&nbsp;&nbsp;✦&nbsp;&nbsp;★</div></div></section>`;
 }
 
-function questionClip(input: { start: number; end: number; phase: Phase; countdownValue?: string; thinkingProgress?: { start: number; end: number }; question: QuizV2["questions"][number]; questionIndex: number; count: number; visual: QuizTemplateScene; copy: Copy; assets: Record<string, string>; isFinal: boolean }): string {
-  const { question, visual, phase } = input;
+function questionClip(input: { start: number; choicesStart: number; thinkingStart: number; revealStart: number; rewardStart: number; end: number; question: QuizV2["questions"][number]; questionIndex: number; count: number; visual: QuizTemplateScene; copy: Copy; assets: Record<string, string>; isFinal: boolean }): string {
+  const { question, visual } = input;
   const questionLayout = textLayout(question.question, "question");
   const answer = question.choices.find((choice) => choice.id === question.correct_choice_id);
-  const thinkingStart = phase === "think" || phase === "countdown";
-  const reveal = phase === "reveal" || phase === "explain";
-  const config = styleAttributes(visual, questionLayout, input.start);
-  const classNames = ["clip", "candy-scene", `phase-${phase}`, `layout-${visual.layoutId}`, `archetype-${question.format}`, motionCssClass(visual.motionId), input.isFinal ? "is-final-scene" : ""].filter(Boolean).join(" ");
+  const config = styleAttributes(visual, questionLayout, input.start, input.choicesStart, input.thinkingStart, input.revealStart, input.rewardStart, input.end);
+  const classNames = ["clip", "candy-scene", "quiz-question-clip", `layout-${visual.layoutId}`, `archetype-${question.format}`, motionCssClass(visual.motionId), input.isFinal ? "is-final-scene" : ""].filter(Boolean).join(" ");
   const questionAsset = assetFor(input.assets, `asset-${question.id}-hero`, `asset-${question.id}-question`);
-  const answers = answerCards(question, phase, input.assets);
+  const answers = answerCards(question, input.assets);
   const hero = visual.layoutId === "visual_choices_three" ? "" : imageCard(questionAsset, question.visual_opportunity || question.question, "hero-image", question.number);
-  const visualAnswers = visual.layoutId === "visual_choices_three" ? visualAnswerCards(question, phase, input.assets, input.questionIndex) : "";
-  const body = `<div class="game-stage"><div class="question-title question-tier-${questionLayout.tier}"><h1>${highlightQuestionMarkup(question.question, question.visual_opportunity)}</h1></div>${hero}${phase !== "question" ? visualAnswers || answers : ""}${thinkingStart ? thinkingBar({ ...input, start: input.start, end: input.end }) : ""}${reveal ? revealPanel(input, answer?.text ?? "") : ""}</div>`;
+  const visualAnswers = visual.layoutId === "visual_choices_three" ? visualAnswerCards(question, input.assets, input.questionIndex) : "";
+  const body = `<div class="game-stage"><div class="question-title question-tier-${questionLayout.tier}"><h1>${highlightQuestionMarkup(question.question, question.visual_opportunity)}</h1></div>${hero}${visualAnswers || answers}<div class="phase-region">${thinkingBar({ start: input.thinkingStart, end: input.revealStart, copy: input.copy })}${revealPanel(input, answer?.text ?? "")}</div></div>`;
   const streak = input.questionIndex >= 2 ? " streak" : "";
   const streakCue = input.questionIndex >= 2 ? "<i aria-hidden=\"true\">✦</i>" : "";
-  return `<section id="quiz-q${question.number}-${phase}-${Math.round(input.start * 1000)}" class="${classNames}" ${config} data-start="${input.start.toFixed(3)}" data-duration="${Math.max(.04, input.end - input.start).toFixed(3)}" data-track-index="0"><div class="bg-gradient"></div><div class="bg-rays"></div><div class="bg-pattern pattern-circles"></div><div class="bg-pattern pattern-sprinkles"></div><div class="bg-shape shape-a" data-layout-allow-overflow></div><div class="bg-shape shape-b" data-layout-allow-overflow></div><div class="bg-shape shape-c" data-layout-allow-overflow></div>${sceneDecorations(input.questionIndex)}<header class="game-header"><div class="episode-progress${streak}"><span>${esc(input.copy.question)}</span><b>${question.number} / ${input.count}</b>${streakCue}</div></header>${body}${reveal ? rewardFx(input.isFinal ? "big" : "small") : ""}</section>`;
+  return `<section id="quiz-q${question.number}-${Math.round(input.start * 1000)}" class="${classNames}" ${config} data-start="${input.start.toFixed(3)}" data-duration="${Math.max(.04, input.end - input.start).toFixed(3)}" data-track-index="0"><div class="bg-gradient"></div><div class="bg-rays"></div><div class="bg-pattern pattern-circles"></div><div class="bg-pattern pattern-sprinkles"></div><div class="bg-shape shape-a" data-layout-allow-overflow></div>${sceneDecorations(input.questionIndex)}<header class="game-header"><div class="episode-progress${streak}"><span>${esc(input.copy.question)}</span><b>${question.number} / ${input.count}</b>${streakCue}</div></header>${body}${rewardFx(input.isFinal ? "big" : "small")}</section>`;
 }
 
 function transitionClip(input: { start: number; end: number; visual: QuizTemplateScene; nextPalette: QuizTemplateScene["palette"] }): string {
@@ -154,31 +140,30 @@ const QUESTION_KEYWORD_STOP_WORDS = new Set([
   "green", "image", "illustration", "large", "object", "picture", "red", "scene", "showing", "simple", "soft", "subject", "warm", "with",
 ]);
 
-function answerCards(question: QuizV2["questions"][number], phase: Phase, assets: Record<string, string>): string {
+function answerCards(question: QuizV2["questions"][number], assets: Record<string, string>): string {
   return `<div class="answer-grid answer-count-${question.choices.length}">${question.choices.map((choice, index) => {
-    const state = "answer-" + visualAnswerState(choice.id, question.correct_choice_id, phase === "reveal" || phase === "explain" ? phase : "idle");
+    const state = "answer-" + visualAnswerState(choice.id, question.correct_choice_id, "reveal");
     const layout = textLayout(choice.text, "choice");
     const optionAsset = assetFor(assets, `asset-${question.id}-${choice.id}`);
     return `<div class="answer-card ${state} choice-tier-${layout.tier}"><b>${String.fromCharCode(65 + index)}</b>${optionAsset ? `<img src="${escAttr(optionAsset)}" alt="">` : ""}<span>${esc(choice.text)}</span>${state === "answer-correct" ? "<i class=\"answer-check\">✓</i>" : state === "answer-incorrect" ? "<i class=\"answer-cross\">×</i>" : ""}</div>`;
   }).join("")}</div>`;
 }
 
-function visualAnswerCards(question: QuizV2["questions"][number], phase: Phase, assets: Record<string, string>, questionIndex: number): string {
+function visualAnswerCards(question: QuizV2["questions"][number], assets: Record<string, string>, questionIndex: number): string {
   return `<div class="visual-answer-grid">${question.choices.map((choice, index) => {
-    const state = "answer-" + visualAnswerState(choice.id, question.correct_choice_id, phase === "reveal" || phase === "explain" ? phase : "idle");
+    const state = "answer-" + visualAnswerState(choice.id, question.correct_choice_id, "reveal");
     const phaseSeconds = ambientPhaseSeconds("float", index, question.id);
     return `<div class="visual-answer-card ${state}" style="--item-phase:${phaseSeconds}s">${imageCard(assetFor(assets, `asset-${question.id}-${choice.id}`), choice.text, "option-image", index + question.number * 10)}<div class="visual-answer-label"><b>${String.fromCharCode(65 + index)}</b><span>${esc(choice.text)}</span></div>${state === "answer-correct" ? "<i class=\"answer-check\">✓</i>" : state === "answer-incorrect" ? "<i class=\"answer-cross\">×</i>" : ""}</div>`;
   }).join("")}</div>`;
 }
 
-function thinkingBar(input: { start: number; end: number; phase: Phase; question: QuizV2["questions"][number]; copy: Copy }): string {
+function thinkingBar(input: { start: number; end: number; copy: Copy }): string {
   const style = `style="--timer-duration:${Math.max(.05, input.end - input.start).toFixed(3)}s"`;
   return `<div class="thinking-bar" ${style}><div class="thinking-label"><span>${esc(input.copy.think)}</span><b>?</b></div><div class="thinking-track" aria-label="Quiz timer" data-layout-allow-overflow><div class="timer-progress"></div><span class="timer-marker">?</span><div class="timer-sparkles" data-layout-ignore><i>✦</i><i>•</i><i>✦</i></div></div><small class="timer-caption">${esc(input.copy.lockIn)}</small></div>`;
 }
 
-function revealPanel(input: { phase: Phase; question: QuizV2["questions"][number]; copy: Copy; isFinal: boolean }, answer: string): string {
-  if (input.phase === "reveal") return `<div class="reveal-panel" aria-label="${escAttr(input.copy.correct)}"><div class="reveal-stamp">✓</div><strong>${esc(input.copy.correct)}</strong><span>${esc(answer)}</span><div class="reveal-sparkles"><i>✦</i><i>★</i><i>✦</i></div></div>`;
-  return `<div class="fact-card"><span>${esc(input.question.fun_fact ? input.copy.funFact : input.copy.why)}</span><p>${esc(input.question.fun_fact || input.question.explanation)}</p></div>`;
+function revealPanel(input: { question: QuizV2["questions"][number]; copy: Copy; isFinal: boolean }, answer: string): string {
+  return `<div class="reveal-panel" aria-label="${escAttr(input.copy.correct)}"><div class="reveal-stamp">✓</div><strong>${esc(input.copy.correct)}</strong><span>${esc(answer)}</span><div class="reveal-sparkles"><i>✦</i><i>★</i><i>✦</i></div></div><div class="fact-card"><span>${esc(input.question.fun_fact ? input.copy.funFact : input.copy.why)}</span><p>${esc(input.question.fun_fact || input.question.explanation)}</p></div>`;
 }
 
 function sceneDecorations(questionIndex: number): string {
@@ -186,9 +171,9 @@ function sceneDecorations(questionIndex: number): string {
   return `<div class="scene-decor" data-layout-ignore aria-hidden="true">${symbols.map((symbol, index) => `<i class="decor-${index + 1}" style="--decor-phase:${ambientPhaseSeconds("drift", index, String(questionIndex))}s">${symbol}</i>`).join("")}</div>`;
 }
 
-function styleAttributes(visual: QuizTemplateScene, layout: ReturnType<typeof textLayout>, clipStart: number): string {
+function styleAttributes(visual: QuizTemplateScene, layout: ReturnType<typeof textLayout>, clipStart: number, choicesStart: number, thinkingStart: number, revealStart: number, rewardStart: number, clipEnd: number): string {
   const palette = visual.palette;
-  return `style="--bg-primary:${palette.backgroundPrimary};--bg-secondary:${palette.backgroundSecondary};--accent:${palette.accent};--badge:${palette.answerBadge};--correct:${palette.correct};--incorrect:${palette.incorrect};--surface:${palette.surface};--ink:${palette.text};--muted:${palette.muted};--question-size:${layout.fontSize}px;--question-leading:${layout.lineHeight};--clip-start:${clipStart.toFixed(3)}s;--ambient-phase:${ambientPhaseSeconds("drift", 0, String(clipStart))}s"`;
+  return `style="--bg-primary:${palette.backgroundPrimary};--bg-secondary:${palette.backgroundSecondary};--accent:${palette.accent};--badge:${palette.answerBadge};--correct:${palette.correct};--incorrect:${palette.incorrect};--surface:${palette.surface};--ink:${palette.text};--muted:${palette.muted};--question-size:${layout.fontSize}px;--question-leading:${layout.lineHeight};--clip-start:${clipStart.toFixed(3)}s;--scene-duration:${Math.max(.04, clipEnd - clipStart).toFixed(3)}s;--choices-at:${Math.max(0, choicesStart - clipStart).toFixed(3)}s;--thinking-at:${Math.max(0, thinkingStart - clipStart).toFixed(3)}s;--reveal-at:${Math.max(0, revealStart - clipStart).toFixed(3)}s;--reward-at:${Math.max(0, rewardStart - clipStart).toFixed(3)}s;--choices-duration:${Math.max(.04, revealStart - choicesStart).toFixed(3)}s;--thinking-duration:${Math.max(.04, revealStart - thinkingStart).toFixed(3)}s;--reveal-duration:${Math.max(.04, rewardStart - revealStart).toFixed(3)}s;--ambient-phase:${ambientPhaseSeconds("drift", 0, String(clipStart))}s"`;
 }
 
 function assetFor(assets: Record<string, string>, ...keys: string[]): string | null {
@@ -242,12 +227,12 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .clip { position: absolute; inset: 0; }
 .candy-scene { --depth-edge: rgba(13,35,71,.16); --depth-shadow: rgba(13,35,71,.22); isolation: isolate; overflow: hidden; padding: 60px 96px 54px; background: var(--bg-primary); color: var(--ink); }
 .bg-gradient { position: absolute; z-index: 0; inset: 0; background: linear-gradient(135deg, var(--bg-primary), var(--bg-secondary)); }
-.bg-gradient::after { position: absolute; top: 3%; left: 9%; width: 460px; height: 250px; border-radius: 50%; background: rgba(255,255,255,.16); content: ""; transform: rotate(-15deg); filter: blur(6px); }
-.bg-rays { position: absolute; z-index: 1; top: 45%; left: 50%; width: 1640px; height: 1640px; opacity: .13; background: repeating-conic-gradient(from 8deg, rgba(255,255,255,.9) 0 7deg, transparent 7deg 18deg); transform: translate(-50%,-50%); animation: ray-spin 44s linear infinite; animation-delay: calc(var(--clip-start) * -1); }
+.bg-gradient::after { position: absolute; top: 3%; left: 9%; width: 460px; height: 250px; border-radius: 50%; background: rgba(255,255,255,.16); content: ""; transform: rotate(-15deg); }
+.bg-rays { position: absolute; z-index: 1; top: 45%; left: 50%; width: 1640px; height: 1640px; opacity: .13; background: repeating-conic-gradient(from 8deg, rgba(255,255,255,.9) 0 7deg, transparent 7deg 18deg); transform: translate(-50%,-50%); animation: ray-spin var(--scene-duration) linear var(--clip-start) 1 both; }
 .bg-pattern { position: absolute; z-index: 1; opacity: .085; pointer-events: none; }
-.pattern-circles { inset: 0; background-image: repeating-linear-gradient(45deg, transparent 0 23px, rgba(255,255,255,.9) 24px 27px, transparent 28px 52px); background-size: 82px 82px; animation: drift 26s linear infinite; animation-delay: calc(var(--clip-start) * -1); }
+.pattern-circles { inset: 0; background-image: repeating-linear-gradient(45deg, transparent 0 23px, rgba(255,255,255,.9) 24px 27px, transparent 28px 52px); background-size: 82px 82px; animation: drift var(--scene-duration) linear var(--clip-start) 1 both; }
 .pattern-sprinkles { right: -110px; bottom: -135px; width: 620px; height: 620px; border: 35px dotted rgba(255,255,255,.7); border-radius: 50%; transform: rotate(-14deg); }
-.bg-shape { position: absolute; z-index: 1; border-radius: 48% 52% 43% 57%; background: rgba(255,255,255,.11); filter: blur(1px); animation: ambient-drift 18s ease-in-out infinite alternate; }
+.bg-shape { position: absolute; z-index: 1; border-radius: 48% 52% 43% 57%; background: rgba(255,255,255,.11); animation: ambient-drift var(--scene-duration) ease-in-out var(--clip-start) 1 alternate both; }
 .shape-a { top: 17%; right: 7%; width: 310px; height: 190px; transform: rotate(-15deg); }
 .shape-b { bottom: 10%; left: -4%; width: 360px; height: 250px; border-radius: 63% 37% 54% 46%; animation-delay: -7s; }
 .shape-c { right: 24%; bottom: -8%; width: 290px; height: 210px; opacity: .7; animation-delay: -12s; }
@@ -262,38 +247,32 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .image-card img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .image-shine { position: absolute; inset: 0; background: linear-gradient(125deg, rgba(255,255,255,.35), transparent 31%); pointer-events: none; }
 .game-stage > .hero-image { width: ${CANDY_ARCADE_LAYOUT_DIMENSIONS.baseline.width}px; height: ${CANDY_ARCADE_LAYOUT_DIMENSIONS.baseline.height}px; margin-top: 20px; }
-.hero-image img { transform-origin: center; animation: hero-ken-burn 28s ease-in-out calc(var(--clip-start) * -1) infinite alternate; }
-.layout-media_left_choices_right .game-stage { grid-template-columns: minmax(0, 1.08fr) minmax(520px, .92fr); grid-template-areas: "title title" "hero answers" "think think" "reveal reveal"; align-items: center; column-gap: 42px; row-gap: 18px; }
+.hero-image img { transform-origin: center; animation: hero-ken-burn var(--scene-duration) ease-in-out var(--clip-start) 1 alternate both; }
+.layout-media_left_choices_right .game-stage { grid-template-columns: minmax(0, 1.08fr) minmax(520px, .92fr); grid-template-areas: "title title" "hero answers" "phase phase"; align-items: center; column-gap: 42px; row-gap: 18px; }
 .layout-media_left_choices_right .question-title { grid-area: title; width: 100%; }
-.layout-media_left_choices_right .game-stage > .hero-image { grid-area: hero; width: 100%; height: ${CANDY_ARCADE_LAYOUT_DIMENSIONS.media_left_choices_right.height}px; margin-top: 0; }
+.layout-media_left_choices_right .game-stage > .hero-image { grid-area: hero; width: 100%; height: 420px; margin-top: 0; }
 .layout-media_left_choices_right .answer-grid { grid-area: answers; grid-template-columns: 1fr; width: 100%; margin-top: 0; gap: 18px; }
 .layout-media_left_choices_right .answer-card { min-height: 112px; padding: 15px 22px 15px 16px; font-size: 30px; }
-.layout-media_left_choices_right .thinking-bar { grid-area: think; }
-.layout-media_left_choices_right .reveal-panel, .layout-media_left_choices_right .fact-card { grid-area: reveal; }
-.layout-media_left_choices_right.phase-question .game-stage { grid-template-areas: "title title" "hero hero"; }
-.layout-media_left_choices_right.phase-question .game-stage > .hero-image { width: 1120px; height: 560px; }
-.layout-media_center_choices_side .game-stage { grid-template-columns: minmax(0, 1.08fr) minmax(520px, .92fr); grid-template-areas: "title title" "hero answers" "think think" "reveal reveal"; align-items: center; column-gap: 42px; row-gap: 18px; }
+.layout-media_center_choices_side .game-stage { grid-template-columns: minmax(0, 1.08fr) minmax(520px, .92fr); grid-template-areas: "title title" "hero answers" "phase phase"; align-items: center; column-gap: 42px; row-gap: 18px; }
 .layout-media_center_choices_side .question-title { grid-area: title; width: 100%; }
-.layout-media_center_choices_side .game-stage > .hero-image { grid-area: hero; width: 100%; height: ${CANDY_ARCADE_LAYOUT_DIMENSIONS.media_left_choices_right.height}px; margin-top: 0; }
+.layout-media_center_choices_side .game-stage > .hero-image { grid-area: hero; width: 100%; height: 420px; margin-top: 0; }
 .layout-media_center_choices_side .answer-grid { grid-area: answers; grid-template-columns: 1fr; width: 100%; margin-top: 0; gap: 18px; }
 .layout-media_center_choices_side .answer-card { min-height: 112px; padding: 15px 22px 15px 16px; font-size: 30px; }
-.layout-media_center_choices_side .thinking-bar { grid-area: think; }
-.layout-media_center_choices_side .reveal-panel, .layout-media_center_choices_side .fact-card { grid-area: reveal; }
-.layout-media_center_choices_side.phase-question .game-stage { grid-template-areas: "title title" "hero hero"; }
-.layout-media_center_choices_side.phase-question .game-stage > .hero-image { width: 1120px; height: 560px; }
-.layout-media_top_choices_bottom .game-stage { grid-template-columns: 1fr; grid-template-areas: "title" "hero" "answers" "think" "reveal"; row-gap: 16px; }
+.layout-media_top_choices_bottom .game-stage { grid-template-columns: 1fr; grid-template-areas: "title" "hero" "answers" "phase"; row-gap: 14px; }
 .layout-media_top_choices_bottom .question-title { grid-area: title; width: 100%; }
-.layout-media_top_choices_bottom .game-stage > .hero-image { grid-area: hero; width: ${CANDY_ARCADE_LAYOUT_DIMENSIONS.media_top_choices_bottom.width}px; height: ${CANDY_ARCADE_LAYOUT_DIMENSIONS.media_top_choices_bottom.height}px; margin-top: 0; }
+.layout-media_top_choices_bottom .game-stage > .hero-image { grid-area: hero; width: 780px; height: 260px; margin-top: 0; }
 .layout-media_top_choices_bottom .answer-grid { grid-area: answers; width: 1540px; margin-top: 0; }
-.layout-media_top_choices_bottom .thinking-bar { grid-area: think; }
-.layout-media_top_choices_bottom .reveal-panel, .layout-media_top_choices_bottom .fact-card { grid-area: reveal; }
-.layout-media_top_choices_bottom.phase-think .game-stage > .hero-image, .layout-media_top_choices_bottom.phase-explain .game-stage > .hero-image { height: ${CANDY_ARCADE_LAYOUT_DIMENSIONS.media_top_choices_bottom.thinkHeight}px; }
-.layout-visual_choices_three .game-stage { grid-template-columns: 1fr; grid-template-areas: "title" "answers" "think" "reveal"; row-gap: 16px; }
+.layout-media_top_choices_bottom .answer-card { min-height: 94px; padding: 12px 18px 12px 16px; font-size: 26px; }
+.layout-media_top_choices_bottom .answer-grid { gap: 14px; }
+.layout-visual_choices_three .game-stage { grid-template-columns: 1fr; grid-template-areas: "title" "answers" "phase"; row-gap: 14px; }
 .layout-visual_choices_three .question-title { grid-area: title; width: 100%; }
 .layout-visual_choices_three .visual-answer-grid { grid-area: answers; margin-top: 0; }
-.layout-visual_choices_three .thinking-bar { grid-area: think; }
-.layout-visual_choices_three .reveal-panel, .layout-visual_choices_three .fact-card { grid-area: reveal; }
-.answer-grid { display: grid; gap: 24px; width: 1540px; margin-top: 25px; }
+.phase-region { position: relative; grid-area: phase; width: 100%; height: 178px; }
+.phase-region > .thinking-bar, .phase-region > .reveal-panel, .phase-region > .fact-card { position: absolute; top: 0; left: 50%; margin-top: 0; transform: translateX(-50%); }
+.phase-region > .thinking-bar { width: min(1380px, 100%); min-height: 158px; }
+.phase-region > .reveal-panel { width: min(1160px, 100%); }
+.phase-region > .fact-card { width: min(1220px, 100%); }
+.answer-grid { display: grid; gap: 24px; width: 1540px; margin-top: 25px; opacity: 0; animation: phase-enter .01s steps(1,end) calc(var(--clip-start) + var(--choices-at)) both; }
 .answer-count-2 { grid-template-columns: repeat(2, 1fr); }
 .answer-count-3 { grid-template-columns: repeat(3, 1fr); }
 .answer-count-4, .answer-count-5, .answer-count-6 { grid-template-columns: repeat(2, 1fr); }
@@ -302,18 +281,14 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .answer-card > b, .visual-answer-label > b { position: relative; z-index: 1; display: grid; flex: 0 0 auto; place-items: center; width: 66px; height: 66px; border-radius: 23px; background: var(--badge); color: #fff; box-shadow: inset 0 -5px 0 rgba(13,35,71,.14); font-size: 35px; }
 .answer-card:nth-child(2) > b { background: var(--accent); }
 .answer-card:nth-child(3) > b { background: #F6B83D; }
-.answer-card span { position: relative; z-index: 1; line-height: 1.1; }
+.answer-card span { position: relative; z-index: 1; flex: 1 1 auto; min-width: 0; padding-right: 54px; line-height: 1.1; }
 .answer-card img { position: relative; z-index: 1; width: 62px; height: 62px; border-radius: 18px; object-fit: cover; }
 .choice-tier-long span, .choice-tier-very_long span { font-size: 28px; }
-.answer-correct { border-color: var(--correct); background: #F6FFF8; box-shadow: 0 14px 0 color-mix(in srgb, var(--correct) 55%, rgba(13,35,71,.08)), 0 0 0 8px rgba(255,255,255,.22), 0 0 39px rgba(255,255,255,.58); transform: translateY(-4px) scale(1.03); }
-.phase-reveal .answer-correct { animation: correct-card-reveal .62s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + .14s) both; }
-.answer-incorrect { opacity: .52; filter: saturate(.2); transform: scale(.98); }
-.phase-reveal .answer-incorrect { animation: incorrect-card-settle .38s ease-out var(--clip-start) both; }
-.answer-check, .answer-cross { position: absolute; z-index: 2; top: 16px; right: 19px; display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: var(--correct); color: #fff; box-shadow: 0 5px 0 rgba(13,35,71,.16); font-size: 31px; font-style: normal; }
+.answer-card.answer-correct { animation: correct-card-reveal .62s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--reveal-at) + .14s) both; }
+.answer-card.answer-incorrect { animation: incorrect-card-settle .38s ease-out calc(var(--clip-start) + var(--reveal-at)) both; }
+.answer-check, .answer-cross { position: absolute; z-index: 2; top: 16px; right: 19px; display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: var(--correct); color: #fff; box-shadow: 0 5px 0 rgba(13,35,71,.16); font-size: 31px; font-style: normal; opacity: 0; animation: status-pop .38s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--reveal-at) + .16s) both; }
 .answer-cross { background: var(--incorrect); }
-.phase-reveal .answer-cross { animation: cross-pop .4s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + .28s) both; }
-.phase-reveal .game-stage > .hero-image { animation: hero-reveal-push .58s ease-out var(--clip-start) both; }
-.thinking-bar { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 18px 24px; width: 1380px; min-height: 164px; margin-top: 24px; padding: 24px 32px; border: 6px solid rgba(255,255,255,.88); border-radius: 42px; background: rgba(255,255,255,.95); box-shadow: 0 16px 0 var(--depth-shadow), inset 0 4px 0 rgba(255,255,255,.9); }
+.thinking-bar { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 18px 24px; width: 1380px; min-height: 164px; margin-top: 24px; padding: 24px 32px; border: 6px solid rgba(255,255,255,.88); border-radius: 42px; background: rgba(255,255,255,.95); box-shadow: 0 16px 0 var(--depth-shadow), inset 0 4px 0 rgba(255,255,255,.9); opacity: 0; animation: phase-hold var(--thinking-duration) steps(1,end) calc(var(--clip-start) + var(--thinking-at)) both; }
 .thinking-label { display: flex; align-items: center; gap: 15px; font-size: 30px; font-weight: 900; }
 .thinking-label b { display: grid; place-items: center; width: 58px; height: 58px; border-radius: 19px; background: var(--accent); color: #fff; box-shadow: inset 0 -5px 0 rgba(13,35,71,.13); font-size: 37px; }
 .thinking-track { position: relative; height: 48px; overflow: visible; border: 5px solid #fff; border-radius: 999px; background: #DDE8EF; box-shadow: inset 0 4px 0 rgba(13,35,71,.12), 0 7px 0 var(--depth-edge); }
@@ -322,50 +297,40 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .timer-marker { position: absolute; top: 50%; left: 100%; display: grid; place-items: center; width: 76px; height: 76px; border: 7px solid #fff; border-radius: 50%; background: var(--accent); color: #fff; box-shadow: 0 8px 0 rgba(13,35,71,.24), inset 0 -5px 0 rgba(13,35,71,.14); font-size: 36px; font-weight: 900; font-style: normal; transform: translate(-50%,-50%); animation: quiz-timer-marker-slide var(--timer-duration) linear var(--clip-start) both; }
 .timer-marker::after { position: absolute; inset: -10px; border: 3px dashed rgba(255,255,255,.68); border-radius: 50%; content: ""; transform: rotate(-8deg); }
 .timer-sparkles { position: absolute; inset: -20px -14px; pointer-events: none; }
-.timer-sparkles i { position: absolute; color: var(--accent); font-size: 24px; font-style: normal; animation: timer-sparkle 1.8s ease-in-out calc(var(--clip-start) + var(--ambient-phase)) infinite; }
+.timer-sparkles i { position: absolute; color: var(--accent); font-size: 24px; font-style: normal; animation: timer-sparkle var(--timer-duration) ease-in-out calc(var(--clip-start) + var(--ambient-phase)) 1 both; }
 .timer-sparkles i:nth-child(1) { right: 7%; top: -17px; }.timer-sparkles i:nth-child(2) { right: 1%; bottom: -15px; color: #FFD34D; font-size: 18px; animation-delay: calc(var(--clip-start) + .55s); }.timer-sparkles i:nth-child(3) { left: 4%; top: -14px; color: #fff; animation-delay: calc(var(--clip-start) + 1.05s); }
 .timer-caption { grid-column: 2; margin-top: -8px; color: rgba(21,42,87,.64); font-size: 19px; font-weight: 900; }
-.reveal-panel { display: grid; justify-items: center; gap: 5px; margin-top: 18px; color: #fff; text-shadow: 0 7px 0 rgba(13,35,71,.18); }
+.reveal-panel { display: grid; justify-items: center; gap: 5px; margin-top: 18px; color: #fff; text-shadow: 0 7px 0 rgba(13,35,71,.18); opacity: 0; animation: phase-hold var(--reveal-duration) steps(1,end) calc(var(--clip-start) + var(--reveal-at)) both; }
 .reveal-panel strong { font-size: 44px; animation: reveal-pop .46s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + .16s) both; }
 .reveal-panel > span { font-size: 30px; font-weight: 900; animation: reveal-answer-in .4s cubic-bezier(.22,.8,.3,1) calc(var(--clip-start) + .25s) both; }
 .reveal-stamp { display: grid; place-items: center; width: 88px; height: 88px; border: 7px solid #fff; border-radius: 50%; background: var(--correct); box-shadow: 0 9px 0 rgba(13,35,71,.24); font-size: 54px; animation: stamp-pop .5s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + .28s) both; }
 .reveal-sparkles { display: flex; justify-content: center; gap: 46px; margin-top: 6px; color: #fff; font-size: 44px; }
 .reveal-sparkles i { font-style: normal; }
 .reveal-sparkles i:nth-child(2) { color: #ffd34d; transform: translateY(-12px); }
-.fact-card { max-width: 1220px; margin-top: 22px; padding: 20px 38px 23px; border: 6px solid rgba(255,255,255,.79); border-radius: 35px; background: var(--surface); box-shadow: 0 15px 0 rgba(13,35,71,.18); text-align: center; }
+.fact-card { max-width: 1220px; margin-top: 22px; padding: 20px 38px 23px; border: 6px solid rgba(255,255,255,.79); border-radius: 35px; background: var(--surface); box-shadow: 0 15px 0 rgba(13,35,71,.18); text-align: center; opacity: 0; animation: phase-enter .01s steps(1,end) calc(var(--clip-start) + var(--reward-at)) both; }
 .fact-card span { color: var(--accent); font-size: 22px; font-weight: 900; letter-spacing: 1.5px; text-transform: uppercase; }
 .fact-card p { margin: 8px 0 0; font-size: 30px; font-weight: 800; line-height: 1.24; }
-.visual-answer-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 28px; width: 1560px; margin-top: 25px; }
+.visual-answer-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 28px; width: 1560px; margin-top: 25px; opacity: 0; animation: phase-enter .01s steps(1,end) calc(var(--clip-start) + var(--choices-at)) both; }
 .visual-answer-card { position: relative; }
 .option-image { width: 100%; height: 372px; border-width: 12px; border-radius: 40px; }
 .visual-answer-label { position: relative; z-index: 2; display: flex; align-items: center; gap: 13px; min-height: 82px; margin: -28px 22px 0; padding: 12px 18px; border: 5px solid rgba(17,39,84,.13); border-radius: 28px; background: var(--surface); box-shadow: 0 11px 0 var(--depth-shadow), inset 0 4px 0 rgba(255,255,255,.72); font-size: 29px; font-weight: 900; }
 .visual-answer-label > b { width: 48px; height: 48px; border-radius: 16px; font-size: 27px; }
-.visual-answer-card.answer-correct .option-image { border-color: var(--correct); box-shadow: 0 18px 0 color-mix(in srgb, var(--correct) 50%, rgba(13,35,71,.1)), 0 0 35px rgba(255,255,255,.6); transform: translateY(-4px) scale(1.035); }
-.phase-reveal .visual-answer-card.answer-correct { animation: correct-card-reveal .62s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + .14s) both; }
-.visual-answer-card.answer-incorrect { opacity: .52; filter: saturate(.16); transform: scale(.98); }
-.phase-reveal .visual-answer-card.answer-incorrect { animation: incorrect-card-settle .38s ease-out var(--clip-start) both; }
-.phase-think .answer-card, .phase-think .visual-answer-card { animation: answer-float 4.2s ease-in-out calc(var(--clip-start) - var(--item-phase, 0s)) infinite; }
-.phase-think .hero-image, .phase-explain .hero-image { animation: hero-float 5.5s ease-in-out calc(var(--clip-start) - var(--ambient-phase)) infinite; }
-.reward-fx { position: absolute; z-index: 4; inset: 0; color: #fff; pointer-events: none; text-shadow: 0 7px 0 rgba(13,35,71,.18); }
-.reward-fx i { position: absolute; font-size: 51px; font-style: normal; animation: star-burst .72s cubic-bezier(.18,1.42,.34,1) var(--clip-start) both; }
+.visual-answer-card.answer-correct .option-image { animation: visual-correct-reveal .62s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--reveal-at) + .14s) both; }
+.visual-answer-card.answer-incorrect { animation: incorrect-card-settle .38s ease-out calc(var(--clip-start) + var(--reveal-at)) both; }
+.quiz-question-clip .hero-image { animation: hero-enter .62s cubic-bezier(.22,.8,.3,1) var(--clip-start) both, hero-float var(--scene-duration) ease-in-out calc(var(--clip-start) + .62s) 1 alternate both; }
+.reward-fx { position: absolute; z-index: 4; inset: 0; color: #fff; pointer-events: none; text-shadow: 0 7px 0 rgba(13,35,71,.18); opacity: 0; animation: phase-enter .01s steps(1,end) calc(var(--clip-start) + var(--reward-at)) both; }
+.reward-fx i { position: absolute; font-size: 51px; font-style: normal; animation: star-burst .72s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--reward-at)) both; }
 .reward-fx i:nth-child(1) { left: 5%; top: 34%; }.reward-fx i:nth-child(2) { right: 6%; top: 38%; animation-delay: calc(var(--clip-start) + .06s); }.reward-fx i:nth-child(3) { left: 9%; bottom: 18%; animation-delay: calc(var(--clip-start) + .12s); }.reward-fx i:nth-child(4) { right: 10%; bottom: 16%; animation-delay: calc(var(--clip-start) + .18s); }.reward-fx i:nth-child(5) { left: 3%; top: 58%; animation-delay: calc(var(--clip-start) + .24s); }.reward-fx i:nth-child(6) { right: 3%; top: 61%; animation-delay: calc(var(--clip-start) + .3s); }.reward-fx i:nth-child(7) { left: 7%; bottom: 8%; animation-delay: calc(var(--clip-start) + .36s); }
 .reward-fx i:nth-child(8) { right: 18%; top: 20%; animation-delay: calc(var(--clip-start) + .42s); }.reward-fx i:nth-child(9) { left: 20%; bottom: 23%; animation-delay: calc(var(--clip-start) + .48s); }
 .reward-small i { font-size: 57px; }
 .reward-big i { font-size: 71px; }
 .episode-progress.streak { animation: progress-pop .52s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + .12s) both; }
 .episode-progress.streak i { margin-left: 2px; color: #FFD34D; font-size: 24px; font-style: normal; }
-.phase-reveal::after { position: absolute; z-index: 2; top: 58%; left: 50%; width: 980px; height: 440px; border-radius: 50%; background: radial-gradient(circle, rgba(255,255,255,.54), rgba(255,255,255,0) 68%); content: ""; pointer-events: none; transform: translate(-50%,-50%) scale(.45); animation: reveal-impact .7s ease-out calc(var(--clip-start) + .04s) both; }
+.quiz-question-clip::after { position: absolute; z-index: 2; top: 58%; left: 50%; width: 980px; height: 440px; border: 26px solid rgba(255,255,255,.54); border-radius: 50%; content: ""; pointer-events: none; transform: translate(-50%,-50%) scale(.45); animation: reveal-impact .7s ease-out calc(var(--clip-start) + var(--reveal-at) + .04s) both; }
 .is-final-scene .question-title { border-color: #FFD64D; box-shadow: 0 18px 0 rgba(255,212,77,.38); }
-.phase-question .question-title { animation: title-enter .58s cubic-bezier(.18,1.42,.34,1) var(--clip-start) both; }
-.phase-question .hero-image { animation: hero-enter .62s cubic-bezier(.22,.8,.3,1) var(--clip-start) both, hero-float 5.5s ease-in-out calc(var(--clip-start) + .62s) infinite; }
-.phase-choices .answer-card { animation: answer-enter .46s cubic-bezier(.22,.8,.3,1) var(--clip-start) both; }
-.phase-choices .answer-card:nth-child(2) { animation-delay: calc(var(--clip-start) + .12s); }.phase-choices .answer-card:nth-child(3) { animation-delay: calc(var(--clip-start) + .24s); }
-.phase-question.layout-media_left_choices_right .hero-image { animation: enter-from-left .66s cubic-bezier(.22,.8,.3,1) var(--clip-start) both, hero-float 5.5s ease-in-out calc(var(--clip-start) + .66s) infinite; }
-.phase-question.layout-media_top_choices_bottom .hero-image { animation: enter-from-right .66s cubic-bezier(.22,.8,.3,1) var(--clip-start) both, hero-float 5.5s ease-in-out calc(var(--clip-start) + .66s) infinite; }
-.phase-choices.layout-media_left_choices_right .hero-image, .phase-choices.layout-media_top_choices_bottom .hero-image { animation: hero-enter .66s cubic-bezier(.22,.8,.3,1) var(--clip-start) both; }
-.phase-choices.layout-media_left_choices_right .answer-card:nth-child(2), .phase-choices.layout-media_top_choices_bottom .answer-card:nth-child(2) { animation-delay: calc(var(--clip-start) + .12s); }
-.phase-choices.layout-media_left_choices_right .answer-card:nth-child(3), .phase-choices.layout-media_top_choices_bottom .answer-card:nth-child(3) { animation-delay: calc(var(--clip-start) + .24s); }
-.phase-choices.layout-visual_choices_three .visual-answer-card:nth-child(1) { animation: enter-from-left .52s cubic-bezier(.22,.8,.3,1) var(--clip-start) both; }.phase-choices.layout-visual_choices_three .visual-answer-card:nth-child(2) { animation: answer-enter .52s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + .08s) both; }.phase-choices.layout-visual_choices_three .visual-answer-card:nth-child(3) { animation: enter-from-right .52s cubic-bezier(.22,.8,.3,1) calc(var(--clip-start) + .16s) both; }
+.quiz-question-clip .question-title { animation: title-enter .58s cubic-bezier(.18,1.42,.34,1) var(--clip-start) both; }
+.layout-media_left_choices_right.quiz-question-clip .hero-image { animation: enter-from-left .66s cubic-bezier(.22,.8,.3,1) var(--clip-start) both, hero-float var(--scene-duration) ease-in-out calc(var(--clip-start) + .66s) 1 alternate both; }
+.layout-media_top_choices_bottom.quiz-question-clip .hero-image { animation: enter-from-right .66s cubic-bezier(.22,.8,.3,1) var(--clip-start) both, hero-float var(--scene-duration) ease-in-out calc(var(--clip-start) + .66s) 1 alternate both; }
 .candy-transition { position: absolute; z-index: 10; inset: 0; overflow: hidden; background: transparent; pointer-events: none; }
 .transition-bubble_splash { background: transparent; }
 .splash-bed { position: absolute; inset: 0; background: var(--from); opacity: 0; transform: scale(.96); animation: splash-bed .86s cubic-bezier(.22,.8,.3,1) var(--clip-start) both; }
@@ -375,12 +340,12 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .splash-particles { position: absolute; top: 50%; left: 50%; color: #fff; font-size: 36px; text-shadow: 0 6px 0 rgba(13,35,71,.2); }
 .splash-particles i { position: absolute; font-style: normal; opacity: 0; animation: splash-particle .6s ease-out calc(var(--clip-start) + .34s) both; }.splash-particles i:nth-child(1) { transform: translate(-190px,-80px); }.splash-particles i:nth-child(2) { transform: translate(170px,-115px); color: #FFD34D; animation-delay: calc(var(--clip-start) + .38s); }.splash-particles i:nth-child(3) { transform: translate(190px,90px); animation-delay: calc(var(--clip-start) + .42s); }.splash-particles i:nth-child(4) { transform: translate(-160px,110px); color: #FFD34D; animation-delay: calc(var(--clip-start) + .46s); }
 .splash-release { position: absolute; inset: 0; border: 24px solid rgba(255,255,255,.34); opacity: 0; transform: scale(1.08); animation: splash-release .86s ease-out calc(var(--clip-start) + .42s) both; }
-.brush { position: absolute; inset: -13% -35%; background: var(--from); clip-path: polygon(0 23%, 11% 12%, 24% 28%, 38% 8%, 52% 25%, 66% 7%, 78% 30%, 91% 12%, 100% 25%, 100% 100%, 0 100%); transform: translateX(-115%); animation: brush-wave .8s cubic-bezier(.25,.8,.35,1) var(--clip-start) both; }
-.brush-two { background: var(--to); clip-path: polygon(0 34%, 12% 20%, 26% 39%, 39% 15%, 53% 34%, 68% 13%, 82% 38%, 100% 19%, 100% 100%, 0 100%); animation-delay: calc(var(--clip-start) + .08s); }
-.transition-lightning_brush .brush { clip-path: polygon(0 32%, 15% 15%, 27% 35%, 42% 10%, 54% 30%, 69% 9%, 81% 34%, 100% 12%, 100% 100%, 0 100%); }
+.brush { position: absolute; inset: -13% -35%; border-radius: 48% 52% 43% 57%; background: var(--from); transform: translateX(-115%) rotate(-8deg); animation: brush-wave .8s cubic-bezier(.25,.8,.35,1) var(--clip-start) both; }
+.brush-two { background: var(--to); transform: translateX(-115%) rotate(8deg) scale(.82); animation-delay: calc(var(--clip-start) + .08s); }
+.transition-lightning_brush .brush { border: 18px solid rgba(255,255,255,.38); }
 .transition-mark { position: absolute; top: 50%; left: 50%; display: grid; place-items: center; width: 146px; height: 146px; border: 9px solid #fff; border-radius: 47px; background: var(--from); color: #fff; box-shadow: 0 18px 0 rgba(13,35,71,.25); font-size: 82px; transform: translate(-50%,-50%) scale(0) rotate(-26deg); animation: mark-pop .8s cubic-bezier(.18,1.42,.34,1) var(--clip-start) both; }
 .candy-intro, .candy-outro { display: grid; place-items: center; background: #F6B83D; color: #172A59; }
-.intro-rays { position: absolute; inset: -30%; opacity: .24; background: repeating-conic-gradient(from 8deg, rgba(255,255,255,.9) 0 9deg, transparent 9deg 19deg); animation: ray-spin 30s linear infinite; }
+.intro-rays { position: absolute; inset: -30%; opacity: .24; background: repeating-conic-gradient(from 8deg, rgba(255,255,255,.9) 0 9deg, transparent 9deg 19deg); animation: ray-spin 16s linear 0s 1 both; }
 .intro-card, .outro-card { position: relative; z-index: 3; display: grid; justify-items: center; text-align: center; }
 .intro-card > span, .outro-card > span { display: inline-flex; padding: 15px 23px; border-radius: 999px; background: #FF6277; color: #fff; box-shadow: 0 10px 0 rgba(13,35,71,.18); font-size: 25px; font-weight: 900; letter-spacing: 1.5px; }
 .intro-card h1, .outro-card h1 { max-width: 1050px; margin: 29px 0 9px; font-size: 96px; line-height: 1.02; letter-spacing: -4px; }
@@ -390,7 +355,7 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .brand-mascot { position: absolute; z-index: 3; right: 255px; bottom: 95px; display: grid; place-items: center; width: 179px; height: 179px; border: 10px solid #fff; border-radius: 53px; background: #29B9A8; color: #fff; box-shadow: 0 20px 0 rgba(13,35,71,.2); font-size: 93px; transform: rotate(-8deg); }
 .outro-blob { position: absolute; border-radius: 50%; background: rgba(255,255,255,.36); }.outro-blob.blob-a { top: 112px; left: 205px; width: 170px; height: 170px; }.outro-blob.blob-b { right: 220px; bottom: 130px; width: 205px; height: 205px; background: rgba(41,185,168,.36); }
 .scene-decor { position: absolute; z-index: 2; inset: 0; pointer-events: none; color: rgba(255,255,255,.62); }
-.scene-decor i { position: absolute; display: block; font-style: normal; animation: decor-drift 6.4s ease-in-out calc(var(--clip-start) - var(--decor-phase)) infinite; }
+.scene-decor i { position: absolute; display: block; font-style: normal; animation: decor-drift var(--scene-duration) ease-in-out var(--clip-start) 1 alternate both; }
 .decor-1 { top: 21%; left: 5%; font-size: 34px; color: var(--accent); }.decor-2 { top: 40%; left: 3%; font-size: 26px; }.decor-3 { top: 13%; right: 12%; font-size: 48px; color: var(--accent); }.decor-4 { right: 5%; bottom: 30%; font-size: 42px; color: rgba(255,255,255,.48); }.decor-5 { left: 18%; bottom: 11%; font-size: 31px; color: #FFD34D; }.decor-6 { right: 24%; top: 28%; font-size: 25px; color: #FFD34D; }.decor-7 { left: 30%; top: 8%; font-size: 18px; }
 @keyframes ray-spin { to { transform: translate(-50%,-50%) rotate(360deg); } }
 @keyframes drift { to { background-position: 230px 160px; } }
@@ -403,11 +368,15 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 @keyframes answer-enter { from { opacity: 0; transform: translateY(32px) scale(.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes enter-from-left { from { opacity: 0; transform: translateX(-60px) scale(.94); } to { opacity: 1; transform: translateX(0) scale(1); } }
 @keyframes enter-from-right { from { opacity: 0; transform: translateX(60px) scale(.94); } to { opacity: 1; transform: translateX(0) scale(1); } }
+@keyframes phase-enter { to { opacity: 1; } }
+@keyframes phase-hold { 0%,100% { opacity: 0; } 1%,99% { opacity: 1; } }
 @keyframes quiz-timer-drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 @keyframes quiz-timer-marker-slide { from { left: 100%; } to { left: 0%; } }
 @keyframes timer-sparkle { 50% { transform: translateY(-4px) scale(1.16) rotate(12deg); opacity: .7; } }
 @keyframes correct-card-reveal { 0% { transform: translateY(0) scale(1); } 55% { transform: translateY(-13px) scale(1.12); } 76% { transform: translateY(-2px) scale(1.015); } 100% { transform: translateY(-5px) scale(1.04); } }
-@keyframes incorrect-card-settle { from { opacity: 1; filter: saturate(1); transform: scale(1); } to { opacity: .52; filter: saturate(.2); transform: scale(.98); } }
+@keyframes visual-correct-reveal { 0% { border-color: #fff; transform: translateY(0) scale(1); } 55% { border-color: var(--correct); transform: translateY(-13px) scale(1.12); } 100% { border-color: var(--correct); transform: translateY(-4px) scale(1.035); } }
+@keyframes incorrect-card-settle { from { opacity: 1; transform: scale(1); } to { opacity: .52; transform: scale(.98); } }
+@keyframes status-pop { from { opacity: 0; transform: scale(0); } to { opacity: 1; transform: scale(1); } }
 @keyframes cross-pop { 0% { transform: scale(0); } 65% { transform: scale(1.15); } 100% { transform: scale(1); } }
 @keyframes hero-reveal-push { from { transform: scale(1); } to { transform: scale(1.035); } }
 @keyframes hero-ken-burn { from { transform: scale(1); } to { transform: scale(1.06); } }

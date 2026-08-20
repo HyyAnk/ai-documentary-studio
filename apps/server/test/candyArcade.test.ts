@@ -108,6 +108,27 @@ describe("Candy Arcade visual template", () => {
     expect(html).toContain(".reward-fx { position: absolute; z-index: 4; inset: 0;");
   });
 
+  it("keeps the 50-question maximum to one scene and one hero image per question", () => {
+    const maximumQuiz = QuizV2Schema.parse({
+      ...quiz,
+      episode_id: "candy-maximum",
+      questions: Array.from({ length: 50 }, (_, index) => ({
+        ...quiz.questions[0]!,
+        id: `question-${String(index + 1).padStart(2, "0")}`,
+        number: index + 1,
+        question: `Which simple machine is shown in challenge ${index + 1}?`,
+      })),
+    });
+    const director = createDefaultDirectorPlan(maximumQuiz);
+    const timeline = compileQuizTimeline({ quiz: maximumQuiz, director, voicePlan: buildQuizVoicePlan(maximumQuiz) });
+    const html = buildCandyArcadeComposition({ quiz: maximumQuiz, director, timeline, theme: "candy_arcade", audioPath: "./narration.wav", narrationDurationSeconds: timeline.duration_seconds });
+    expect((html.match(/<section id="quiz-q/g) ?? [])).toHaveLength(50);
+    expect((html.match(/class="image-card hero-image"/g) ?? [])).toHaveLength(50);
+    expect(html).not.toContain("infinite");
+    expect(html).not.toContain("filter:");
+    expect(html).not.toContain("clip-path");
+  });
+
   it("creates one complete visual-answer consistency group and blocks missing group metadata", () => {
     const director = createDefaultDirectorPlan(quiz);
     const plan = planQuizAssets(quiz, director);

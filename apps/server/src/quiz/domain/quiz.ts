@@ -18,6 +18,37 @@ export function normalizeQuizText(value: string): string {
   return value.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }
 
+export function stripQuizChoiceLabel(value: string): string {
+  return value.trim().replace(/^(?:choice\s*)?[a-z]\s*[-–—:.)]\s+/i, "").trim();
+}
+
+function normalizeQuizChoiceText(value: string): string {
+  return normalizeQuizText(stripQuizChoiceLabel(value)).replace(/[.!?…。！？]+$/u, "");
+}
+
+/**
+ * Returns the unique visible choice represented by a spoken/scripted answer.
+ * Quiz shot plans often say "B — Inclined plane" while the visible choice is
+ * only "Inclined plane". The label is accepted only when its suffix is empty
+ * or still matches the referenced visible choice.
+ */
+export function resolveVisibleQuizChoice(choices: string[], answer: string): number | null {
+  const normalizedAnswer = normalizeQuizChoiceText(answer);
+  const exactMatches = choices
+    .map((choice, index) => ({ index, normalized: normalizeQuizChoiceText(choice) }))
+    .filter((choice) => choice.normalized === normalizedAnswer);
+  if (exactMatches.length === 1) return exactMatches[0].index;
+  if (exactMatches.length > 1) return null;
+
+  const labeled = answer.trim().match(/^(?:choice\s*)?([a-z])(?:\s*(?:[-–—:.)]\s*(.*)|\s+(.+)))?$/i);
+  if (!labeled) return null;
+  const index = labeled[1].toLowerCase().charCodeAt(0) - 97;
+  const visibleChoice = choices[index];
+  if (!visibleChoice) return null;
+  const suffix = normalizeQuizText(labeled[2] ?? labeled[3] ?? "");
+  return !suffix || normalizeQuizChoiceText(suffix) === normalizeQuizChoiceText(visibleChoice) ? index : null;
+}
+
 export function validateQuizV2(value: unknown): QuizV2 {
   try {
     return QuizV2Schema.parse(value);
@@ -50,10 +81,10 @@ export function deriveQuizV2FromScenes(input: {
     if (!question || choicesText.length < 2 || !answer || !explanation) {
       throw new QuizDomainError("Question " + number + " is missing question, choices, canonical answer, or explanation", "QUIZ_QUESTION_INCOMPLETE");
     }
-    const choices = choicesText.map((text, choiceIndex) => ({ id: "choice-" + String.fromCharCode(97 + choiceIndex), text: text.trim() }));
-    const canonicalMatches = choices.filter((choice) => normalizeQuizText(choice.text) === normalizeQuizText(answer));
-    if (canonicalMatches.length !== 1) throw new QuizDomainError("Question " + number + " answer \"" + answer + "\" does not match exactly one visible choice", "QUIZ_CANONICAL_ANSWER_INVALID");
-    const normalizedChoices = choices.map((choice) => normalizeQuizText(choice.text));
+    const choices = choicesText.map((text, choiceIndex) => ({ id: "choice-" + String.fromCharCode(97 + choiceIndex), text: stripQuizChoiceLabel(text) }));
+    const canonicalChoiceIndex = resolveVisibleQuizChoice(choices.map((choice) => choice.text), answer);
+    if (canonicalChoiceIndex === null) throw new QuizDomainError("Question " + number + " answer \"" + answer + "\" does not match exactly one visible choice", "QUIZ_CANONICAL_ANSWER_INVALID");
+    const normalizedChoices = choices.map((choice) => normalizeQuizChoiceText(choice.text));
     if (new Set(normalizedChoices).size !== normalizedChoices.length) throw new QuizDomainError("Question " + number + " contains duplicate visible choices", "QUIZ_DUPLICATE_CHOICE");
     const sourceIds = [...new Set(questionScenes.flatMap((scene) => scene.source_ids))];
     const visualOpportunity = quizScenes.find((quiz) => quiz.image_prompt.trim())?.image_prompt.trim() ?? "";
@@ -65,7 +96,7 @@ export function deriveQuizV2FromScenes(input: {
       difficulty: Math.min(5, 1 + Math.floor(index / Math.max(1, Math.ceil(grouped.size / 5)))),
       question,
       choices,
-      correct_choice_id: canonicalMatches[0].id,
+      correct_choice_id: choices[canonicalChoiceIndex].id,
       explanation,
       fun_fact: "",
       source_ids: sourceIds,

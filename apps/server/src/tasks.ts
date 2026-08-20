@@ -37,6 +37,7 @@ import { preflightQuizRender } from "./quiz/qa/preflight.js";
 import { inspectRenderedVideo } from "./quiz/qa/postRenderQa.js";
 import { isQuizAssetResolutionComplete, resolveQuizAssets } from "./quiz/assets/resolveQuizAssets.js";
 import { compileTimeline, generateDirector, generateQuiz, generateVoice, planAssets, readQuizArtifacts, resolveAssets, runQa } from "./quiz/pipeline/orchestrator.js";
+import { resolveVisibleQuizChoice } from "./quiz/domain/quiz.js";
 
 export { buildQuizComposition };
 
@@ -50,10 +51,9 @@ type NarrationCheckpoint = {
   segments: Record<string, { fingerprint: string; asset_path: string; duration_seconds: number }>;
 };
 type RenderCheckpoint = {
-  schema_version: 1;
+  schema_version: 2;
   source_fingerprint: string;
-  lint: { status: "passed" };
-  inspect: { status: "passed" };
+  check: { status: "passed" };
   render?: { status: "passed" };
 };
 
@@ -545,14 +545,13 @@ export class TaskManager extends EventEmitter {
       const sourceFingerprint = renderSourceFingerprint(html, narration.modified_at, narration.size, assetResolution?.assets ?? []);
       const checkpointPath = path.join(renderRoot, "render-checkpoint.json");
       const checkpoint = await readRenderCheckpoint(checkpointPath);
-      const layoutReady = checkpoint?.source_fingerprint === sourceFingerprint && checkpoint.lint.status === "passed" && checkpoint.inspect.status === "passed";
+      const layoutReady = checkpoint?.source_fingerprint === sourceFingerprint && checkpoint.check.status === "passed";
       if (layoutReady) {
         await this.update(task.task_id, { progress_message: "Video · layout and media checks already passed", progress_percent: 20 });
       } else {
         await this.update(task.task_id, { progress_message: "Video · checking layout and media", progress_percent: 20 });
-        await execFileAsync(npxCommand, hyperframesArgs("lint", renderRoot, "--json"), { cwd: this.repository.rootDirectory, timeout: 180_000, windowsHide: true });
-        await execFileAsync(npxCommand, hyperframesArgs("inspect", renderRoot, "--json", "--samples", "5"), { cwd: this.repository.rootDirectory, timeout: 300_000, windowsHide: true });
-        await writeRenderCheckpoint(checkpointPath, { schema_version: 1, source_fingerprint: sourceFingerprint, lint: { status: "passed" }, inspect: { status: "passed" } });
+        await execFileAsync(npxCommand, hyperframesArgs("check", renderRoot, "--json", "--samples", "5", "--timeout", "60000"), { cwd: this.repository.rootDirectory, timeout: 600_000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 });
+        await writeRenderCheckpoint(checkpointPath, { schema_version: 2, source_fingerprint: sourceFingerprint, check: { status: "passed" } });
       }
       let reusableRender = layoutReady && checkpoint?.render?.status === "passed" && await hasNonEmptyFile(outputPath);
       if (reusableRender) {
@@ -569,7 +568,7 @@ export class TaskManager extends EventEmitter {
       const probe = await inspectRenderedVideo(outputPath, { width: 1920, height: 1080, fps: this.videoConfig.fps });
       const renderBlocker = probe.issues.find((issue) => issue.severity === "blocker");
       if (renderBlocker) throw new RepositoryError(renderBlocker.message, "QUIZ_RENDER_QA_FAILED");
-      await writeRenderCheckpoint(checkpointPath, { schema_version: 1, source_fingerprint: sourceFingerprint, lint: { status: "passed" }, inspect: { status: "passed" }, render: { status: "passed" } });
+      await writeRenderCheckpoint(checkpointPath, { schema_version: 2, source_fingerprint: sourceFingerprint, check: { status: "passed" }, render: { status: "passed" } });
       const duration = Number.parseFloat(probe.probe.format?.duration ?? "");
       if (!Number.isFinite(duration) || duration <= 0) throw new Error("Rendered MP4 has no readable duration");
       const manifestPath = await this.repository.writeRenderManifest(task.channel_id, task.episode_id, JSON.stringify({
@@ -584,8 +583,7 @@ export class TaskManager extends EventEmitter {
         resolution: { width: 1920, height: 1080 },
         fps: this.videoConfig.fps,
         preflight: preflightAssessment ? { status: "passed", score: preflightAssessment.score, blockers: preflightAssessment.issues.filter((issue) => issue.severity === "blocker").length } : { status: "legacy_skipped" },
-        lint: { status: "passed" },
-        inspect: { status: "passed" },
+        check: { status: "passed" },
         render: { status: "passed", output: "quiz-video.mp4" },
         post_render: { status: "passed", issues: probe.issues.length, streams: probe.probe.streams?.map((stream) => ({ codec_type: stream.codec_type, width: stream.width, height: stream.height, r_frame_rate: stream.r_frame_rate })) ?? [] },
         generated_at: nowIso(),
@@ -1254,13 +1252,13 @@ async function writeNarrationCheckpoint(filePath: string, checkpoint: NarrationC
 }
 
 function renderSourceFingerprint(html: string, narrationModifiedAt: string, narrationSize: number, assets: Array<{ asset_id: string; fingerprint: string; path: string }>): string {
-  return createHash("sha256").update(JSON.stringify({ version: "quiz-render-v2", html, narrationModifiedAt, narrationSize, assets: assets.map((asset) => ({ asset_id: asset.asset_id, fingerprint: asset.fingerprint, path: asset.path })) })).digest("hex");
+  return createHash("sha256").update(JSON.stringify({ version: "quiz-render-v3", html, narrationModifiedAt, narrationSize, assets: assets.map((asset) => ({ asset_id: asset.asset_id, fingerprint: asset.fingerprint, path: asset.path })) })).digest("hex");
 }
 
 async function readRenderCheckpoint(filePath: string): Promise<RenderCheckpoint | null> {
   try {
     const parsed = JSON.parse(await readFile(filePath, "utf8")) as RenderCheckpoint;
-    if (parsed.schema_version !== 1 || typeof parsed.source_fingerprint !== "string" || parsed.lint?.status !== "passed" || parsed.inspect?.status !== "passed") return null;
+    if (parsed.schema_version !== 2 || typeof parsed.source_fingerprint !== "string" || parsed.check?.status !== "passed") return null;
     return parsed;
   } catch {
     return null;
@@ -1579,6 +1577,8 @@ function validateBeatOutput(beats: Beat[], minimumSequences = 5, quiz = false): 
   if (quiz) {
     const incompleteQuiz = beats.filter((beat) => !beat.quiz || (!["intro", "outro"].includes(beat.quiz.phase) && (!beat.quiz.question_number || !beat.quiz.question || !beat.quiz.answer)));
     if (incompleteQuiz.length) throw new Error(`Quiz scene quality gate failed: ${incompleteQuiz.length} beats lack structured question or answer data`);
+    const invalidAnswers = beats.filter((beat) => beat.quiz && !["intro", "outro"].includes(beat.quiz.phase) && resolveVisibleQuizChoice(beat.quiz.choices, beat.quiz.answer) === null);
+    if (invalidAnswers.length) throw new Error(`Quiz scene quality gate failed: ${invalidAnswers.length} beats contain an answer that does not match a visible choice`);
   }
 }
 

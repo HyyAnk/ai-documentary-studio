@@ -49,16 +49,17 @@ function resolveStatus(stage: RailStage, index: number, readiness: Readiness, st
   const failedStage = pipelineTask?.status === "FAILED" ? currentStage?.key : null;
   if (failedStage === stage) return "failed";
 
+  const currentIndex = currentStage ? stages.findIndex((candidate) => candidate.key === currentStage.key) : -1;
+  if (pipelineTask && isTaskActive(pipelineTask) && currentIndex >= 0) {
+    if (index < currentIndex) return "ready";
+    if (index === currentIndex) return "running";
+    if (base !== "ready") return "queued";
+  }
+
   const childTask = latestRelevantTask(stage, tasks);
-  if (childTask?.status === "FAILED" || childTask?.status === "CANCELLED") return "failed";
+  if ((childTask?.status === "FAILED" || childTask?.status === "CANCELLED") && base !== "ready") return "failed";
   if (childTask && isTaskActive(childTask)) return "running";
   if (currentStage) {
-    const currentIndex = stages.findIndex((candidate) => candidate.key === currentStage.key);
-    if (pipelineTask && isTaskActive(pipelineTask)) {
-      if (index < currentIndex) return "ready";
-      if (index === currentIndex) return "running";
-      if (base !== "ready") return "queued";
-    }
     if (pipelineTask?.status === "FAILED" && index < currentIndex) return "ready";
   }
   return base;

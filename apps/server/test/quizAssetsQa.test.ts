@@ -6,7 +6,7 @@ import { QuizV2Schema } from "@studio/shared";
 import { SfxRegistry } from "../src/quiz/audio/sfxRegistry.js";
 import { assetFingerprint } from "../src/quiz/assets/assetFingerprint.js";
 import { AssetResolver, isSafeAssetReference } from "../src/quiz/assets/assetResolver.js";
-import { planQuizAssets } from "../src/quiz/assets/assetPlanner.js";
+import { compactQuizAssetSubject, planQuizAssets, QUIZ_ASSET_SUBJECT_MAX_LENGTH } from "../src/quiz/assets/assetPlanner.js";
 import { validateResolvedAssets } from "../src/quiz/assets/validateAssets.js";
 import { createDefaultDirectorPlan } from "../src/quiz/director/parseDirectorPlan.js";
 import { preflightQuizRender } from "../src/quiz/qa/preflight.js";
@@ -46,6 +46,16 @@ describe("Quiz V2 assets and QA", () => {
     const request = { semantic_key: "question-01:question_illustration", subject: "Tiger", purpose: "question_illustration" as const, style: "cute_illustration" as const, aspect_ratio: "16:9" as const, transparent_background: false };
     expect(assetFingerprint(request)).toBe(assetFingerprint({ ...request, subject: " tiger " }));
     expect(assetFingerprint(request)).not.toBe(assetFingerprint({ ...request, subject: "Dolphin" }));
+  });
+
+  it("keeps long visual opportunities within the asset subject contract", () => {
+    const longVisualOpportunity = "Safe illustrated dishwasher cutaway with a white rack holding plates, spray arms beneath the rack, sky-blue water jets crossing the plates, and detergent dissolving in the wash water; soft 5600K kitchen-appliance light, rounded forms, clear answer-card space, and no visible text.";
+    const longQuiz = QuizV2Schema.parse({ ...quiz, questions: [{ ...quiz.questions[0], format: "multiple_choice", visual_opportunity: longVisualOpportunity }] });
+    const plan = planQuizAssets(longQuiz, createDefaultDirectorPlan(longQuiz));
+    const hero = plan.assets.find((asset) => asset.purpose === "hero_question_image");
+    expect(hero?.subject.length).toBeLessThanOrEqual(QUIZ_ASSET_SUBJECT_MAX_LENGTH);
+    expect(hero?.subject).toContain("dishwasher");
+    expect(compactQuizAssetSubject("word ".repeat(80), "Fallback subject").length).toBeLessThanOrEqual(QUIZ_ASSET_SUBJECT_MAX_LENGTH);
   });
 
   it("blocks a semantically incorrect fallback for a required image question", async () => {
