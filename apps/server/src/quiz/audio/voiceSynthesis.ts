@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -21,6 +22,7 @@ export async function synthesizeQuizVoiceSegments(input: {
   channelId: string;
   episodeId: string;
   voicePlan: VoicePlan;
+  onProgress?: (progress: { completed: number; total: number; reused: boolean }) => Promise<void> | void;
 }): Promise<MeasuredQuizVoice> {
   const channel = await input.repository.getChannel(input.channelId);
   const voice = channel.voice_reference_path ? input.repository.resolveContextPath(channel.voice_reference_path) : "default";
@@ -31,16 +33,27 @@ export async function synthesizeQuizVoiceSegments(input: {
   await mkdir(pacingDirectory, { recursive: true });
   for (const [index, segment] of input.voicePlan.segments.entries()) {
     const tempo = quizVoiceTempo(segment.role);
-    const key = `${segment.role}:${tempo}:${JSON.stringify(segment.phrases)}:${segment.text.trim().replace(/\s+/g, " ")}`;
-    const pacingVersion = segment.role === "outro" ? "paced-v10-outro-performance" : QUIZ_VOICE_PACING_VERSION;
+    const fingerprint = quizVoiceFingerprint(segment, tempo, voice, input.config);
+    const key = fingerprint;
+    const pacingVersion = `${segment.role === "outro" ? "paced-v10-outro" : "paced-v10"}-${fingerprint.slice(0, 20)}`;
     let rendered = cache.get(key);
+    let reused = Boolean(rendered);
     if (!rendered) {
       const existing = await input.repository.getQuizVoiceSegmentAudioFile(input.channelId, input.episodeId, index + 1, pacingVersion).catch(() => null);
       if (existing) {
-        const audio = new Uint8Array(await readFile(existing.absolutePath));
-        rendered = { duration: wavDurationSeconds(audio), absolutePath: existing.absolutePath };
-      } else {
-      const audio = await renderPerformanceSegment(input.config, segment, voice, pacingDirectory, index + 1);
+        try {
+          const audio = new Uint8Array(await readFile(existing.absolutePath));
+          const duration = wavDurationSeconds(audio);
+          if (duration > 0.05) {
+            rendered = { duration, absolutePath: existing.absolutePath };
+            reused = true;
+          }
+        } catch {
+          // A corrupt cache entry is regenerated below.
+        }
+      }
+      if (!rendered) {
+        const audio = await renderPerformanceSegment(input.config, segment, voice, pacingDirectory, index + 1);
         const assetPath = await input.repository.writeQuizVoiceSegmentAudio(input.channelId, input.episodeId, index + 1, audio, pacingVersion);
         rendered = { duration: wavDurationSeconds(audio), absolutePath: input.repository.resolveContextPath(assetPath) };
       }
@@ -48,6 +61,7 @@ export async function synthesizeQuizVoiceSegments(input: {
     }
     segmentPaths.set(segment.segment_id, rendered.absolutePath);
     segments.push({ ...segment, duration_seconds: rendered.duration });
+    await input.onProgress?.({ completed: index + 1, total: input.voicePlan.segments.length, reused });
   }
   return { voicePlan: VoicePlanSchema.parse({ ...input.voicePlan, segments }), segmentPaths };
 }
@@ -59,6 +73,24 @@ export function quizVoiceTempo(role: VoicePlan["segments"][number]["role"]): num
   if (role === "thinking_prompt") return 1.04;
   if (role === "intro" || role === "midpoint" || role === "outro") return 1.06;
   return 1;
+}
+
+export function quizVoiceFingerprint(segment: VoiceSegment, tempo: number, voice: string, config: AppConfig["audio_generation"]): string {
+  const performance = voicePerformanceConfig(config, segment.role);
+  return createHash("sha256").update(JSON.stringify({
+    version: QUIZ_VOICE_PACING_VERSION,
+    segment_id: segment.segment_id,
+    role: segment.role,
+    question_id: segment.question_id,
+    text: segment.text.trim().replace(/\s+/g, " "),
+    phrases: segment.phrases,
+    tempo,
+    voice,
+    provider: config.provider,
+    service_url: config.service_url,
+    exaggeration: performance.exaggeration,
+    cfg_weight: performance.cfg_weight,
+  })).digest("hex");
 }
 
 /** Only controls supported by the local Chatterbox adapter are used here. */

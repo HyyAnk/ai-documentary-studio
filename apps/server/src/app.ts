@@ -35,7 +35,7 @@ import { CodexAppServerClient } from "./codex.js";
 import { ContextEngine } from "./context.js";
 import { StudioLogger } from "./logger.js";
 import { RepositoryError, RepositoryService } from "./repository.js";
-import { TaskManager } from "./tasks.js";
+import { TaskManager, planSequenceResume } from "./tasks.js";
 import { synthesizeWav } from "./providers/chatterbox.js";
 import { createStoredZip } from "./zip.js";
 import { composeMergedVisualPrompt, mergeEditorialOverlays, optimizeShortScenes } from "./sceneTiming.js";
@@ -443,9 +443,15 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     const sequenceCount = extractNarrationSections(script.content).length;
     if (sequenceCount < 1) throw new RepositoryError("A completed script is required", "SCRIPT_REQUIRED");
     await repository.backupEpisodeFile(params.channelId, params.episodeId, "scene_plan.md");
-    await repository.clearSequenceDrafts(params.episodeId);
-    const created = Array.from({ length: sequenceCount }, (_, index) => tasks.submit("GENERATE_SEQUENCE_SCENES", params.channelId, params.episodeId, index + 1));
-    return reply.code(202).send({ tasks: created, sequence_count: sequenceCount });
+    const drafts = await repository.readSequenceDrafts(params.episodeId);
+    const resumePlan = planSequenceResume(sequenceCount, drafts, script.modified_at, false);
+    if (resumePlan.shouldClearDrafts) await repository.clearSequenceDrafts(params.episodeId);
+    if (resumePlan.pendingSequenceNumbers.length === 0) {
+      const committed = await repository.commitSequenceDrafts(params.channelId, params.episodeId, sequenceCount);
+      if (!committed) throw new RepositoryError("Completed shot drafts could not be committed", "SHOT_PLAN_COMMIT_FAILED");
+    }
+    const created = resumePlan.pendingSequenceNumbers.map((sequenceNumber) => tasks.submit("GENERATE_SEQUENCE_SCENES", params.channelId, params.episodeId, sequenceNumber));
+    return reply.code(202).send({ tasks: created, sequence_count: sequenceCount, reused_sequence_numbers: resumePlan.reusedSequenceNumbers, pending_sequence_numbers: resumePlan.pendingSequenceNumbers });
   });
   server.post("/api/channels/:channelId/episodes/:episodeId/shots/optimize", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };

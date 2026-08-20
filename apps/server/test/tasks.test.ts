@@ -7,7 +7,7 @@ import { QuizAssessmentSchema, QuizAssetPlanSchema, QuizAssetResolutionSchema } 
 import { ContextEngine } from "../src/context.js";
 import { StudioLogger } from "../src/logger.js";
 import { RepositoryService } from "../src/repository.js";
-import { TaskManager, planSequenceResume } from "../src/tasks.js";
+import { TaskManager, isSequenceOutputFailure, parseBeatsOutput, planSequenceResume } from "../src/tasks.js";
 import type { AudioProvider } from "../src/providers/index.js";
 import { buildQuizVoicePlan } from "../src/quiz/audio/voicePlan.js";
 import { createDefaultDirectorPlan } from "../src/quiz/director/parseDirectorPlan.js";
@@ -17,6 +17,11 @@ import { compileQuizTimeline } from "../src/quiz/timeline/compileTimeline.js";
 const roots: string[] = [];
 
 describe("sequence retry planning", () => {
+  it("classifies malformed shot-plan JSON as retryable", () => {
+    expect(() => parseBeatsOutput('[{"dialogue":"Opening",}]')).toThrow("Shot-plan JSON output malformed");
+    expect(isSequenceOutputFailure("Shot-plan JSON output malformed: Expected double-quoted property name")).toBe(true);
+  });
+
   it("reuses fresh sequence drafts and queues only missing sequences", () => {
     const scriptModifiedAt = "2026-08-20T10:00:00.000Z";
     const plan = planSequenceResume(4, [
@@ -118,6 +123,44 @@ describe("TaskManager locks", () => {
     const task = manager.submit("GENERATE_NARRATION", channel.channel_id, episode.episode_id);
     await waitFor(() => manager.get(task.task_id).status === "FAILED");
     expect(manager.get(task.task_id).error).toContain("Quiz channels use Quiz V2 voice generation");
+  });
+
+  it("reuses valid documentary narration segments after a retry", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "documentary-narration-resume-"));
+    roots.push(root);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await mkdir(path.join(root, "shared"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
+    const repository = new RepositoryService(root);
+    const channel = await repository.createChannel({ name: "Narration Resume", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });
+    const topics = Array.from({ length: 5 }, (_, index) => ({ topic_id: `narration_resume_topic_${index}`, channel_id: channel.channel_id, title: `Narration Resume ${index}`, premise: "Premise", why_it_fits: "Fits", hook: "Hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false }));
+    await repository.saveTopicRun(channel.channel_id, topics);
+    const episode = await repository.confirmTopic(channel.channel_id, topics[0]!.topic_id);
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "script.md", "# Narration Resume\n\nThis is a short narration segment for the retry test.");
+    const logger = new StudioLogger(root);
+    await logger.init();
+    let synthesizeCalls = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/synthesize")) {
+        synthesizeCalls += 1;
+        return new Response(fakeWav(2), { status: 200, headers: { "content-type": "audio/wav" } });
+      }
+      throw new Error(`Unexpected audio request: ${String(input)}`);
+    }) as typeof fetch;
+    try {
+      const manager = new TaskManager(repository, new ContextEngine(repository, logger), new FakeCodex() as never, 1, 8, logger, { provider: "chatterbox", service_url: "http://127.0.0.1:8890", exaggeration: 0.5, cfg_weight: 0.5, max_concurrent_tasks: 2, merge_gap_ms: 300, match_target_duration: false });
+      await manager.load();
+      const first = manager.submit("GENERATE_NARRATION", channel.channel_id, episode.episode_id);
+      await waitFor(() => manager.get(first.task_id).status === "COMPLETED");
+      const second = manager.submit("GENERATE_NARRATION", channel.channel_id, episode.episode_id);
+      await waitFor(() => manager.get(second.task_id).status === "COMPLETED");
+      expect(synthesizeCalls).toBe(1);
+      expect(manager.get(second.task_id).progress_message).toBe("Completed");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("serializes two tasks targeting the same episode", async () => {
@@ -373,7 +416,7 @@ describe("TaskManager locks", () => {
     await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "visual_bible.md", "# Episode Visual Bible\n\n## Continuity bundle CB-01 — Ready\n\n- Anchor-frame prompt: A ready continuity anchor.\n- Reference asset slots: anchor");
     await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "script.md", "# script\n\n<!-- HUMOR_POLICY: v1 -->\nReady artifact");
     await repository.saveScenes(channel.channel_id, episode.episode_id, [{ scene_id: "pipeline_scene_1", episode_id: episode.episode_id, scene_number: 1, duration_seconds: 6, dialogue: "Ready dialogue", visual_prompt: "CAMERA\nReady\nACTION\nReady\nLIGHTING\nReady\nATMOSPHERE\nReady\nCONTINUITY\nReady", transition_note: "", continuity_note: "Ready continuity", sequence_id: "sequence-1", sequence_title: "Sequence 1", shot_id: "shot-1", asset_type: "ai_reconstruction", continuity_bundle_id: "CB-01", reference_asset_ids: [], source_ids: [], reconstruction: true, sound_cue: "", editorial_overlay: { kind: "none" }, audio_asset_path: null, audio_generated_at: null, audio_duration_seconds: null }]);
-    const narrationPath = await repository.writeNarrationAudio(channel.channel_id, episode.episode_id, new Uint8Array([1, 2, 3]));
+    const narrationPath = await repository.writeNarrationAudio(channel.channel_id, episode.episode_id, fakeWav(2));
     await repository.saveNarrationMetadata(channel.channel_id, episode.episode_id, narrationPath, 10, 1, 20);
     const logger = new StudioLogger(root);
     await logger.init();
@@ -420,7 +463,7 @@ describe("TaskManager locks", () => {
     await repository.writeVoicePlan(channel.channel_id, episode.episode_id, measuredVoice);
     await repository.writeQuizTimeline(channel.channel_id, episode.episode_id, compileQuizTimeline({ quiz, director, voicePlan: measuredVoice }));
     await repository.writeQuizAssessment(channel.channel_id, episode.episode_id, QuizAssessmentSchema.parse({ schema_version: 2, episode_id: episode.episode_id, assessed_at: new Date().toISOString(), score: 90, rating: "production_ready", categories: { semantic: 100, visual: 100, pacing: 100, audio: 100, variety: 100, render_integrity: 100 }, issues: [] }));
-    const narrationPath = await repository.writeQuizNarrationAudio(channel.channel_id, episode.episode_id, new Uint8Array([1, 2, 3]));
+    const narrationPath = await repository.writeQuizNarrationAudio(channel.channel_id, episode.episode_id, fakeWav(2));
     await repository.saveNarrationMetadata(channel.channel_id, episode.episode_id, narrationPath, 30, measuredVoice.segments.length, 20);
 
     const logger = new StudioLogger(root);

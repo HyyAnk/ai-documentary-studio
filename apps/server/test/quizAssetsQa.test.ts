@@ -12,6 +12,7 @@ import { createDefaultDirectorPlan } from "../src/quiz/director/parseDirectorPla
 import { preflightQuizRender } from "../src/quiz/qa/preflight.js";
 import { validateRenderProbe } from "../src/quiz/qa/postRenderQa.js";
 import { buildQuizVoicePlan } from "../src/quiz/audio/voicePlan.js";
+import { quizVoiceFingerprint, quizVoiceTempo } from "../src/quiz/audio/voiceSynthesis.js";
 import { compileQuizTimeline } from "../src/quiz/timeline/compileTimeline.js";
 
 const roots: string[] = [];
@@ -73,6 +74,13 @@ describe("Quiz V2 assets and QA", () => {
     const registry = new SfxRegistry();
     registry.register({ intent: "ui_pop", path: "ui-pop.wav", decorative: true });
     expect(registry.resolveMany(["ui_pop", "correct_small"]).missing).toEqual(["correct_small"]);
+  });
+
+  it("changes the voice cache fingerprint when narration content changes", () => {
+    const voice = buildQuizVoicePlan(quiz);
+    const segment = voice.segments.find((item) => item.role === "question")!;
+    const config = { provider: "chatterbox" as const, service_url: "http://127.0.0.1:8890", exaggeration: 0.5, cfg_weight: 0.5, max_concurrent_tasks: 2, merge_gap_ms: 300, match_target_duration: true };
+    expect(quizVoiceFingerprint(segment, quizVoiceTempo(segment.role), "default", config)).not.toBe(quizVoiceFingerprint({ ...segment, text: `${segment.text} changed` }, quizVoiceTempo(segment.role), "default", config));
   });
 
   it("blocks preflight when required assets are unresolved and validates render probe evidence", () => {

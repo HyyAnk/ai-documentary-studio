@@ -1,7 +1,8 @@
-import { copyFile, readFile, readdir, writeFile, mkdir } from "node:fs/promises";
+import { copyFile, readFile, readdir, writeFile, mkdir, rename, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import {
   EditorialOverlaySchema,
@@ -34,7 +35,7 @@ import { buildQuizComposition } from "./quiz/render/buildComposition.js";
 import { HyperframesRenderer } from "./quiz/render/hyperframesRenderer.js";
 import { preflightQuizRender } from "./quiz/qa/preflight.js";
 import { inspectRenderedVideo } from "./quiz/qa/postRenderQa.js";
-import { resolveQuizAssets } from "./quiz/assets/resolveQuizAssets.js";
+import { isQuizAssetResolutionComplete, resolveQuizAssets } from "./quiz/assets/resolveQuizAssets.js";
 import { compileTimeline, generateDirector, generateQuiz, generateVoice, planAssets, readQuizArtifacts, resolveAssets, runQa } from "./quiz/pipeline/orchestrator.js";
 
 export { buildQuizComposition };
@@ -43,6 +44,18 @@ type ActiveRun = { task: Task; threadId: string; turnId: string; output: string;
 type CodexCleanupConfig = { auto_delete_threads: boolean; failed_thread_retention_days: number };
 type PipelineRun = { cancelled: boolean; children: Set<string> };
 type SequenceDraftSnapshot = { sequenceNumber: number; modified_at: string };
+type NarrationCheckpoint = {
+  schema_version: 1;
+  script_modified_at: string;
+  segments: Record<string, { fingerprint: string; asset_path: string; duration_seconds: number }>;
+};
+type RenderCheckpoint = {
+  schema_version: 1;
+  source_fingerprint: string;
+  lint: { status: "passed" };
+  inspect: { status: "passed" };
+  render?: { status: "passed" };
+};
 
 const channelTaskTypes = new Set<TaskType>(["GENERATE_DNA", "SUGGEST_TOPICS"]);
 const audioTaskTypes = new Set<TaskType>(["GENERATE_AUDIO", "GENERATE_NARRATION"]);
@@ -425,7 +438,7 @@ export class TaskManager extends EventEmitter {
       } else {
         await this.update(task.task_id, { progress_message: "Narration · generating the master voice track", progress_percent: 88 });
         const episode = await this.repository.getEpisode(task.channel_id, episodeId);
-        if (upstreamChanged || !episode.narration_asset_path) {
+        if (upstreamChanged || !(await this.hasValidNarrationAsset(task.channel_id, episodeId, episode.narration_asset_path))) {
           const child = this.submit("GENERATE_NARRATION", task.channel_id, episodeId);
           run.children.add(child.task_id);
           try {
@@ -465,9 +478,9 @@ export class TaskManager extends EventEmitter {
       const episode = await this.repository.getEpisode(task.channel_id, task.episode_id);
       const channel = await this.repository.getChannel(task.channel_id);
       const scenes = await this.repository.readScenes(task.channel_id, task.episode_id);
-      if (!episode.narration_asset_path) throw new RepositoryError("Generate the Chatterbox narration before rendering video", "NARRATION_REQUIRED");
+      if (!(await this.hasValidNarrationAsset(task.channel_id, task.episode_id, episode.narration_asset_path))) throw new RepositoryError("Generate the Chatterbox narration before rendering video", "NARRATION_REQUIRED");
       if (scenes.length === 0) throw new RepositoryError("Generate Quiz scenes before rendering video", "SCENES_REQUIRED");
-      const narration = await this.repository.getEpisodeAudioFile(task.channel_id, task.episode_id, path.basename(episode.narration_asset_path));
+      const narration = await this.repository.getEpisodeAudioFile(task.channel_id, task.episode_id, path.basename(episode.narration_asset_path!));
       const renderRoot = this.repository.resolvePath("runtime", "hyperframes", episode.episode_id);
       await mkdir(renderRoot, { recursive: true });
       const compositionPath = path.join(renderRoot, "index.html");
@@ -529,15 +542,34 @@ export class TaskManager extends EventEmitter {
         ? (await quizRenderer.prepare({ quiz: completeQuizV2.quiz, director: completeQuizV2.director, timeline: completeQuizV2.timeline, scenes, audioPath: "./narration.wav", theme: episode.quiz_config.visual_theme, narrationDurationSeconds: episode.narration_duration_seconds ?? undefined, assets: assetSources })).html
         : buildQuizComposition(episode.quiz_config, scenes, "./narration.wav", episode.narration_duration_seconds ?? undefined);
       await writeFile(compositionPath, html, "utf8");
-      await this.update(task.task_id, { progress_message: "Video · checking layout and media", progress_percent: 20 });
-      await execFileAsync(npxCommand, hyperframesArgs("lint", renderRoot, "--json"), { cwd: this.repository.rootDirectory, timeout: 180_000, windowsHide: true });
-      await execFileAsync(npxCommand, hyperframesArgs("inspect", renderRoot, "--json", "--samples", "5"), { cwd: this.repository.rootDirectory, timeout: 300_000, windowsHide: true });
-      await this.update(task.task_id, { progress_message: "Video · rendering MP4 with narration", progress_percent: 45 });
-      await execFileAsync(npxCommand, hyperframesArgs("render", renderRoot, "--output", outputPath, "--fps", String(this.videoConfig.fps), "--quality", this.videoConfig.render_quality, "--strict", "--json"), { cwd: this.repository.rootDirectory, timeout: 30 * 60_000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 });
+      const sourceFingerprint = renderSourceFingerprint(html, narration.modified_at, narration.size, assetResolution?.assets ?? []);
+      const checkpointPath = path.join(renderRoot, "render-checkpoint.json");
+      const checkpoint = await readRenderCheckpoint(checkpointPath);
+      const layoutReady = checkpoint?.source_fingerprint === sourceFingerprint && checkpoint.lint.status === "passed" && checkpoint.inspect.status === "passed";
+      if (layoutReady) {
+        await this.update(task.task_id, { progress_message: "Video · layout and media checks already passed", progress_percent: 20 });
+      } else {
+        await this.update(task.task_id, { progress_message: "Video · checking layout and media", progress_percent: 20 });
+        await execFileAsync(npxCommand, hyperframesArgs("lint", renderRoot, "--json"), { cwd: this.repository.rootDirectory, timeout: 180_000, windowsHide: true });
+        await execFileAsync(npxCommand, hyperframesArgs("inspect", renderRoot, "--json", "--samples", "5"), { cwd: this.repository.rootDirectory, timeout: 300_000, windowsHide: true });
+        await writeRenderCheckpoint(checkpointPath, { schema_version: 1, source_fingerprint: sourceFingerprint, lint: { status: "passed" }, inspect: { status: "passed" } });
+      }
+      let reusableRender = layoutReady && checkpoint?.render?.status === "passed" && await hasNonEmptyFile(outputPath);
+      if (reusableRender) {
+        const existingProbe = await inspectRenderedVideo(outputPath, { width: 1920, height: 1080, fps: this.videoConfig.fps });
+        reusableRender = !existingProbe.issues.some((issue) => issue.severity === "blocker");
+      }
+      if (reusableRender) {
+        await this.update(task.task_id, { progress_message: "Video · reusing verified MP4", progress_percent: 75 });
+      } else {
+        await this.update(task.task_id, { progress_message: "Video · rendering MP4 with narration", progress_percent: 45 });
+        await execFileAsync(npxCommand, hyperframesArgs("render", renderRoot, "--output", outputPath, "--fps", String(this.videoConfig.fps), "--quality", this.videoConfig.render_quality, "--strict", "--json"), { cwd: this.repository.rootDirectory, timeout: 30 * 60_000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 });
+      }
       await this.update(task.task_id, { progress_message: "Video · verifying MP4 and audio track", progress_percent: 90 });
       const probe = await inspectRenderedVideo(outputPath, { width: 1920, height: 1080, fps: this.videoConfig.fps });
       const renderBlocker = probe.issues.find((issue) => issue.severity === "blocker");
       if (renderBlocker) throw new RepositoryError(renderBlocker.message, "QUIZ_RENDER_QA_FAILED");
+      await writeRenderCheckpoint(checkpointPath, { schema_version: 1, source_fingerprint: sourceFingerprint, lint: { status: "passed" }, inspect: { status: "passed" }, render: { status: "passed" } });
       const duration = Number.parseFloat(probe.probe.format?.duration ?? "");
       if (!Number.isFinite(duration) || duration <= 0) throw new Error("Rendered MP4 has no readable duration");
       const manifestPath = await this.repository.writeRenderManifest(task.channel_id, task.episode_id, JSON.stringify({
@@ -582,8 +614,10 @@ export class TaskManager extends EventEmitter {
     if (bundles.length === 0) return;
 
     const existing = await this.repository.listBundleImages(task.channel_id, task.episode_id!);
+    const reusableImages = new Set<string>();
+    for (const image of existing) if (await isValidPngFile(image.absolutePath)) reusableImages.add(`${image.bundle_id}:${image.variant}`);
     const missing = bundles.flatMap((bundle) => Array.from({ length: this.imageConfig.images_per_bundle }, (_, variant) => ({ bundle, variant })))
-      .filter(({ bundle, variant }) => !existing.some((image) => image.bundle_id === bundle.bundle_id && image.variant === variant));
+      .filter(({ bundle, variant }) => !reusableImages.has(`${bundle.bundle_id}:${variant}`));
     if (missing.length === 0) {
       await this.update(task.task_id, { progress_message: "Style anchors · already ready", progress_percent: 58 });
       return;
@@ -607,7 +641,18 @@ export class TaskManager extends EventEmitter {
   }
 
   private async runQuizV2Pipeline(task: Task): Promise<void> {
-    const input = { repository: this.repository, config: { audio_generation: this.audioConfig }, channelId: task.channel_id, episodeId: task.episode_id! };
+    const input = {
+      repository: this.repository,
+      config: { audio_generation: this.audioConfig },
+      channelId: task.channel_id,
+      episodeId: task.episode_id!,
+      onAssetProgress: async ({ completed, total, reused }: { completed: number; total: number; reused: boolean }) => {
+        await this.update(task.task_id, { progress_message: `Quiz · resolving assets ${completed}/${total}${reused ? " · reused" : ""}`, progress_percent: 76 + Math.round((completed / Math.max(1, total)) * 4) });
+      },
+      onVoiceProgress: async ({ completed, total, reused }: { completed: number; total: number; reused: boolean }) => {
+        await this.update(task.task_id, { progress_message: `Quiz · ${reused ? "reusing" : "generating"} voice ${completed}/${total}`, progress_percent: 83 + Math.round((completed / Math.max(1, total)) * 3) });
+      },
+    };
     let artifacts = await readQuizArtifacts(input);
     let episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
     if (!artifacts.quiz) {
@@ -625,12 +670,12 @@ export class TaskManager extends EventEmitter {
       await planAssets(input);
       artifacts = await readQuizArtifacts(input);
     }
-    if (!artifacts.asset_resolution) {
+    if (!artifacts.asset_resolution || !artifacts.asset_plan || !(await isQuizAssetResolutionComplete({ repository: this.repository, channelId: task.channel_id, episodeId: task.episode_id!, plan: artifacts.asset_plan, resolution: artifacts.asset_resolution }))) {
       await this.update(task.task_id, { progress_message: "Quiz · resolving semantic assets", progress_percent: 79 });
       await resolveAssets(input);
       artifacts = await readQuizArtifacts(input);
     }
-    if (!artifacts.voice_plan || !episode.narration_asset_path || artifacts.voice_plan.segments.some((segment) => segment.duration_seconds === null)) {
+    if (!artifacts.voice_plan || !(await this.hasValidNarrationAsset(task.channel_id, task.episode_id!, episode.narration_asset_path)) || artifacts.voice_plan.segments.some((segment) => segment.duration_seconds === null)) {
       await this.update(task.task_id, { progress_message: "Quiz · generating per-question voice", progress_percent: 83 });
       await generateVoice(input);
       artifacts = await readQuizArtifacts(input);
@@ -658,6 +703,16 @@ export class TaskManager extends EventEmitter {
   private async hasReadyScript(channelId: string, episodeId: string): Promise<boolean> {
     const file = await this.repository.getEpisodeFile(channelId, episodeId, "script.md");
     return !isPlaceholderArtifact(file.content) && hasHumorPolicyMarker(file.content);
+  }
+
+  private async hasValidNarrationAsset(channelId: string, episodeId: string, assetPath: string | null): Promise<boolean> {
+    if (!assetPath) return false;
+    try {
+      const audio = await this.repository.getEpisodeAudioFile(channelId, episodeId, path.basename(assetPath));
+      return parseWavDuration(new Uint8Array(await readFile(audio.absolutePath))) > 0;
+    } catch {
+      return false;
+    }
   }
 
   private async isShotPlanFresh(channelId: string, episodeId: string): Promise<boolean> {
@@ -725,17 +780,40 @@ export class TaskManager extends EventEmitter {
     const channel = await this.repository.getChannel(task.channel_id);
     const episode = await this.repository.getEpisode(task.channel_id, task.episode_id);
     const voice = channel.voice_reference_path ? this.repository.resolveContextPath(channel.voice_reference_path) : "default";
+    const checkpointPath = this.repository.resolvePath("runtime", "narration-checkpoints", task.episode_id, "segments.json");
+    const checkpoint = await readNarrationCheckpoint(checkpointPath);
+    const nextCheckpoint: NarrationCheckpoint = { schema_version: 1, script_modified_at: script.modified_at, segments: {} };
     const segmentPaths: string[] = [];
     for (const [index, section] of sections.entries()) {
-      await this.update(task.task_id, {
-        progress_message: `Narrating ${section.title}`,
-        progress_percent: Math.round((index / sections.length) * 78),
-      });
-      const audio = await synthesizeWav(this.audioConfig, section.text, voice);
+      const segmentNumber = index + 1;
+      const fingerprint = narrationSegmentFingerprint(section.text, voice, script.modified_at, this.audioConfig, this.videoConfig.narration_words_per_second);
+      let audio: Uint8Array | null = null;
+      let assetPath: string | null = null;
+      const saved = checkpoint?.script_modified_at === script.modified_at ? checkpoint.segments[String(segmentNumber)] : undefined;
+      if (saved?.fingerprint === fingerprint) {
+        try {
+          const existing = await this.repository.getEpisodeAudioFile(task.channel_id, task.episode_id, path.basename(saved.asset_path));
+          const existingAudio = new Uint8Array(await readFile(existing.absolutePath));
+          const existingDuration = parseWavDuration(existingAudio);
+          validateNarrationSegmentDuration(existingDuration, section.text, this.videoConfig.narration_words_per_second, segmentNumber);
+          audio = existingAudio;
+          assetPath = existing.path;
+        } catch {
+          // A checkpoint is advisory; missing, stale, or corrupt audio is regenerated below.
+        }
+      }
+      if (!audio || !assetPath) {
+        await this.update(task.task_id, { progress_message: `Narration · generating ${section.title} (${segmentNumber}/${sections.length})`, progress_percent: Math.round((index / sections.length) * 78) });
+        audio = await synthesizeWav(this.audioConfig, section.text, voice);
+        const audioDuration = parseWavDuration(audio);
+        validateNarrationSegmentDuration(audioDuration, section.text, this.videoConfig.narration_words_per_second, segmentNumber);
+        assetPath = await this.repository.writeNarrationAudio(task.channel_id, task.episode_id, audio, segmentNumber);
+      } else {
+        await this.update(task.task_id, { progress_message: `Narration · reusing ${section.title} (${segmentNumber}/${sections.length})`, progress_percent: Math.round((index / sections.length) * 78) });
+      }
       const audioDuration = parseWavDuration(audio);
-      const expectedDuration = countWords(section.text) / Math.max(0.1, this.videoConfig.narration_words_per_second);
-      if (audioDuration < expectedDuration * 0.4) throw new Error(`Narration segment ${index + 1} appears truncated (${audioDuration.toFixed(1)}s for ${countWords(section.text)} words)`);
-      const assetPath = await this.repository.writeNarrationAudio(task.channel_id, task.episode_id, audio, index + 1);
+      nextCheckpoint.segments[String(segmentNumber)] = { fingerprint, asset_path: assetPath, duration_seconds: audioDuration };
+      await writeNarrationCheckpoint(checkpointPath, nextCheckpoint);
       segmentPaths.push((await this.repository.getEpisodeAudioFile(task.channel_id, task.episode_id, path.basename(assetPath))).absolutePath);
     }
     await this.update(task.task_id, { progress_message: "Assembling narration", progress_percent: 82 });
@@ -1134,6 +1212,82 @@ export function planSequenceResume(sectionCount: number, drafts: SequenceDraftSn
   return { shouldClearDrafts, reusedSequenceNumbers: reusable, pendingSequenceNumbers: expected.filter((sequenceNumber) => !reusableSet.has(sequenceNumber)) };
 }
 
+function narrationSegmentFingerprint(text: string, voice: string, scriptModifiedAt: string, audioConfig: AppConfig["audio_generation"], narrationWordsPerSecond: number): string {
+  return createHash("sha256").update(JSON.stringify({
+    version: "narration-segment-v2",
+    text: text.trim().replace(/\s+/g, " "),
+    voice,
+    scriptModifiedAt,
+    narrationWordsPerSecond,
+    audio: {
+      provider: audioConfig.provider,
+      service_url: audioConfig.service_url,
+      exaggeration: audioConfig.exaggeration,
+      cfg_weight: audioConfig.cfg_weight,
+      match_target_duration: audioConfig.match_target_duration,
+    },
+  })).digest("hex");
+}
+
+function validateNarrationSegmentDuration(duration: number, text: string, wordsPerSecond: number, segmentNumber: number): void {
+  const expectedDuration = countWords(text) / Math.max(0.1, wordsPerSecond);
+  if (!Number.isFinite(duration) || duration <= 0 || duration < expectedDuration * 0.4) {
+    throw new Error(`Narration segment ${segmentNumber} appears truncated (${Number.isFinite(duration) ? duration.toFixed(1) : "0.0"}s for ${countWords(text)} words)`);
+  }
+}
+
+async function readNarrationCheckpoint(filePath: string): Promise<NarrationCheckpoint | null> {
+  try {
+    const parsed = JSON.parse(await readFile(filePath, "utf8")) as Partial<NarrationCheckpoint>;
+    if (parsed.schema_version !== 1 || typeof parsed.script_modified_at !== "string" || !parsed.segments || typeof parsed.segments !== "object") return null;
+    return parsed as NarrationCheckpoint;
+  } catch {
+    return null;
+  }
+}
+
+async function writeNarrationCheckpoint(filePath: string, checkpoint: NarrationCheckpoint): Promise<void> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  const temporary = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(checkpoint, null, 2)}\n`, "utf8");
+  await rename(temporary, filePath);
+}
+
+function renderSourceFingerprint(html: string, narrationModifiedAt: string, narrationSize: number, assets: Array<{ asset_id: string; fingerprint: string; path: string }>): string {
+  return createHash("sha256").update(JSON.stringify({ version: "quiz-render-v2", html, narrationModifiedAt, narrationSize, assets: assets.map((asset) => ({ asset_id: asset.asset_id, fingerprint: asset.fingerprint, path: asset.path })) })).digest("hex");
+}
+
+async function readRenderCheckpoint(filePath: string): Promise<RenderCheckpoint | null> {
+  try {
+    const parsed = JSON.parse(await readFile(filePath, "utf8")) as RenderCheckpoint;
+    if (parsed.schema_version !== 1 || typeof parsed.source_fingerprint !== "string" || parsed.lint?.status !== "passed" || parsed.inspect?.status !== "passed") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function writeRenderCheckpoint(filePath: string, checkpoint: RenderCheckpoint): Promise<void> {
+  const temporary = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(checkpoint, null, 2)}\n`, "utf8");
+  await rename(temporary, filePath);
+}
+
+async function hasNonEmptyFile(filePath: string): Promise<boolean> {
+  try { return (await stat(filePath)).size > 0; } catch { return false; }
+}
+
+async function isValidPngFile(filePath: string): Promise<boolean> {
+  try {
+    const data = new Uint8Array(await readFile(filePath));
+    if (data.length < 24 || !data.slice(0, 8).every((value, index) => value === [137, 80, 78, 71, 13, 10, 26, 10][index])) return false;
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+    return view.getUint32(16) > 0 && view.getUint32(20) > 0;
+  } catch {
+    return false;
+  }
+}
+
 function extractMarkdown(output: string, fallbackHeading: string): string {
   const fenced = output.match(/```(?:markdown|md)?\s*([\s\S]*?)```/i)?.[1]?.trim();
   let value = fenced || output.trim();
@@ -1159,13 +1313,18 @@ export function extractScriptMarkdown(output: string, episodeTitle: string): str
   return value.slice(selected.index, nextHeading?.index).trim();
 }
 
-function parseJson(output: string): unknown {
+function parseJson(output: string, context = "Codex"): unknown {
   const fenced = output.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
   const value = fenced || output.trim();
   const starts = [value.indexOf("["), value.indexOf("{")].filter((index) => index >= 0);
   if (starts.length === 0) throw new Error("Codex output did not contain JSON");
   const objectStart = Math.min(...starts);
-  return JSON.parse(value.slice(objectStart));
+  try {
+    return JSON.parse(value.slice(objectStart));
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "invalid JSON syntax";
+    throw new Error(`${context} JSON output malformed: ${detail}`);
+  }
 }
 
 function parseTopicCandidates(output: string, channelId: string) {
@@ -1195,7 +1354,7 @@ function parseTopicCandidates(output: string, channelId: string) {
 
 
 export function parseBeatsOutput(output: string): Beat[] {
-  const raw = parseJson(output);
+  const raw = parseJson(output, "Shot-plan");
   const list = Array.isArray(raw) ? raw : (raw as { beats?: unknown[] }).beats;
   if (!Array.isArray(list) || list.length === 0) throw new Error("Codex beat output must contain beats");
   return list.map((item, index) => {
@@ -1395,9 +1554,10 @@ function validateVisualBible(markdown: string): void {
   }
 }
 
-function isSequenceOutputFailure(message: string): boolean {
+export function isSequenceOutputFailure(message: string): boolean {
   return message.startsWith("Shot-plan quality gate failed")
     || message.startsWith("Quiz scene quality gate failed")
+    || message.startsWith("Shot-plan JSON output malformed")
     || message === "Codex output did not contain JSON"
     || message.startsWith("Codex beat ");
 }
