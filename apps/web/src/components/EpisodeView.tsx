@@ -1,7 +1,7 @@
 import { ArrowLeft, CheckCircle, CircleNotch, DownloadSimple, FilmSlate, FloppyDisk, FolderOpen, PencilSimple, Play, SpeakerHigh, WarningCircle, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { QUIZ_MAX_QUESTION_COUNT, QUIZ_MIN_QUESTION_COUNT, type Channel, type ProductionAssessment, type Scene, type Task } from "@studio/shared";
-import { api, type BundleImage, type QuizV2Stages } from "../api";
+import { api, type BundleImage } from "../api";
 import { isTaskActive, isTaskTerminal, latestTask } from "../lib/utils";
 import { parseContinuityBundles } from "../lib/continuity";
 import { useEpisode } from "../hooks/useEpisode";
@@ -144,30 +144,6 @@ export function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxD
     finally { setBusy(null); }
   };
 
-  const runQuizStage = async (stage: keyof QuizV2Stages) => {
-    if (stage === "research") return;
-    const key = "quiz-" + stage;
-    setBusy(key);
-    try {
-      if (stage === "render") {
-        const result = await api.renderQuizVideo(channel.channel_id, episodeId);
-        onTaskSubmitted(result.task);
-        onNotice({ tone: "good", message: "Quiz video render queued" });
-        return;
-      }
-      if (stage === "questions") await api.generateQuizV2(channel.channel_id, episodeId);
-      if (stage === "director") await api.generateQuizDirector(channel.channel_id, episodeId);
-      if (stage === "assets") await api.planQuizAssets(channel.channel_id, episodeId);
-      if (stage === "voice") await api.synthesizeQuizVoice(channel.channel_id, episodeId);
-      if (stage === "timeline") await api.compileQuizTimeline(channel.channel_id, episodeId);
-      if (stage === "qa") await api.assessQuiz(channel.channel_id, episodeId);
-      await load();
-      onNotice({ tone: "good", message: stage === "voice" ? "Quiz narration generated" : stage === "qa" ? "Quiz QA updated" : stage.charAt(0).toUpperCase() + stage.slice(1) + " stage updated" });
-    } catch (error) {
-      onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Could not update Quiz stage" });
-    } finally { setBusy(null); }
-  };
-
   if (!episode) return <section className="page-wrap"><LoadingState /></section>;
   const artifactValues: Record<ArtifactName, { value: string; set: (value: string) => void }> = {
     "research.md": { value: research, set: setResearch },
@@ -185,7 +161,7 @@ export function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxD
     </header>
 
     {pipelineTask ? <TaskProgressPanel task={pipelineTask} title="Production pipeline" activeLabel="Running the next step" completionLabel="Production pipeline complete" now={episodeClock} progressLabel="Production pipeline progress" /> : null}
-    {isQuiz ? <QuizV2Panel state={quizV2} busy={busy} scenesReady={readiness.scenes} onRun={(stage) => void runQuizStage(stage)} /> : <PipelineRail readiness={readiness} quiz={false} />}
+    {isQuiz ? <QuizV2Panel state={quizV2} /> : <PipelineRail readiness={readiness} quiz={false} />}
     {assessment ? <AssessmentPanel assessment={assessment} /> : null}
 
     <div className="artifact-stack">

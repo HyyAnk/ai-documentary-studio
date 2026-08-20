@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
 
-test("Quiz Engine V2 rail acknowledges stage actions and stays usable on mobile", async ({ page }) => {
+test("Quiz Engine V2 rail is status-only and Build video is the single production action", async ({ page }) => {
   const channel = { channel_id: "ch_quiz_v2", slug: "quiz-v2", display_name: "Quiz V2 channel", description: "Quiz", target_audience: "Children", language: "English", market: "Global", channel_dna_path: "channels/quiz-v2/channel_dna.md", style_guide_path: null, status: "ACTIVE", created_at: "2026-08-16T00:00:00.000Z", updated_at: "2026-08-16T00:00:00.000Z", episode_count: 1, group_id: "quiz", engine: "quiz" };
   const episode = { episode_id: "ep_quiz_v2", channel_id: channel.channel_id, slug: "quiz-story", topic: { title: "Quiz Story", premise: "A deterministic quiz episode.", hook: "Can you spot the answer?" }, stage: "VIDEO_READY", script_path: "channels/quiz-v2/episodes/quiz-story/script.md", research_path: "channels/quiz-v2/episodes/quiz-story/research.md", treatment_path: "channels/quiz-v2/episodes/quiz-story/treatment.md", visual_bible_path: "channels/quiz-v2/episodes/quiz-story/visual_bible.md", scene_plan_path: "channels/quiz-v2/episodes/quiz-story/scene_plan.md", dialogue_script_path: "channels/quiz-v2/episodes/quiz-story/dialogue_script.md", video_prompts_path: "channels/quiz-v2/episodes/quiz-story/video_prompts.md", target_duration_minutes: 8, target_word_count: 1050, narration_asset_path: null, narration_generated_at: null, narration_duration_seconds: null, narration_segment_count: 0, measured_narration_words_per_second: null, quiz_config: { question_count: 3, quiz_format: "multiple_choice", age_band: "7-9", answer_mode: "voice_and_reveal", visual_theme: "candy_pop" }, video_asset_path: "channels/quiz-v2/episodes/quiz-story/assets/quiz-video.mp4", video_generated_at: channel.updated_at, video_duration_seconds: 42, render_manifest_path: "channels/quiz-v2/episodes/quiz-story/assets/render-manifest.json", created_at: channel.created_at, updated_at: channel.updated_at };
-  let v2 = { quiz: { schema_version: 2, episode_id: episode.episode_id, age_band: "7-9", language: "English", questions: [] }, director_plan: null, asset_plan: null, voice_plan: null, timeline: null, assessment: null, stages: { research: "ready", questions: "ready", director: "not_started", assets: "not_started", voice: "not_started", timeline: "not_started", qa: "not_started", render: "not_started" } };
+  const v2 = { quiz: { schema_version: 2, episode_id: episode.episode_id, age_band: "7-9", language: "English", questions: [] }, director_plan: null, asset_plan: null, voice_plan: null, timeline: null, assessment: null, stages: { research: "ready", questions: "ready", director: "not_started", assets: "not_started", voice: "not_started", timeline: "not_started", qa: "not_started", render: "not_started" } };
 
   await page.route("**/api/config", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ video_generation: { provider: "none", model: "", max_scene_duration_seconds: 8, default_scene_duration_seconds: 6, hyperframes_command: "npx hyperframes", render_quality: "draft", fps: 30, narration_words_per_second: 2.3, aspect_ratio: "16:9" }, image_generation: { enabled: true, images_per_bundle: 1 }, codex: { max_concurrent_tasks: 3, transport: "app_server", app_server_endpoint: "stdio://", command: "codex", model: "", experimental_api: false, api_base_url: "", api_key: "", auto_delete_threads: true, failed_thread_retention_days: 7 }, audio_generation: { provider: "chatterbox", service_url: "http://127.0.0.1:8890", exaggeration: 0.5, cfg_weight: 0.5, max_concurrent_tasks: 2, merge_gap_ms: 300, match_target_duration: true } }) }));
   await page.route("**/api/git", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ branch: "main", dirty: false, changed_files: 0 }) }));
@@ -19,23 +19,6 @@ test("Quiz Engine V2 rail acknowledges stage actions and stays usable on mobile"
   await page.route("**/api/channels/" + channel.channel_id + "/episodes/" + episode.episode_id + "/visual-bible/images", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ images: [] }) }));
   await page.route("**/api/channels/" + channel.channel_id + "/episodes/" + episode.episode_id + "/production-assessment", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ assessment: { score: 62, rating: "needs_work", assessed_at: "2026-08-17T00:00:00.000Z", metrics: { target_duration_seconds: 480, estimated_narration_seconds: 300, narration_word_count: 700, target_word_count: 1050, scene_count: 0, sequence_count: 0, unique_prompt_ratio: 1, structured_prompt_ratio: 0, continuity_coverage_ratio: 0, source_coverage_ratio: 0, narration_coverage_ratio: 1, factual_anchor_count: 2, research_source_count: 5 }, issues: [] } }) }));
   await page.route("**/api/channels/" + channel.channel_id + "/episodes/" + episode.episode_id + "/quiz-v2", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(v2) }));
-  await page.route("**/api/channels/" + channel.channel_id + "/episodes/" + episode.episode_id + "/quiz-v2/director/generate", async (route) => {
-    v2 = {
-      ...v2,
-      director_plan: { schema_version: 2, beats: [] },
-      asset_plan: { schema_version: 2, episode_id: episode.episode_id, assets: [], consistency_groups: [] },
-      voice_plan: { schema_version: 2, episode_id: episode.episode_id, segments: [] },
-      timeline: { schema_version: 2, episode_id: episode.episode_id, duration_seconds: 1, events: [] },
-      assessment: { schema_version: 2, episode_id: episode.episode_id, assessed_at: episode.updated_at, score: 90, rating: "production_ready", categories: { semantic: 100, visual: 100, pacing: 100, audio: 100, variety: 100, render_integrity: 100 }, issues: [] },
-      stages: { ...v2.stages, director: "ready", assets: "ready", voice: "ready", timeline: "ready", qa: "ready", render: "not_started" },
-    };
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ director_plan: v2.director_plan, artifact_path: "quiz/director-plan.json", invalidated: [] }) });
-  });
-  let renderQueued = false;
-  await page.route("**/api/channels/" + channel.channel_id + "/episodes/" + episode.episode_id + "/quiz-v2/render", async (route) => {
-    renderQueued = route.request().method() === "POST";
-    await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ task: { task_id: "quiz-render-task", task_type: "GENERATE_VIDEO", channel_id: channel.channel_id, episode_id: episode.episode_id, status: "QUEUED", created_at: episode.updated_at, started_at: null, completed_at: null, codex_thread_id: null, codex_turn_id: null, error: null, output_files: [], lock_key: episode.episode_id, queue_position: 1, progress_message: "Queued", scene_number: null } }) });
-  });
   let folderOpened = false;
   await page.route("**/api/channels/" + channel.channel_id + "/episodes/" + episode.episode_id + "/video/open-folder", async (route) => { folderOpened = route.request().method() === "POST"; await route.fulfill({ contentType: "application/json", body: JSON.stringify({ opened: true, folder_path: "channels/quiz-v2/episodes/quiz-story/assets" }) }); });
 
@@ -45,16 +28,15 @@ test("Quiz Engine V2 rail acknowledges stage actions and stays usable on mobile"
   await expect(page.getByRole("heading", { name: "Production rail", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Production narration", exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Rendered video")).toBeVisible();
+  await expect(page.locator(".quiz-v2-panel").getByRole("button")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Generate Questions", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Generate Director", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Render", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Render again", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Open folder", exact: true }).click();
   await expect.poll(() => folderOpened).toBe(true);
   await expect(page.getByRole("status")).toContainText("Video folder opened");
   await expect(page.getByRole("list", { name: "Quiz Engine V2 production stages" }).getByText("Questions", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Generate Director", exact: true }).first()).toBeEnabled();
-  await page.getByRole("button", { name: "Generate Director", exact: true }).first().click();
-  await expect(page.getByRole("status")).toContainText("Director stage updated");
-  await expect(page.getByText("Regenerate", { exact: true }).first()).toBeVisible();
-  await page.getByRole("button", { name: "Render", exact: true }).click();
-  await expect.poll(() => renderQueued).toBe(true);
   await page.setViewportSize({ width: 390, height: 844 });
   const mobileWidth = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
   expect(mobileWidth.scrollWidth).toBeLessThanOrEqual(mobileWidth.clientWidth);

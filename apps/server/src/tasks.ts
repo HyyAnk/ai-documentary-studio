@@ -39,7 +39,7 @@ import { compileTimeline, generateDirector, generateQuiz, generateVoice, planAss
 
 export { buildQuizComposition };
 
-type ActiveRun = { task: Task; threadId: string; turnId: string; output: string; manifest: ContextManifest; researchAttempts: number; scriptAttempts: number; visualBibleAttempts: number };
+type ActiveRun = { task: Task; threadId: string; turnId: string; output: string; manifest: ContextManifest; researchAttempts: number; scriptAttempts: number; visualBibleAttempts: number; sequenceAttempts: number };
 type CodexCleanupConfig = { auto_delete_threads: boolean; failed_thread_retention_days: number };
 type PipelineRun = { cancelled: boolean; children: Set<string> };
 
@@ -307,7 +307,7 @@ export class TaskManager extends EventEmitter {
       await this.update(task.task_id, { codex_thread_id: threadId, progress_message: "Generating" });
       const turnId = await this.codex.startTurn(threadId, manifest.prompt);
       await this.update(task.task_id, { codex_turn_id: turnId });
-      this.active.set(task.task_id, { task: this.get(task.task_id), threadId, turnId, output: "", manifest, researchAttempts: 0, scriptAttempts: 0, visualBibleAttempts: 0 });
+      this.active.set(task.task_id, { task: this.get(task.task_id), threadId, turnId, output: "", manifest, researchAttempts: 0, scriptAttempts: 0, visualBibleAttempts: 0, sequenceAttempts: 0 });
       await new Promise<void>((resolve) => this.completionWaiters.set(task.task_id, resolve));
       this.logger.step("Codex turn started", context);
     } catch (error) {
@@ -941,9 +941,18 @@ export class TaskManager extends EventEmitter {
           return;
         }
       }
-      if (active.task.task_type === "GENERATE_VISUAL_BIBLE" && active.visualBibleAttempts < 1 && message.startsWith("Visual bible quality gate failed")) {
+      if (active.task.task_type === "GENERATE_VISUAL_BIBLE" && active.visualBibleAttempts < 1 && (message.startsWith("Visual bible quality gate failed") || message.startsWith("Quiz visual bible quality gate failed"))) {
         try {
           await this.retryVisualBible(active, message);
+          return;
+        } catch (retryError) {
+          await this.finish(active.task.task_id, "FAILED", retryError instanceof Error ? retryError.message : message);
+          return;
+        }
+      }
+      if (active.task.task_type === "GENERATE_SEQUENCE_SCENES" && active.sequenceAttempts < 1 && isSequenceOutputFailure(message)) {
+        try {
+          await this.retrySequenceScenes(active, message);
           return;
         } catch (retryError) {
           await this.finish(active.task.task_id, "FAILED", retryError instanceof Error ? retryError.message : message);
@@ -986,14 +995,41 @@ export class TaskManager extends EventEmitter {
   }
 
   private async retryVisualBible(active: ActiveRun, reason: string): Promise<void> {
+    const channel = await this.repository.getChannel(active.task.channel_id);
+    const episode = await this.repository.getEpisode(active.task.channel_id, active.task.episode_id!);
+    const isQuiz = channel.engine === "quiz";
+    const bundleRequirement = isQuiz
+      ? `Create exactly ${episode.quiz_config.question_count} continuity bundles formatted as \`## Continuity bundle CB-01 — Title\` through CB-${String(episode.quiz_config.question_count).padStart(2, "0")}.`
+      : "Include at least five stable bundles using exact second-level headings `## Continuity bundle CB-01 — Title`, `CB-02`, and so on.";
+    const quizMotionRequirement = isQuiz
+      ? "Include an explicit second-level section named exactly `## Safe motion` with labeled Allowed motion, Prohibited motion, and Reduced-motion fallback rules. The exact phrase `safe motion` must appear in the returned Markdown."
+      : "";
     const previousThreadId = active.threadId;
     const threadId = await this.codex.startThread();
-    const turnId = await this.codex.startTurn(threadId, `${active.manifest.prompt}\n\nSTRICT RETRY: The previous Visual Bible failed validation (${reason}). Start over in a fresh response. Return only the Markdown Episode Visual Bible, with no reasoning, research, treatment, tool output, JSON, or explanation. Include at least five stable bundles using exact second-level headings \`## Continuity bundle CB-01 — Title\`, \`CB-02\`, and so on. Every bundle must include Era, Location, Subjects, Palette, Lighting, Anchor-frame prompt, and Reference asset slots. Do not use alternative heading names. Do not omit bundle IDs.`);
+    const turnId = await this.codex.startTurn(threadId, `${active.manifest.prompt}\n\nSTRICT RETRY: The previous ${isQuiz ? "Quiz " : ""}Visual Bible failed validation (${reason}). Start over in a fresh response. Return only the Markdown ${isQuiz ? "Quiz " : ""}Visual Bible, with no reasoning, research, treatment, tool output, JSON, or explanation. ${bundleRequirement} Every bundle must include Era, Location, Subjects, Palette, Lighting, Anchor-frame prompt, and Reference asset slots. ${quizMotionRequirement} Do not use alternative heading names. Do not omit bundle IDs.`);
     active.threadId = threadId;
     active.turnId = turnId;
     active.output = "";
     active.visualBibleAttempts += 1;
-    await this.update(active.task.task_id, { codex_thread_id: threadId, codex_turn_id: turnId, progress_message: "Retrying visual bible with strict continuity schema" });
+    await this.update(active.task.task_id, { codex_thread_id: threadId, codex_turn_id: turnId, progress_message: isQuiz ? "Retrying Quiz visual bible with safe motion rules" : "Retrying visual bible with strict continuity schema" });
+    if (previousThreadId !== threadId) void this.codex.deleteThread(previousThreadId).catch(() => undefined);
+  }
+
+  private async retrySequenceScenes(active: ActiveRun, reason: string): Promise<void> {
+    const channel = await this.repository.getChannel(active.task.channel_id);
+    const isQuiz = channel.engine === "quiz";
+    const sequenceNumber = active.task.scene_number ?? 1;
+    const strictContract = isQuiz
+      ? `Preserve every quiz field and return only a JSON array. Every beat must use a non-empty continuity_bundle_id exactly "CB-${String(sequenceNumber).padStart(2, "0")}", a non-empty continuity_note, and a distinct visual_prompt with the exact uppercase sections CAMERA, ACTION, LIGHTING, ATMOSPHERE, and CONTINUITY. Every non-intro/outro beat must also include complete quiz question, choices, answer, and explanation data.`
+      : "Return only a JSON array. Every beat must use a non-empty continuity_bundle_id, a non-empty continuity_note, and a distinct visual_prompt with the exact uppercase sections CAMERA, ACTION, LIGHTING, ATMOSPHERE, and CONTINUITY.";
+    const previousThreadId = active.threadId;
+    const threadId = await this.codex.startThread();
+    const turnId = await this.codex.startTurn(threadId, `${active.manifest.prompt}\n\nSTRICT RETRY: The previous ${isQuiz ? "Quiz " : ""}shot-plan response failed validation (${reason}). Start over in a fresh response. ${strictContract} Do not omit metadata, use empty strings, repeat prompts, add Markdown fences, add commentary, or return anything except the JSON array.`);
+    active.threadId = threadId;
+    active.turnId = turnId;
+    active.output = "";
+    active.sequenceAttempts += 1;
+    await this.update(active.task.task_id, { codex_thread_id: threadId, codex_turn_id: turnId, progress_message: isQuiz ? "Retrying Quiz shot plan with strict continuity metadata" : "Retrying shot plan with strict structure metadata" });
     if (previousThreadId !== threadId) void this.codex.deleteThread(previousThreadId).catch(() => undefined);
   }
 
@@ -1330,6 +1366,13 @@ function validateVisualBible(markdown: string): void {
   for (const required of ["palette", "lighting", "reference asset", "anchor-frame"]) {
     if (!markdown.toLowerCase().includes(required)) throw new Error(`Visual bible quality gate failed: missing ${required}`);
   }
+}
+
+function isSequenceOutputFailure(message: string): boolean {
+  return message.startsWith("Shot-plan quality gate failed")
+    || message.startsWith("Quiz scene quality gate failed")
+    || message === "Codex output did not contain JSON"
+    || message.startsWith("Codex beat ");
 }
 
 function validateBeatOutput(beats: Beat[], minimumSequences = 5, quiz = false): void {

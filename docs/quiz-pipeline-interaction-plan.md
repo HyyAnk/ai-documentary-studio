@@ -6,7 +6,7 @@
 2. Generate exactly five topic candidates. Each candidate carries a quiz format, age band, and question count.
 3. Confirm one candidate to create a Quiz episode.
 4. Set the question count, then click **Build video** once. The single pipeline runs research → treatment → script → visual bible → scenes → Quiz V2 → Director → assets → voice → timeline → QA → HyperFrames MP4.
-5. Review the inline video, download the MP4, or rerun only the failed/changed stage.
+5. Review the inline video or download the MP4. If a stage fails or becomes stale, click **Build video** again; the pipeline resumes from the earliest invalid stage.
 6. Hover or focus a channel card to reveal **Delete channel**, or an episode row to reveal **Delete episode**. Channel deletion uses typed `Yes` confirmation; episode deletion uses a direct **Yes/No** confirmation.
 
 ## State transitions
@@ -32,7 +32,7 @@
 
 - A successful render stores `quiz-video.mp4` and `render-manifest.json`, updates episode metadata, and exposes inline playback/download.
 - Failed Codex, image, Chatterbox, lint, inspect, or render steps retain completed upstream artifacts and expose retry.
-- `QuizV2Panel` is a live status and advanced regeneration surface. **Generate questions** is optional; it is never required before **Build video**.
+- `QuizV2Panel` is a live status-only surface. **Build video** is the only Quiz production action; question generation and every downstream V2 stage run inside that pipeline.
 - Cancelling the parent pipeline cancels active child tasks and leaves the last confirmed artifacts intact.
 - HyperFrames preflight reports missing FFmpeg, FFprobe, Chrome, or source audio as the exact failed step.
 

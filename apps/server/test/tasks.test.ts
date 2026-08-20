@@ -31,14 +31,23 @@ class FakeCodex extends EventEmitter {
     setTimeout(() => {
       const visualBible = prompt.includes("Task type: GENERATE_VISUAL_BIBLE");
       const strictVisualRetry = visualBible && prompt.includes("STRICT RETRY");
+      const sequenceTask = prompt.includes("Task type: GENERATE_SEQUENCE_SCENES");
+      const strictSequenceRetry = sequenceTask && prompt.includes("STRICT RETRY");
       const quizResearchCount = Number(prompt.match(/The episode has exactly (\d+) questions/)?.[1] ?? 0);
       const quizResearch = quizResearchCount > 0;
       const strictQuizResearchRetry = quizResearch && prompt.includes("STRICT RETRY");
-      const validVisualBible = "# Episode Visual Bible\n\n" + Array.from({ length: 5 }, (_, index) => `## Continuity bundle CB-0${index + 1} — Bundle ${index + 1}\n\n- Era: 1950s\n- Location: Test location\n- Subjects: Test subject\n- Palette: Warm neutral\n- Lighting: Soft side light\n- Anchor-frame prompt: A coherent documentary environment for bundle ${index + 1}.\n- Reference asset slots: anchor`).join("\n\n");
+      const quizVisualBibleCount = Number(prompt.match(/Create exactly (\d+) continuity bundles/)?.[1] ?? 0);
+      const quizVisualBible = visualBible && quizVisualBibleCount > 0;
+      const safeMotionSection = "\n## Safe motion\n\n- Allowed motion: gentle fades, slow scale changes, and calm card slides.\n- Prohibited motion: strobing, flashing, seizure-triggering patterns, and unsafe rapid camera movement.\n- Reduced-motion fallback: hold still frames and use opacity changes only.\n";
+      const validVisualBible = "# Episode Visual Bible\n\n- Palette: Warm candy colors\n- Countdown: A clear, calm countdown\n- Answer reveal: One focused reveal state\n" + safeMotionSection + Array.from({ length: Math.max(5, quizVisualBibleCount) }, (_, index) => `## Continuity bundle CB-${String(index + 1).padStart(2, "0")} — Bundle ${index + 1}\n\n- Era: 1950s\n- Location: Test location\n- Subjects: Test subject\n- Palette: Warm neutral\n- Lighting: Soft side light\n- Anchor-frame prompt: A coherent documentary environment for bundle ${index + 1}.\n- Reference asset slots: anchor`).join("\n\n");
+      const invalidSequenceBeats = Array.from({ length: 5 }, (_, index) => ({ dialogue: index === 0 ? "Opening narration." : `Additional beat ${index + 1}.`, sequence_id: "sequence-1", sequence_title: "Opening", shot_id: `shot-${index + 1}`, visual_prompt: `Unstructured shot ${index + 1}`, asset_type: "ai_reconstruction", continuity_key: "opening", continuity_bundle_id: "", reference_asset_ids: [], source_ids: ["C01"], reconstruction: true, sound_cue: "", transition_note: "", continuity_note: "", editorial_overlay: { kind: "none" } }));
+      const validSequenceBeat = [{ dialogue: "Opening narration.", sequence_id: "sequence-1", sequence_title: "Opening", shot_id: "shot-1", visual_prompt: "CAMERA\nWide 35mm locked shot.\nACTION\nThe subject enters and pauses.\nLIGHTING\nSoft 5600K window light.\nATMOSPHERE\nCalm air with 10% haze.\nCONTINUITY\nCB-01 palette and subject identity remain fixed.", asset_type: "ai_reconstruction", continuity_key: "opening", continuity_bundle_id: "CB-01", reference_asset_ids: [], source_ids: ["C01"], reconstruction: true, sound_cue: "", transition_note: "", continuity_note: "Keep CB-01 palette, location, and subject identity.", editorial_overlay: { kind: "none" } }];
       const delta = prompt.includes("Generate exactly one reference image")
         ? "data:image/png;base64,iVBORw0KGgo="
-        : visualBible
-          ? strictVisualRetry ? validVisualBible : "# Episode Visual Bible\n\nThe visual bible needs revision."
+        : sequenceTask
+          ? JSON.stringify(strictSequenceRetry ? validSequenceBeat : invalidSequenceBeats)
+          : visualBible
+          ? strictVisualRetry ? validVisualBible : quizVisualBible ? validVisualBible.replace(safeMotionSection, "") : "# Episode Visual Bible\n\nThe visual bible needs revision."
           : quizResearch
             ? `# Research Dossier\n\n${Array.from({ length: strictQuizResearchRetry ? quizResearchCount : Math.max(1, quizResearchCount - 7) }, (_, index) => `C${String(index + 1).padStart(2, "0")} https://example.com/quiz-${index + 1}`).join("\n")}`
             : "# Research Dossier\n\nC01 https://example.com/1\nC02 https://example.com/2\nC03 https://example.com/3\nC04 https://example.com/4\nC05 https://example.com/5";
@@ -230,6 +239,71 @@ describe("TaskManager locks", () => {
     const visualBible = await repository.getEpisodeFile(channel.channel_id, episode.episode_id, "visual_bible.md");
     expect(visualBible.content).toContain("## Continuity bundle CB-05");
     expect(manager.get(task.task_id).progress_message).toBe("Completed");
+  });
+
+  it("retries a Quiz visual bible when safe motion is missing", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "documentary-quiz-visual-bible-retry-"));
+    roots.push(root);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await mkdir(path.join(root, "shared"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "quiz_channel_dna.md"), "# Quiz DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
+    const repository = new RepositoryService(root);
+    const channel = await repository.createChannel({ name: "Quiz Visual Retry", description: "", target_audience: "Children", language: "English", market: "Global", group_id: "quiz", dna_mode: "example" });
+    const topics = Array.from({ length: 5 }, (_, index) => ({ topic_id: `quiz_visual_retry_topic_${index}`, channel_id: channel.channel_id, title: `Quiz Visual Retry ${index}`, premise: "Premise", why_it_fits: "Fits", hook: "Hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false, quiz_format: "multiple_choice" as const, question_count: 3, age_band: "7-9" as const }));
+    await repository.saveTopicRun(channel.channel_id, topics);
+    const episode = await repository.confirmTopic(channel.channel_id, topics[0]!.topic_id);
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "research.md", "# Research Dossier\n\nC01 verified");
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "treatment.md", "# Documentary Treatment\n\n## Question 1\nTime budget and correct answer");
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "script.md", "# Quiz Visual Retry 0\n\n<!-- HUMOR_POLICY: v1 -->\n\n## Question 1\nGuess, answer, and explanation.");
+    const logger = new StudioLogger(root, true);
+    await logger.init();
+    const fake = new FakeCodex();
+    const manager = new TaskManager(repository, new ContextEngine(repository, logger), fake as never, 1, 8, logger);
+    await manager.load();
+
+    const task = manager.submit("GENERATE_VISUAL_BIBLE", channel.channel_id, episode.episode_id);
+    await waitFor(() => manager.get(task.task_id).status === "COMPLETED");
+
+    const visualBible = await repository.getEpisodeFile(channel.channel_id, episode.episode_id, "visual_bible.md");
+    expect(visualBible.content.toLowerCase()).toContain("safe motion");
+    expect(manager.get(task.task_id).progress_message).toBe("Completed");
+    expect(fake.deletedThreads).toContain("thread_1");
+  });
+
+  it("retries a sequence shot plan when prompt structure or continuity metadata is missing", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "documentary-shot-plan-retry-"));
+    roots.push(root);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await mkdir(path.join(root, "shared"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
+    const repository = new RepositoryService(root);
+    const channel = await repository.createChannel({ name: "Shot Plan Retry", description: "", target_audience: "Viewers", language: "English", market: "Global", dna_mode: "example" });
+    const topics = Array.from({ length: 5 }, (_, index) => ({ topic_id: `shot_retry_topic_${index}`, channel_id: channel.channel_id, title: `Shot Retry ${index}`, premise: "Premise", why_it_fits: "Fits", hook: "Hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false }));
+    await repository.saveTopicRun(channel.channel_id, topics);
+    const episode = await repository.confirmTopic(channel.channel_id, topics[0]!.topic_id);
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "research.md", "# Research Dossier\n\nC01 verified");
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "treatment.md", "# Documentary Treatment\n\n## Sequence 1 — Opening\n\nTime budget: 8 seconds. Claim IDs: C01.");
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "script.md", "# Shot Plan Retry\n\n## Sequence 1 — Opening\n\nOpening narration.");
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "visual_bible.md", "# Episode Visual Bible\n\n## Continuity bundle CB-01 — Opening\n\n- Palette: Warm\n- Lighting: Soft\n- Anchor-frame prompt: A coherent opening.\n- Reference asset slots: anchor");
+    const logger = new StudioLogger(root, true);
+    await logger.init();
+    const fake = new FakeCodex();
+    const manager = new TaskManager(repository, new ContextEngine(repository, logger), fake as never, 1, 8, logger);
+    await manager.load();
+
+    const task = manager.submit("GENERATE_SEQUENCE_SCENES", channel.channel_id, episode.episode_id, 1);
+    await waitFor(() => manager.get(task.task_id).status === "COMPLETED");
+
+    const scenes = await repository.readScenes(channel.channel_id, episode.episode_id);
+    expect(scenes.length).toBeGreaterThan(0);
+    expect(scenes[0]!.visual_prompt).toContain("CAMERA");
+    expect(scenes[0]!.continuity_bundle_id).toBe("cb-01");
+    expect(scenes[0]!.continuity_note).toContain("CB-01");
+    expect(manager.get(task.task_id).progress_message).toBe("Completed");
+    expect(fake.deletedThreads).toContain("thread_1");
   });
 
   it("retries quiz research when a question claim is missing", async () => {
