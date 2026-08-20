@@ -46,7 +46,11 @@ describe("Quiz V2 pacing", () => {
     expect(voice.segments.some((segment) => segment.role === "thinking_prompt")).toBe(true);
     expect(voice.segments.find((segment) => segment.role === "question")?.phrases.length).toBeGreaterThan(0);
     expect(voice.segments.find((segment) => segment.segment_id === "question-2:fact")?.text).toBe(quiz.questions[1]?.fun_fact);
-    expect(quizVoiceTempo("question")).toBeLessThan(1);
+    expect(quizVoiceTempo("question")).toBeGreaterThanOrEqual(1);
+    expect(quizVoiceTempo("choice")).toBeGreaterThanOrEqual(1);
+    expect(quizVoiceTempo("reveal")).toBeGreaterThanOrEqual(1);
+    expect(quizVoiceTempo("thinking_prompt")).toBeGreaterThanOrEqual(1);
+    expect(quizVoiceTempo("explanation")).toBeGreaterThanOrEqual(1);
     expect(quizVoiceTempo("explanation")).toBeLessThan(quizVoiceTempo("question"));
     expect(quizVoiceTempo("countdown")).toBe(1);
   });

@@ -55,23 +55,23 @@ function voiceCopy(language: string) {
       intro: "Sẵn sàng cho một quiz thật vui chưa?",
       question: (_number: number, text: string) => text,
       choices: (choices: string[]) => choices.length < 2 ? choices[0] : `${choices.slice(0, -1).join(", ")} hay ${choices.at(-1)}?`,
-      thinking: ["Bạn chọn đáp án nào?", "Suy nghĩ thật kỹ nhé.", "Giữ đáp án trong đầu nhé.", "Chốt đáp án nào!"],
+      thinking: ["Bạn sẵn sàng chưa? Chọn đáp án nào!", "Suy nghĩ nhanh nhé!", "Giữ đáp án trong đầu nào!", "Chốt đáp án thôi!"],
       reveal: (answer: string) => `${answer}!`,
       explanation: (text: string) => text,
       fact: (text: string) => text,
       midpoint: "",
-      outro: "Bạn đúng được mấy câu? Chơi lại sớm nhé!",
+      outro: "Bạn đúng được mấy câu? Tuyệt lắm! Chơi lại sớm nhé!",
     };
   }
   return {
-    intro: "Ready for a bright quiz?",
+    intro: "Ready for a bright quiz? Here we go!",
     question: (_number: number, text: string) => text,
     choices: (choices: string[]) => choices.length < 2 ? choices[0] : `${choices.slice(0, -1).join(", ")}, or ${choices.at(-1)}?`,
-    thinking: ["Pick your answer.", "Think it through.", "Keep your answer in mind.", "Lock it in!"],
+    thinking: ["Ready? Pick your answer!", "Think fast!", "Keep your answer in mind!", "Lock it in!"],
     reveal: (answer: string) => `${answer}!`,
     explanation: (text: string) => text,
     fact: (text: string) => text,
     midpoint: "",
-    outro: "How many did you get right? Play again soon!",
+    outro: "How many did you get right? Great game! Play again soon!",
   };
 }

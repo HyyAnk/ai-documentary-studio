@@ -5,7 +5,7 @@ import { planQuizAssets } from "../src/quiz/assets/assetPlanner.js";
 import { buildQuizVoicePlan } from "../src/quiz/audio/voicePlan.js";
 import { createDefaultDirectorPlan } from "../src/quiz/director/parseDirectorPlan.js";
 import { assessQuizVisualLayout } from "../src/quiz/qa/visualQa.js";
-import { buildCandyArcadeComposition } from "../src/quiz/render/candyArcadeComposition.js";
+import { buildCandyArcadeComposition, candyArcadeHeroAreaRatio } from "../src/quiz/render/candyArcadeComposition.js";
 import { compileQuizTimeline } from "../src/quiz/timeline/compileTimeline.js";
 import { ambientPhaseSeconds, candyArcadeTemplate, quizTimerState, resolveLayout, resolvePalette, textLayout, timelineProgress, visualAnswerState } from "../src/quiz/visual/candyArcade.js";
 
@@ -76,6 +76,11 @@ describe("Candy Arcade visual template", () => {
     expect(prompt.prompt).toContain("consistent with the other answer options");
     expect(prompt.prompt).toContain("Every option in this set must share this exact art direction");
     expect(prompt.prompt).toContain("No words");
+    const hero = assetPlan.assets.find((asset) => asset.asset_id === "asset-question-01-hero")!;
+    const heroPrompt = compileQuizAssetPrompt(hero);
+    expect(heroPrompt.prompt).toContain("polished 3D clay-like illustration");
+    expect(heroPrompt.prompt).toContain("gentle upper-left highlight");
+    expect(heroPrompt.prompt).toContain("Face policy: none");
     expect(assessQuizVisualLayout({ quiz, director }).filter((issue) => issue.severity === "blocker")).toEqual([]);
   });
 
@@ -87,6 +92,14 @@ describe("Candy Arcade visual template", () => {
     expect(html).toContain("reveal-sparkles");
     expect(html).not.toContain("reveal-lockup");
     expect(html).toContain("timer-marker");
+    expect(html).toContain('<div class="timer-progress"></div><span class="timer-marker">?</span>');
+    expect(html).not.toContain('<div class="timer-progress"><span class="timer-marker">?</span></div>');
+    expect(html).toContain("@keyframes quiz-timer-marker-slide");
+    expect(html).toContain("layout-media_left_choices_right .game-stage");
+    expect(html).toContain("layout-media_top_choices_bottom .game-stage");
+    expect(html).toContain("<strong class=\"keyword-highlight\">");
+    expect(candyArcadeHeroAreaRatio("media_left_choices_right")).toBeGreaterThan(.2);
+    expect(candyArcadeHeroAreaRatio("media_top_choices_bottom", "choices")).toBeGreaterThan(.3);
     expect(html).toContain("transition-bubble_splash");
     expect(html).toContain("splash-brand");
     expect(html).toContain(".decor-7 { left: 30%; top: 8%;");

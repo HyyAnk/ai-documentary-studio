@@ -8,7 +8,7 @@ import { synthesizeWav } from "../../providers/chatterbox.js";
 import { audioDiagnosticsForTimeline, type VoiceAudioDiagnostics } from "./audioDiagnostics.js";
 
 const execFileAsync = promisify(execFile);
-const QUIZ_VOICE_PACING_VERSION = "paced-v9-performance-contrast";
+const QUIZ_VOICE_PACING_VERSION = "paced-v10-natural-speed-performance";
 
 export type MeasuredQuizVoice = {
   voicePlan: VoicePlan;
@@ -32,7 +32,7 @@ export async function synthesizeQuizVoiceSegments(input: {
   for (const [index, segment] of input.voicePlan.segments.entries()) {
     const tempo = quizVoiceTempo(segment.role);
     const key = `${segment.role}:${tempo}:${JSON.stringify(segment.phrases)}:${segment.text.trim().replace(/\s+/g, " ")}`;
-    const pacingVersion = segment.role === "outro" ? "paced-v9-outro-performance" : QUIZ_VOICE_PACING_VERSION;
+    const pacingVersion = segment.role === "outro" ? "paced-v10-outro-performance" : QUIZ_VOICE_PACING_VERSION;
     let rendered = cache.get(key);
     if (!rendered) {
       const existing = await input.repository.getQuizVoiceSegmentAudioFile(input.channelId, input.episodeId, index + 1, pacingVersion).catch(() => null);
@@ -53,11 +53,11 @@ export async function synthesizeQuizVoiceSegments(input: {
 }
 
 export function quizVoiceTempo(role: VoicePlan["segments"][number]["role"]): number {
-  if (role === "question" || role === "choice") return 0.84;
-  if (role === "reveal") return 0.86;
-  if (role === "explanation" || role === "fun_fact") return 0.82;
-  if (role === "thinking_prompt") return 0.9;
-  if (role === "intro" || role === "midpoint" || role === "outro") return 0.84;
+  if (role === "question" || role === "choice") return 1.1;
+  if (role === "reveal") return 1.08;
+  if (role === "explanation" || role === "fun_fact") return 1;
+  if (role === "thinking_prompt") return 1.04;
+  if (role === "intro" || role === "midpoint" || role === "outro") return 1.06;
   return 1;
 }
 

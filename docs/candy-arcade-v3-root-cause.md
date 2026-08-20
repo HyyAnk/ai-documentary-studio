@@ -15,6 +15,8 @@ This is the pre-implementation inspection for the V3 visual and voice pass.
 | Long low-audio regions | Timeline and narration assembly | Extended dead air relative to the reference | Thinking prompt was not synthesized; every question had broad silent intervals | Schedule short thinking prompts inside existing thinking time and persist low-audio/occupancy diagnostics |
 | Question/reveal structure | Timeline compiler | Reveal/fact delivery is not clearly separated | Reveal and explanation were scheduled as ordinary adjacent narration with no performance metadata | Keep canonical text unchanged, give reveal higher supported exaggeration, preserve a deliberate reveal hold, then deliver explanation/fact warmer |
 
+V4 applies the same explicit art-direction discipline to solo hero images. Answer-option sets still use their shared consistency group, while `hero_question_image` and `question_illustration` prompts now receive a deterministic solo contract for polished 3D clay-like rendering, dimensional lighting, rim-light edge treatment, medium child-friendly detail, and a `face_policy: none` decision. This prevents a hero subject from becoming accidentally photographic or anthropomorphic simply because it has no answer-set group.
+
 ## Provider capability map
 
 The installed Chatterbox adapter accepts `text`, optional `voice_reference_path`, `exaggeration`, and `cfg_weight`. V3 uses only those existing fields. Pace is controlled through phrase segmentation, bounded deterministic gaps, and the existing FFmpeg `atempo` post-process; no unsupported provider parameter was introduced.

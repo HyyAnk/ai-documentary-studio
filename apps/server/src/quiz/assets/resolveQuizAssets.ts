@@ -1,4 +1,5 @@
 import type { QuizAssetPlan, QuizAssetResolution, QuizIssue } from "@studio/shared";
+import { StudioLogger } from "../../logger.js";
 import type { RepositoryService } from "../../repository.js";
 import { ShopAiKeyQuizImageProvider } from "../../providers/shopAiKeyImage.js";
 import { assetFingerprint } from "./assetFingerprint.js";
@@ -9,10 +10,12 @@ export async function resolveQuizAssets(input: { repository: RepositoryService; 
   const byFingerprint = new Map(existing?.assets.map((asset) => [asset.fingerprint, asset]) ?? []);
   const assets: QuizAssetResolution["assets"] = [];
   const issues: QuizIssue[] = [];
+  const logger = new StudioLogger(input.repository.rootDirectory);
   const consistencyGroups = new Map(input.plan.consistency_groups.map((group) => [group.group_id, group]));
   const provider = ShopAiKeyQuizImageProvider.isConfigured() ? new ShopAiKeyQuizImageProvider(input.repository, { channelId: input.channelId, episodeId: input.episodeId }) : null;
   for (const request of input.plan.assets) {
     const compiled = compileQuizAssetPrompt(request, request.consistency_group_id ? consistencyGroups.get(request.consistency_group_id) : undefined);
+    logger.info(`Compiled prompt for ${request.asset_id}: ${JSON.stringify(compiled.prompt)}`, { profileId: input.channelId, workerId: input.episodeId, step: "compile_asset_prompt" });
     const fingerprint = assetFingerprint(request, provider ? "shopaikey" : "inline-fallback", compiled.cacheVersion);
     const cached = byFingerprint.get(fingerprint);
     if (cached && await exists(input.repository, input.channelId, input.episodeId, cached.path)) {
