@@ -37,3 +37,9 @@ Thumbs.db
 # Local production content: keep the folder, never publish channel artifacts.
 channels/*
 !channels/.gitkeep
+
+# Generated validation, preview, and render output.
+tmp/
+
+# Machine-local Documentary Studio configuration.
+.documentary-studio/config.json

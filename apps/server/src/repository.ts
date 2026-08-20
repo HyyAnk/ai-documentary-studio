@@ -2,16 +2,32 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
   ChannelSchema,
+  DirectorPlanSchema,
   EpisodeSchema,
+  QuizAssessmentSchema,
+  QuizAssetPlanSchema,
+  QuizAssetResolutionSchema,
+  QuizTimelineSchema,
+  QuizV2Schema,
   SceneSchema,
   TopicCandidateSchema,
+  TopicConfirmInputSchema,
+  QUIZ_SECONDS_PER_QUESTION,
+  VoicePlanSchema,
   VoiceProfileSchema,
   type Channel,
   type CreateChannelInput,
+  type DirectorPlan,
   type Episode,
   type EpisodeSettingsInput,
+  type QuizAssessment,
+  type QuizAssetPlan,
+  type QuizAssetResolution,
+  type QuizTimeline,
+  type QuizV2,
   type Scene,
   type TopicCandidate,
+  type VoicePlan,
   type VoiceProfile,
   makeId,
   nowIso,
@@ -21,6 +37,16 @@ import path from "node:path";
 import { stripEditorialOverlayInstructions } from "./visualPrompt.js";
 
 const execFileAsync = promisify(execFile);
+
+const DEFAULT_NARRATION_WORDS_PER_SECOND = 2.3;
+
+function estimateQuizTargetDurationMinutes(questionCount: number): number {
+  return Math.max(3, Math.round((questionCount * QUIZ_SECONDS_PER_QUESTION) / 60));
+}
+
+function estimateQuizTargetWordCount(targetDurationMinutes: number, wordsPerSecond: number): number {
+  return Math.round(targetDurationMinutes * 60 * Math.max(0.1, wordsPerSecond) * 0.95);
+}
 
 type TopicRun = { generated_at: string; candidates: TopicCandidate[] };
 
@@ -355,6 +381,109 @@ export class RepositoryService {
     return { path: `channels/${channel.slug}/episodes/${episode.slug}/${filename}`, modified_at: metadata.mtime.toISOString() };
   }
 
+  async readQuiz(channelId: string, episodeId: string): Promise<QuizV2 | null> {
+    return this.readQuizArtifact(channelId, episodeId, "quiz-v2.json", QuizV2Schema);
+  }
+
+  async writeQuiz(channelId: string, episodeId: string, quiz: QuizV2): Promise<string> {
+    return this.writeQuizArtifact(channelId, episodeId, "quiz-v2.json", QuizV2Schema.parse(quiz));
+  }
+
+  async readDirectorPlan(channelId: string, episodeId: string): Promise<DirectorPlan | null> {
+    return this.readQuizArtifact(channelId, episodeId, "director-plan.json", DirectorPlanSchema);
+  }
+
+  async writeDirectorPlan(channelId: string, episodeId: string, plan: DirectorPlan): Promise<string> {
+    return this.writeQuizArtifact(channelId, episodeId, "director-plan.json", DirectorPlanSchema.parse(plan));
+  }
+
+  async readAssetPlan(channelId: string, episodeId: string): Promise<QuizAssetPlan | null> {
+    return this.readQuizArtifact(channelId, episodeId, "asset-plan.json", QuizAssetPlanSchema);
+  }
+
+  async writeAssetPlan(channelId: string, episodeId: string, plan: QuizAssetPlan): Promise<string> {
+    return this.writeQuizArtifact(channelId, episodeId, "asset-plan.json", QuizAssetPlanSchema.parse(plan));
+  }
+
+  async readQuizAssetResolution(channelId: string, episodeId: string): Promise<QuizAssetResolution | null> {
+    return this.readQuizArtifact(channelId, episodeId, "asset-resolution.json", QuizAssetResolutionSchema);
+  }
+
+  async writeQuizAssetResolution(channelId: string, episodeId: string, resolution: QuizAssetResolution): Promise<string> {
+    return this.writeQuizArtifact(channelId, episodeId, "asset-resolution.json", QuizAssetResolutionSchema.parse(resolution));
+  }
+
+  async writeQuizImageAsset(channelId: string, episodeId: string, assetId: string, fingerprint: string, content: Uint8Array): Promise<string> {
+    if (!/^[a-z0-9][a-z0-9_-]{0,119}$/i.test(assetId)) throw new RepositoryError("Quiz asset ID is invalid", "INVALID_ASSET");
+    if (!/^[a-f0-9]{64}$/i.test(fingerprint)) throw new RepositoryError("Quiz asset fingerprint is invalid", "INVALID_ASSET");
+    if (!isPng(content)) throw new RepositoryError("Quiz image output is not a PNG file", "INVALID_IMAGE");
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const directory = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets", "quiz-images");
+    await mkdir(directory, { recursive: true });
+    const filename = `${assetId}-${fingerprint.slice(0, 12)}.png`;
+    const absolutePath = path.join(directory, filename);
+    await this.writeBinaryAtomic(absolutePath, content);
+    return `channels/${channel.slug}/episodes/${episode.slug}/assets/quiz-images/${filename}`;
+  }
+
+  async resolveQuizAssetPath(channelId: string, episodeId: string, assetPath: string): Promise<string> {
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const expected = `channels/${channel.slug}/episodes/${episode.slug}/assets/quiz-images/`;
+    if (!assetPath.replaceAll("\\", "/").startsWith(expected)) throw new RepositoryError("Quiz asset path is outside this episode", "UNSAFE_PATH");
+    const filename = path.basename(assetPath);
+    if (!/^[a-z0-9][a-z0-9_-]{0,119}-[a-f0-9]{12}\.png$/i.test(filename)) throw new RepositoryError("Quiz asset filename is invalid", "UNSAFE_PATH");
+    const absolutePath = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets", "quiz-images", filename);
+    await access(absolutePath);
+    return absolutePath;
+  }
+
+  async readQuizTimeline(channelId: string, episodeId: string): Promise<QuizTimeline | null> {
+    return this.readQuizArtifact(channelId, episodeId, "timeline.json", QuizTimelineSchema);
+  }
+
+  async writeQuizTimeline(channelId: string, episodeId: string, timeline: QuizTimeline): Promise<string> {
+    return this.writeQuizArtifact(channelId, episodeId, "timeline.json", QuizTimelineSchema.parse(timeline));
+  }
+
+  async readQuizAssessment(channelId: string, episodeId: string): Promise<QuizAssessment | null> {
+    return this.readQuizArtifact(channelId, episodeId, "qa.json", QuizAssessmentSchema);
+  }
+
+  async writeQuizAssessment(channelId: string, episodeId: string, assessment: QuizAssessment): Promise<string> {
+    return this.writeQuizArtifact(channelId, episodeId, "qa.json", QuizAssessmentSchema.parse(assessment));
+  }
+
+  async readVoicePlan(channelId: string, episodeId: string): Promise<VoicePlan | null> {
+    return this.readQuizArtifact(channelId, episodeId, "voice-plan.json", VoicePlanSchema);
+  }
+
+  async writeVoicePlan(channelId: string, episodeId: string, plan: VoicePlan): Promise<string> {
+    return this.writeQuizArtifact(channelId, episodeId, "voice-plan.json", VoicePlanSchema.parse(plan));
+  }
+
+  async invalidateQuizArtifacts(channelId: string, episodeId: string, stages: string[]): Promise<string[]> {
+    const filenames: Record<string, "quiz-v2.json" | "director-plan.json" | "asset-plan.json" | "asset-resolution.json" | "voice-plan.json" | "timeline.json" | "qa.json"> = {
+      quiz: "quiz-v2.json",
+      director: "director-plan.json",
+      assets: "asset-plan.json",
+      asset_resolution: "asset-resolution.json",
+      voice: "voice-plan.json",
+      timeline: "timeline.json",
+      qa: "qa.json",
+    };
+    const removed: string[] = [];
+    for (const stage of stages) {
+      const filename = filenames[stage];
+      if (!filename) continue;
+      const target = await this.quizArtifactTarget(channelId, episodeId, filename);
+      await rm(target.absolutePath, { force: true });
+      removed.push(target.relativePath);
+    }
+    return removed;
+  }
+
   async listTopics(channelId: string): Promise<TopicCandidate[]> {
     const channel = await this.getChannel(channelId);
     const directory = this.resolvePath("channels", channel.slug, "topics");
@@ -381,11 +510,14 @@ export class RepositoryService {
     await this.writeJsonAtomic(path.join(directory, `suggestion-${Date.now()}-${makeId("run")}.json`), run);
   }
 
-  async confirmTopic(channelId: string, topicId: string): Promise<Episode> {
+  async confirmTopic(channelId: string, topicId: string, questionCount?: number): Promise<Episode> {
     const channel = await this.getChannel(channelId);
     const candidate = (await this.listTopics(channelId)).find((topic) => topic.topic_id === topicId);
     if (!candidate) throw new RepositoryError("Topic candidate not found", "TOPIC_NOT_FOUND");
-    await this.markTopicSelected(channelId, topicId);
+    const selectedQuestionCount = TopicConfirmInputSchema.parse({ topic_id: topicId, question_count: questionCount }).question_count ?? candidate.question_count;
+    const targetDurationMinutes = estimateQuizTargetDurationMinutes(selectedQuestionCount);
+    const targetWordCount = estimateQuizTargetWordCount(targetDurationMinutes, DEFAULT_NARRATION_WORDS_PER_SECOND);
+    await this.markTopicSelected(channelId, topicId, selectedQuestionCount);
     const episodeSlug = await this.uniqueSlug(candidate.title, this.resolvePath("channels", channel.slug, "episodes"));
     const episodeId = makeId("ep");
     const timestamp = nowIso();
@@ -404,10 +536,10 @@ export class RepositoryService {
       scene_plan_path: `channels/${channel.slug}/episodes/${episodeSlug}/scene_plan.md`,
       dialogue_script_path: `channels/${channel.slug}/episodes/${episodeSlug}/dialogue_script.md`,
       video_prompts_path: `channels/${channel.slug}/episodes/${episodeSlug}/video_prompts.md`,
-      target_duration_minutes: 8,
-      target_word_count: 1050,
+      target_duration_minutes: targetDurationMinutes,
+      target_word_count: targetWordCount,
       quiz_config: {
-        question_count: candidate.question_count,
+        question_count: selectedQuestionCount,
         quiz_format: candidate.quiz_format,
         age_band: candidate.age_band,
         answer_mode: "voice_and_reveal",
@@ -444,8 +576,8 @@ export class RepositoryService {
       ...(input.answer_mode === undefined ? {} : { answer_mode: input.answer_mode }),
       ...(input.visual_theme === undefined ? {} : { visual_theme: input.visual_theme }),
     };
-    const targetDurationMinutes = input.target_duration_minutes ?? Math.max(3, Math.round((nextQuizConfig.question_count * 18) / 60));
-    const targetWordCount = Math.round(targetDurationMinutes * 60 * Math.max(0.1, episode.measured_narration_words_per_second ?? wordsPerSecond) * 0.95);
+    const targetDurationMinutes = input.target_duration_minutes ?? estimateQuizTargetDurationMinutes(nextQuizConfig.question_count);
+    const targetWordCount = estimateQuizTargetWordCount(targetDurationMinutes, episode.measured_narration_words_per_second ?? wordsPerSecond);
     const next = EpisodeSchema.parse({
       ...episode,
       target_duration_minutes: targetDurationMinutes,
@@ -622,6 +754,53 @@ export class RepositoryService {
     return `channels/${channel.slug}/episodes/${episode.slug}/assets/${filename}`;
   }
 
+  async writeQuizVoiceSegmentAudio(channelId: string, episodeId: string, segmentNumber: number, content: Uint8Array, version = ""): Promise<string> {
+    if (!Number.isInteger(segmentNumber) || segmentNumber < 1 || segmentNumber > 999) throw new RepositoryError("Quiz voice segment number is invalid", "INVALID_SEGMENT");
+    if (version && !/^[a-z0-9-]{1,40}$/.test(version)) throw new RepositoryError("Quiz voice segment version is invalid", "INVALID_SEGMENT");
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const episodeDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug);
+    const assetsDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets");
+    const voiceDirectory = path.join(assetsDirectory, "quiz-voice");
+    await mkdir(voiceDirectory, { recursive: true });
+    await this.assertRealPathInside(episodeDirectory, voiceDirectory);
+    const filename = `segment-${String(segmentNumber).padStart(3, "0")}${version ? `-${version}` : ""}.wav`;
+    const absolutePath = path.join(voiceDirectory, filename);
+    await this.writeBinaryAtomic(absolutePath, content);
+    return `channels/${channel.slug}/episodes/${episode.slug}/assets/quiz-voice/${filename}`;
+  }
+
+  async writeQuizNarrationAudio(channelId: string, episodeId: string, content: Uint8Array): Promise<string> {
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const episodeDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug);
+    const assetsDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets");
+    await mkdir(assetsDirectory, { recursive: true });
+    await this.assertRealPathInside(episodeDirectory, assetsDirectory);
+    const filename = `quiz-narration-${Date.now()}.wav`;
+    const absolutePath = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets", filename);
+    await this.writeBinaryAtomic(absolutePath, content);
+    return `channels/${channel.slug}/episodes/${episode.slug}/assets/${filename}`;
+  }
+
+  async getQuizVoiceSegmentAudioFile(channelId: string, episodeId: string, segmentNumber: number, version = ""): Promise<{ absolutePath: string; path: string; size: number; modified_at: string }> {
+    if (!Number.isInteger(segmentNumber) || segmentNumber < 1 || segmentNumber > 999) throw new RepositoryError("Quiz voice segment number is invalid", "INVALID_SEGMENT");
+    if (version && !/^[a-z0-9-]{1,40}$/.test(version)) throw new RepositoryError("Quiz voice segment version is invalid", "INVALID_SEGMENT");
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const assetsDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets");
+    const voiceDirectory = path.join(assetsDirectory, "quiz-voice");
+    const filename = `segment-${String(segmentNumber).padStart(3, "0")}${version ? `-${version}` : ""}.wav`;
+    const absolutePath = path.join(voiceDirectory, filename);
+    try {
+      await this.assertRealPathInside(assetsDirectory, absolutePath);
+      const metadata = await stat(absolutePath);
+      return { absolutePath, path: `channels/${channel.slug}/episodes/${episode.slug}/assets/quiz-voice/${filename}`, size: metadata.size, modified_at: metadata.mtime.toISOString() };
+    } catch {
+      throw new RepositoryError("Quiz voice segment not found", "AUDIO_NOT_FOUND");
+    }
+  }
+
   async writeVideoArtifact(channelId: string, episodeId: string, content: Uint8Array, filename = "quiz-video.mp4"): Promise<string> {
     if (!/^[a-z0-9][a-z0-9._-]*\.mp4$/i.test(filename)) throw new RepositoryError("Unsupported video file", "FILE_NOT_ALLOWED");
     const episode = await this.getEpisode(channelId, episodeId);
@@ -676,7 +855,7 @@ export class RepositoryService {
   }
 
   async getEpisodeAudioFile(channelId: string, episodeId: string, filename: string): Promise<{ absolutePath: string; path: string; size: number; modified_at: string }> {
-    if (!/^(?:scene-\d{2,}|narration(?:-\d{2,})?)\.wav$/i.test(filename)) throw new RepositoryError("Unsupported audio file", "FILE_NOT_ALLOWED");
+    if (!/^(?:scene-\d{2,}|narration(?:-\d{2,})?|quiz-narration-\d+)\.wav$/i.test(filename)) throw new RepositoryError("Unsupported audio file", "FILE_NOT_ALLOWED");
     const episode = await this.getEpisode(channelId, episodeId);
     const channel = await this.getChannel(channelId);
     const assetsDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets");
@@ -802,6 +981,33 @@ export class RepositoryService {
     return slug;
   }
 
+  private async readQuizArtifact<T>(channelId: string, episodeId: string, filename: "quiz-v2.json" | "director-plan.json" | "asset-plan.json" | "asset-resolution.json" | "voice-plan.json" | "timeline.json" | "qa.json", schema: { parse(value: unknown): T }): Promise<T | null> {
+    const target = await this.quizArtifactTarget(channelId, episodeId, filename);
+    try {
+      const raw = JSON.parse(await readFile(target.absolutePath, "utf8")) as unknown;
+      return schema.parse(raw);
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "ENOENT") return null;
+      if (error instanceof RepositoryError) throw error;
+      throw new RepositoryError("Quiz artifact " + filename + " is malformed", "QUIZ_ARTIFACT_INVALID");
+    }
+  }
+
+  private async writeQuizArtifact<T>(channelId: string, episodeId: string, filename: "quiz-v2.json" | "director-plan.json" | "asset-plan.json" | "asset-resolution.json" | "voice-plan.json" | "timeline.json" | "qa.json", value: T): Promise<string> {
+    const target = await this.quizArtifactTarget(channelId, episodeId, filename);
+    await this.writeJsonAtomic(target.absolutePath, value);
+    return target.relativePath;
+  }
+
+  private async quizArtifactTarget(channelId: string, episodeId: string, filename: "quiz-v2.json" | "director-plan.json" | "asset-plan.json" | "asset-resolution.json" | "voice-plan.json" | "timeline.json" | "qa.json"): Promise<{ absolutePath: string; relativePath: string }> {
+    const episode = await this.getEpisode(channelId, episodeId);
+    const channel = await this.getChannel(channelId);
+    const episodeDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug);
+    await this.assertRealPathInside(this.roots.channels, episodeDirectory);
+    const absolutePath = path.join(episodeDirectory, "quiz", filename);
+    return { absolutePath, relativePath: ["channels", channel.slug, "episodes", episode.slug, "quiz", filename].join("/") };
+  }
+
   private async readChannelBySlug(slug: string): Promise<Channel> {
     const directory = this.resolvePath("channels", this.assertSlug(slug));
     await this.assertRealPathInside(this.roots.channels, directory);
@@ -840,7 +1046,7 @@ export class RepositoryService {
     };
   }
 
-  private async markTopicSelected(channelId: string, topicId: string): Promise<void> {
+  private async markTopicSelected(channelId: string, topicId: string, questionCount: number): Promise<void> {
     const channel = await this.getChannel(channelId);
     const directory = this.resolvePath("channels", channel.slug, "topics");
     const entries = await readdir(directory, { withFileTypes: true });
@@ -852,7 +1058,7 @@ export class RepositoryService {
         run.candidates = run.candidates.map((topic) => {
           if (topic.topic_id !== topicId) return topic;
           changed = true;
-          return { ...topic, selected: true };
+          return { ...topic, question_count: questionCount, selected: true };
         });
         if (changed) await this.writeJsonAtomic(filePath, run);
       } catch {

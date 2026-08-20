@@ -153,6 +153,46 @@ test("channel detail keeps topic generation progress visible", async ({ page }) 
   expect(mobileWidth.scrollWidth).toBeLessThanOrEqual(mobileWidth.clientWidth);
 });
 
+test("topic confirmation sends the selected question count before episode generation", async ({ page }) => {
+  const channel = { channel_id: "ch_topic_count", slug: "topic-count", display_name: "Topic count", description: "A quiz channel", target_audience: "Children", language: "English", market: "Global", channel_dna_path: "channels/topic-count/channel_dna.md", style_guide_path: null, status: "ACTIVE", created_at: "2026-08-16T00:00:00.000Z", updated_at: "2026-08-16T00:00:00.000Z", episode_count: 0, group_id: "quiz", engine: "quiz" };
+  const topic = { topic_id: "topic_count_1", channel_id: channel.channel_id, title: "Animal explorers", premise: "A playful animal quiz", why_it_fits: "Fits young quiz fans", hook: "Can you name them all?", estimated_potential: "High", generated_at: channel.created_at, selected: false, quiz_format: "multiple_choice", question_count: 8, age_band: "7-9" };
+  const episode = { episode_id: "ep_topic_count", channel_id: channel.channel_id, slug: "animal-explorers", topic: { title: topic.title, premise: topic.premise, hook: topic.hook }, stage: "SELECTED", script_path: "channels/topic-count/episodes/animal-explorers/script.md", research_path: "channels/topic-count/episodes/animal-explorers/research.md", treatment_path: "channels/topic-count/episodes/animal-explorers/treatment.md", visual_bible_path: "channels/topic-count/episodes/animal-explorers/visual_bible.md", scene_plan_path: "channels/topic-count/episodes/animal-explorers/scene_plan.md", dialogue_script_path: "channels/topic-count/episodes/animal-explorers/dialogue_script.md", video_prompts_path: "channels/topic-count/episodes/animal-explorers/video_prompts.md", target_duration_minutes: 7, target_word_count: 918, narration_asset_path: null, narration_generated_at: null, narration_duration_seconds: null, narration_segment_count: 0, measured_narration_words_per_second: null, quiz_config: { question_count: 12, quiz_format: "multiple_choice", age_band: "7-9", answer_mode: "voice_and_reveal", visual_theme: "candy_pop" }, video_asset_path: null, video_generated_at: null, video_duration_seconds: null, render_manifest_path: null, created_at: channel.created_at, updated_at: channel.updated_at };
+  let confirmedPayload: unknown = null;
+  let releaseConfirmation: (() => void) | undefined;
+  let episodes: Array<typeof episode> = [];
+
+  await page.route("**/api/channels", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ channels: [channel] }) }));
+  await page.route("**/api/tasks", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ tasks: [], codex_status: "connected" }) }));
+  await page.route(`**/api/channels/${channel.channel_id}/dna`, (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ content: "# DNA", path: channel.channel_dna_path, modified_at: channel.updated_at }) }));
+  await page.route(`**/api/channels/${channel.channel_id}/topics`, (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ topics: [topic] }) }));
+  await page.route(`**/api/channels/${channel.channel_id}/episodes`, (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ episodes }) }));
+  await page.route(`**/api/channels/${channel.channel_id}/topics/${topic.topic_id}/confirm`, async (route) => {
+    confirmedPayload = route.request().postDataJSON();
+    await new Promise<void>((resolve) => { releaseConfirmation = resolve; });
+    episodes = [episode];
+    await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ episode }) });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: /01.*Topic count/ }).click();
+  const topicCard = page.locator(".topic-card").filter({ hasText: topic.title });
+  const questionPicker = topicCard.getByRole("spinbutton", { name: `Question count for ${topic.title}` });
+  await questionPicker.fill("12");
+  await expect(questionPicker).toHaveValue("12");
+  await expect(topicCard.getByText("About 7 min", { exact: true })).toBeVisible();
+
+  const confirmButton = topicCard.getByRole("button", { name: "Use this topic", exact: true });
+  await confirmButton.click();
+  await expect(topicCard.getByRole("button", { name: "Creating…", exact: true })).toBeDisabled();
+  await expect.poll(() => confirmedPayload).toEqual({ topic_id: topic.topic_id, question_count: 12 });
+  releaseConfirmation?.();
+  await expect(page.getByRole("status")).toContainText("with 12 questions");
+  await expect(page.locator(".episode-row").filter({ hasText: topic.title })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileWidth = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
+  expect(mobileWidth.scrollWidth).toBeLessThanOrEqual(mobileWidth.clientWidth);
+});
+
 test("episode generation stays visible and refreshes completed work without F5", async ({ page }) => {
   const channel = { channel_id: "ch_episode", slug: "episode-demo", display_name: "Episode demo", description: "A demo channel", target_audience: "Viewers", language: "English", market: "Global", channel_dna_path: "channels/episode-demo/channel_dna.md", style_guide_path: null, status: "ACTIVE", created_at: "2026-08-16T00:00:00.000Z", updated_at: "2026-08-16T00:00:00.000Z", episode_count: 1 };
   const episode = { episode_id: "ep_demo", channel_id: channel.channel_id, slug: "the-demo-story", topic: { title: "The Demo Story", premise: "A story used to verify realtime updates.", hook: "What happens next?" }, stage: "SCRIPT", script_path: "channels/episode-demo/episodes/the-demo-story/script.md", research_path: "channels/episode-demo/episodes/the-demo-story/research.md", treatment_path: "channels/episode-demo/episodes/the-demo-story/treatment.md", visual_bible_path: "channels/episode-demo/episodes/the-demo-story/visual_bible.md", scene_plan_path: "channels/episode-demo/episodes/the-demo-story/scene_plan.json", dialogue_script_path: "channels/episode-demo/episodes/the-demo-story/dialogue_script.md", video_prompts_path: "channels/episode-demo/episodes/the-demo-story/video_prompts.md", target_duration_minutes: 8, target_word_count: 1050, narration_asset_path: null, narration_generated_at: null, narration_duration_seconds: null, narration_segment_count: 0, measured_narration_words_per_second: null, created_at: channel.created_at, updated_at: channel.updated_at };

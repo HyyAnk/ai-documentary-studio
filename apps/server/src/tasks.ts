@@ -1,4 +1,4 @@
-import { readFile, readdir, writeFile, mkdir } from "node:fs/promises";
+import { copyFile, readFile, readdir, writeFile, mkdir } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
@@ -28,7 +28,13 @@ import { optimizeShortScenes, packBeatsIntoScenes, rebalanceEditorialOverlays, t
 import { calibratedScriptTargetWords, countWords, extractNarration, extractNarrationChunks, extractNarrationSections, hasHumorPolicyMarker, scriptWordBounds } from "./production.js";
 import { stripEditorialOverlayInstructions } from "./visualPrompt.js";
 import { parseContinuityBundles } from "./visualBundles.js";
-import { pathToFileURL } from "node:url";
+import { buildQuizComposition } from "./quiz/render/buildComposition.js";
+import { HyperframesRenderer } from "./quiz/render/hyperframesRenderer.js";
+import { preflightQuizRender } from "./quiz/qa/preflight.js";
+import { inspectRenderedVideo } from "./quiz/qa/postRenderQa.js";
+import { resolveQuizAssets } from "./quiz/assets/resolveQuizAssets.js";
+
+export { buildQuizComposition };
 
 type ActiveRun = { task: Task; threadId: string; turnId: string; output: string; manifest: ContextManifest; scriptAttempts: number; visualBibleAttempts: number };
 type CodexCleanupConfig = { auto_delete_threads: boolean; failed_thread_retention_days: number };
@@ -37,7 +43,8 @@ type PipelineRun = { cancelled: boolean; children: Set<string> };
 const channelTaskTypes = new Set<TaskType>(["GENERATE_DNA", "SUGGEST_TOPICS"]);
 const audioTaskTypes = new Set<TaskType>(["GENERATE_AUDIO", "GENERATE_NARRATION"]);
 const execFileAsync = promisify(execFile);
-const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
+const npxCommand = process.platform === "win32" ? process.execPath : "npx";
+const quizRenderer = new HyperframesRenderer();
 
 export class TaskManager extends EventEmitter {
   private readonly tasks = new Map<string, Task>();
@@ -448,18 +455,86 @@ export class TaskManager extends EventEmitter {
       await mkdir(renderRoot, { recursive: true });
       const compositionPath = path.join(renderRoot, "index.html");
       const outputPath = path.join(renderRoot, "quiz-video.mp4");
-      const html = buildQuizComposition(episode.quiz_config, scenes, narration.absolutePath, episode.narration_duration_seconds ?? undefined);
+      const renderAudioPath = path.join(renderRoot, "narration.wav");
+      await copyFile(narration.absolutePath, renderAudioPath);
+      const quizV2 = await this.repository.readQuiz(task.channel_id, task.episode_id);
+      const directorPlan = await this.repository.readDirectorPlan(task.channel_id, task.episode_id);
+      const assetPlan = await this.repository.readAssetPlan(task.channel_id, task.episode_id);
+      const voicePlan = await this.repository.readVoicePlan(task.channel_id, task.episode_id);
+      const timeline = await this.repository.readQuizTimeline(task.channel_id, task.episode_id);
+      let assetResolution = await this.repository.readQuizAssetResolution(task.channel_id, task.episode_id);
+      if (quizV2 && assetPlan && !assetResolution) {
+        await this.update(task.task_id, { progress_message: "Quiz · preparing visual assets", progress_percent: 10 });
+        assetResolution = (await resolveQuizAssets({ repository: this.repository, channelId: task.channel_id, episodeId: task.episode_id, plan: assetPlan })).resolution;
+      }
+      // HyperFrames only discovers local media inside the composition directory.
+      // Copy resolved assets into this ephemeral render root instead of exposing
+      // absolute repository paths (which would become invalid file:// URLs).
+      const renderAssetDirectory = path.join(renderRoot, "quiz-images");
+      await mkdir(renderAssetDirectory, { recursive: true });
+      const resolvedAssetEntries: Array<readonly [string, string] | null> = await Promise.all((assetResolution?.assets ?? []).map(async (asset) => {
+        try {
+          const sourcePath = await this.repository.resolveQuizAssetPath(task.channel_id, task.episode_id!, asset.path);
+          const extension = path.extname(sourcePath) || ".png";
+          const renderFilename = `${asset.asset_id}${extension}`;
+          await copyFile(sourcePath, path.join(renderAssetDirectory, renderFilename));
+          return [asset.asset_id, `./quiz-images/${renderFilename}`] as const;
+        } catch {
+          return null;
+        }
+      }));
+      const assetSources: Record<string, string> = Object.fromEntries(resolvedAssetEntries.filter((entry): entry is readonly [string, string] => entry !== null));
+      let preflightAssessment: ReturnType<typeof preflightQuizRender>["assessment"] | null = null;
+      if (quizV2 && directorPlan && assetPlan && voicePlan && timeline) {
+        const preflight = preflightQuizRender({
+          quiz: quizV2,
+          director: directorPlan,
+          assetPlan,
+          resolvedAssets: assetResolution?.assets ?? [],
+          voicePlan,
+          timeline,
+          measuredAudio: episode.narration_duration_seconds !== null,
+        });
+        preflightAssessment = preflight.assessment;
+        await this.repository.writeQuizAssessment(task.channel_id, task.episode_id, preflight.assessment);
+        if (!preflight.ok) {
+          const blocker = preflight.assessment.issues.find((issue) => issue.severity === "blocker");
+          throw new RepositoryError("Quiz V2 preflight blocked render: " + (blocker?.message ?? "Resolve the reported QA blockers before rendering."), "QUIZ_PREFLIGHT_BLOCKED");
+        }
+      }
+      const html = quizV2 && directorPlan && timeline
+        ? (await quizRenderer.prepare({ quiz: quizV2, director: directorPlan, timeline, scenes, audioPath: "./narration.wav", theme: episode.quiz_config.visual_theme, narrationDurationSeconds: episode.narration_duration_seconds ?? undefined, assets: assetSources })).html
+        : buildQuizComposition(episode.quiz_config, scenes, "./narration.wav", episode.narration_duration_seconds ?? undefined);
       await writeFile(compositionPath, html, "utf8");
-      const manifestPath = await this.repository.writeRenderManifest(task.channel_id, task.episode_id, JSON.stringify({ engine: "hyperframes", composition: compositionPath, question_count: episode.quiz_config.question_count, format: episode.quiz_config.quiz_format, generated_at: nowIso() }));
       await this.update(task.task_id, { progress_message: "Video · checking layout and media", progress_percent: 20 });
-      await execFileAsync(npxCommand, ["--yes", "hyperframes", "lint", renderRoot, "--json"], { cwd: this.repository.rootDirectory, timeout: 180_000, windowsHide: true });
-      await execFileAsync(npxCommand, ["--yes", "hyperframes", "inspect", renderRoot, "--json", "--samples", "5"], { cwd: this.repository.rootDirectory, timeout: 300_000, windowsHide: true });
+      await execFileAsync(npxCommand, hyperframesArgs("lint", renderRoot, "--json"), { cwd: this.repository.rootDirectory, timeout: 180_000, windowsHide: true });
+      await execFileAsync(npxCommand, hyperframesArgs("inspect", renderRoot, "--json", "--samples", "5"), { cwd: this.repository.rootDirectory, timeout: 300_000, windowsHide: true });
       await this.update(task.task_id, { progress_message: "Video · rendering MP4 with narration", progress_percent: 45 });
-      await execFileAsync(npxCommand, ["--yes", "hyperframes", "render", renderRoot, "--output", outputPath, "--fps", String(this.videoConfig.fps), "--quality", this.videoConfig.render_quality, "--strict", "--json"], { cwd: this.repository.rootDirectory, timeout: 30 * 60_000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 });
+      await execFileAsync(npxCommand, hyperframesArgs("render", renderRoot, "--output", outputPath, "--fps", String(this.videoConfig.fps), "--quality", this.videoConfig.render_quality, "--strict", "--json"), { cwd: this.repository.rootDirectory, timeout: 30 * 60_000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 });
       await this.update(task.task_id, { progress_message: "Video · verifying MP4 and audio track", progress_percent: 90 });
-      const probe = await execFileAsync("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", outputPath], { cwd: this.repository.rootDirectory, timeout: 60_000, windowsHide: true });
-      const duration = Number.parseFloat(probe.stdout.trim());
+      const probe = await inspectRenderedVideo(outputPath, { width: 1920, height: 1080, fps: this.videoConfig.fps });
+      const renderBlocker = probe.issues.find((issue) => issue.severity === "blocker");
+      if (renderBlocker) throw new RepositoryError(renderBlocker.message, "QUIZ_RENDER_QA_FAILED");
+      const duration = Number.parseFloat(probe.probe.format?.duration ?? "");
       if (!Number.isFinite(duration) || duration <= 0) throw new Error("Rendered MP4 has no readable duration");
+      const manifestPath = await this.repository.writeRenderManifest(task.channel_id, task.episode_id, JSON.stringify({
+        engine: "hyperframes",
+        quiz_engine_version: quizV2 ? 2 : 1,
+        schema_version: quizV2 ? 2 : 1,
+        composition: "runtime/hyperframes/" + episode.episode_id + "/index.html",
+        source_fingerprints: {},
+        question_count: episode.quiz_config.question_count,
+        format: episode.quiz_config.quiz_format,
+        duration_seconds: Number(duration.toFixed(3)),
+        resolution: { width: 1920, height: 1080 },
+        fps: this.videoConfig.fps,
+        preflight: preflightAssessment ? { status: "passed", score: preflightAssessment.score, blockers: preflightAssessment.issues.filter((issue) => issue.severity === "blocker").length } : { status: "legacy_skipped" },
+        lint: { status: "passed" },
+        inspect: { status: "passed" },
+        render: { status: "passed", output: "quiz-video.mp4" },
+        post_render: { status: "passed", issues: probe.issues.length, streams: probe.probe.streams?.map((stream) => ({ codec_type: stream.codec_type, width: stream.width, height: stream.height, r_frame_rate: stream.r_frame_rate })) ?? [] },
+        generated_at: nowIso(),
+      }));
       const videoPath = await this.repository.writeVideoArtifact(task.channel_id, task.episode_id, await readFile(outputPath));
       await this.repository.saveVideoMetadata(task.channel_id, task.episode_id, videoPath, Number(duration.toFixed(3)), manifestPath);
       await this.update(task.task_id, { progress_message: "Quiz video ready", progress_percent: 100 });
@@ -969,42 +1044,6 @@ function parseTopicCandidates(output: string, channelId: string) {
   });
 }
 
-export function buildQuizComposition(config: { question_count: number; quiz_format: string; age_band: string; visual_theme: string }, scenes: Scene[], audioPath: string, narrationDurationSeconds?: number): string {
-  const sceneDuration = Math.max(0.1, scenes.reduce((sum, scene) => sum + scene.duration_seconds, 0));
-  const totalDuration = Math.max(3, narrationDurationSeconds ?? sceneDuration);
-  const durationScale = totalDuration / sceneDuration;
-  const audioSrc = escapeHtml(pathToFileURL(audioPath).href);
-  let cursor = 0;
-  const clips = scenes.map((scene, index) => {
-    const start = cursor;
-    const scaledDuration = scene.duration_seconds * durationScale;
-    cursor += scaledDuration;
-    const isWelcome = index === 0 || /welcome|intro|opening/i.test(scene.sequence_title);
-    const quiz = scene.quiz;
-    const questionNumber = quiz?.question_number ?? Math.min(config.question_count, Math.max(1, index));
-    const label = isWelcome ? "READY TO PLAY" : `QUESTION ${questionNumber}`;
-    const safeDialogue = escapeHtml((quiz?.explanation || scene.dialogue).replace(/\s+/g, " ").trim().slice(0, 240));
-    const safeTitle = escapeHtml(quiz?.question || scene.sequence_title || label);
-    const choices = (quiz?.choices.length ? quiz.choices : ["A", "B", "C"]).slice(0, 3).map((choice, choiceIndex) => `<div class="answer-choice answer-${choiceIndex + 1}"><b>${String.fromCharCode(65 + choiceIndex)}</b><span>${escapeHtml(choice)}</span></div>`).join("");
-    const phaseLabel = quiz?.phase === "reveal" ? "ANSWER REVEAL" : quiz?.phase === "explanation" ? "WHY IT'S TRUE" : label;
-    return `<section id="quiz-scene-${index + 1}" class="clip quiz-scene ${isWelcome ? "welcome" : ""}" data-start="${start.toFixed(3)}" data-duration="${scaledDuration.toFixed(3)}" data-track-index="0">
-      <div class="scene-kicker">${phaseLabel}</div>
-      <h1>${safeTitle}</h1>
-      <div class="answer-grid">${choices}</div>
-      <p class="voice-line">${safeDialogue}</p>
-      <div class="countdown"><span></span><span></span><span></span></div>
-      <div class="sparkle sparkle-one">✦</div><div class="sparkle sparkle-two">✦</div>
-    </section>`;
-  }).join("\n");
-  return `<!doctype html>
-<html><head><meta charset="utf-8"><title>Quiz composition</title><style>
-:root{color-scheme:dark;--ink:#18212b;--cream:#fff8e8;--yellow:#ffd65a;--coral:#ff7866;--mint:#73d6bd;--blue:#78b9ff}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--ink);font-family:Arial,sans-serif}body{color:var(--cream)}#stage{position:relative;width:1920px;height:1080px;overflow:hidden;background:radial-gradient(circle at 18% 10%,#31445c 0,#18212b 45%,#111820 100%)}#stage:before{content:"";position:absolute;inset:0;opacity:.17;background-image:radial-gradient(#fff 1px,transparent 1px);background-size:34px 34px}section.clip{position:absolute;inset:0;padding:125px 160px 100px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center}.scene-kicker{padding:14px 24px;border:4px solid var(--yellow);border-radius:999px;color:var(--yellow);font-size:34px;font-weight:800;letter-spacing:.14em}section.clip h1{max-width:1420px;margin:36px 0 42px;color:var(--cream);font-size:82px;line-height:1.04;letter-spacing:-.04em;text-wrap:balance}.answer-grid{display:grid;grid-template-columns:repeat(3,260px);gap:24px;margin-bottom:38px}.answer-grid div{min-width:220px;display:grid;gap:8px;padding:22px 16px;border-radius:26px;color:var(--ink);font-size:58px;font-weight:900}.answer-grid div span{font-size:22px;line-height:1.15;font-weight:700}.answer-grid div:nth-child(1){background:var(--coral)}.answer-grid div:nth-child(2){background:var(--mint)}.answer-grid div:nth-child(3){background:var(--blue)}.voice-line{max-width:1180px;margin:0;color:#dce7ef;font-size:31px;line-height:1.35}.countdown{display:flex;gap:14px;margin-top:34px}.countdown span{width:18px;height:18px;border-radius:50%;background:var(--yellow)}.sparkle{position:absolute;color:var(--yellow);font-size:88px}.sparkle-one{top:120px;left:190px}.sparkle-two{right:210px;bottom:150px;color:var(--coral)}
-</style></head><body><main id="stage" data-composition-id="quiz" data-no-timeline data-start="0" data-width="1920" data-height="1080" data-duration="${totalDuration.toFixed(3)}" data-fps="${30}">${clips}<audio id="quiz-narration" class="clip" data-start="0" data-duration="${totalDuration.toFixed(3)}" data-track-index="2" data-volume="1" src="${audioSrc}"></audio></main><script>window.__playerReady=true;window.__renderReady=true;</script></body></html>`;
-}
-
-function escapeHtml(value: string): string {
-  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
-}
 
 export function parseBeatsOutput(output: string): Beat[] {
   const raw = parseJson(output);
@@ -1127,6 +1166,11 @@ function parseWavDuration(buffer: Uint8Array): number {
   }
   if (!byteRate || !dataSize) throw new Error("Audio service returned a WAV without duration metadata");
   return Number((dataSize / byteRate).toFixed(3));
+}
+
+function hyperframesArgs(...args: string[]): string[] {
+  if (process.platform === "win32") return [path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npx-cli.js"), "--yes", "hyperframes", ...args];
+  return ["--yes", "hyperframes", ...args];
 }
 
 function validateResearch(markdown: string): void {

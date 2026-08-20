@@ -3,15 +3,15 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RepositoryService } from "../src/repository.js";
-import { ShopAiKeyImageProvider } from "../src/providers/shopAiKeyImage.js";
+import { generateShopAiKeyImageBytes, ShopAiKeyImageProvider } from "../src/providers/shopAiKeyImage.js";
 
 const roots: string[] = [];
 const originalFetch = globalThis.fetch;
-const originalEnv = { key: process.env.SHOPAIKEY_API_KEY, base: process.env.SHOPAIKEY_BASE_URL, model: process.env.SHOPAIKEY_IMAGE_MODEL, fallback: process.env.SHOPAIKEY_IMAGE_FALLBACK_MODEL, size: process.env.SHOPAIKEY_IMAGE_SIZE, quality: process.env.SHOPAIKEY_IMAGE_QUALITY };
+const originalEnv = { key: process.env.SHOPAIKEY_API_KEY, base: process.env.SHOPAIKEY_BASE_URL, model: process.env.SHOPAIKEY_IMAGE_MODEL, fallback: process.env.SHOPAIKEY_IMAGE_FALLBACK_MODEL, fallbacks: process.env.SHOPAIKEY_IMAGE_FALLBACK_MODELS, size: process.env.SHOPAIKEY_IMAGE_SIZE, quality: process.env.SHOPAIKEY_IMAGE_QUALITY };
 
 afterEach(async () => {
   globalThis.fetch = originalFetch;
-  for (const [name, value] of Object.entries({ SHOPAIKEY_API_KEY: originalEnv.key, SHOPAIKEY_BASE_URL: originalEnv.base, SHOPAIKEY_IMAGE_MODEL: originalEnv.model, SHOPAIKEY_IMAGE_FALLBACK_MODEL: originalEnv.fallback, SHOPAIKEY_IMAGE_SIZE: originalEnv.size, SHOPAIKEY_IMAGE_QUALITY: originalEnv.quality })) {
+  for (const [name, value] of Object.entries({ SHOPAIKEY_API_KEY: originalEnv.key, SHOPAIKEY_BASE_URL: originalEnv.base, SHOPAIKEY_IMAGE_MODEL: originalEnv.model, SHOPAIKEY_IMAGE_FALLBACK_MODEL: originalEnv.fallback, SHOPAIKEY_IMAGE_FALLBACK_MODELS: originalEnv.fallbacks, SHOPAIKEY_IMAGE_SIZE: originalEnv.size, SHOPAIKEY_IMAGE_QUALITY: originalEnv.quality })) {
     if (value === undefined) delete process.env[name];
     else process.env[name] = value;
   }
@@ -20,6 +20,24 @@ afterEach(async () => {
 });
 
 describe("ShopAIKey image provider", () => {
+  it("uses the requested four-model fallback chain by default", async () => {
+    process.env.SHOPAIKEY_API_KEY = "test-key";
+    delete process.env.SHOPAIKEY_IMAGE_MODEL;
+    delete process.env.SHOPAIKEY_IMAGE_FALLBACK_MODEL;
+    delete process.env.SHOPAIKEY_IMAGE_FALLBACK_MODELS;
+    const models: string[] = [];
+    globalThis.fetch = vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      models.push(body.model);
+      if (body.model !== "gpt-image-2-all") throw new Error("network timeout");
+      return new Response(JSON.stringify({ data: [{ b64_json: "iVBORw0KGgo=" }] }), { status: 200 });
+    });
+
+    await generateShopAiKeyImageBytes("A cheerful quiz image");
+
+    expect(models).toEqual(["gpt-image-2", "gpt-image-1.5", "gpt-image-1", "gpt-image-2-all"]);
+  });
+
   it("posts to exactly one /v1/images/generations route and persists b64_json PNG output", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "documentary-shopaikey-image-"));
     roots.push(root);
