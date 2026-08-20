@@ -35,6 +35,7 @@ import {
 import { access, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { stripEditorialOverlayInstructions } from "./visualPrompt.js";
+import { invalidateQuizArtifacts as quizInvalidationStages } from "./quiz/pipeline/invalidation.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -377,6 +378,7 @@ export class RepositoryService {
       updated_at: nowIso(),
     });
     await this.writeJsonAtomic(path.join(path.dirname(absolutePath), "episode.json"), updated);
+    if (["research.md", "treatment.md", "script.md", "visual_bible.md"].includes(filename)) await this.invalidateQuizSourceArtifacts(channelId, episodeId);
     const metadata = await stat(absolutePath);
     return { path: `channels/${channel.slug}/episodes/${episode.slug}/${filename}`, modified_at: metadata.mtime.toISOString() };
   }
@@ -474,12 +476,32 @@ export class RepositoryService {
       qa: "qa.json",
     };
     const removed: string[] = [];
+    const shouldInvalidateRender = stages.includes("render");
+    const hasQuizV2Artifact = shouldInvalidateRender ? Boolean(await this.readQuiz(channelId, episodeId)) : false;
     for (const stage of stages) {
       const filename = filenames[stage];
       if (!filename) continue;
       const target = await this.quizArtifactTarget(channelId, episodeId, filename);
       await rm(target.absolutePath, { force: true });
       removed.push(target.relativePath);
+    }
+    if (shouldInvalidateRender && hasQuizV2Artifact) {
+      const episode = await this.getEpisode(channelId, episodeId);
+      const channel = await this.getChannel(channelId);
+      const assetsDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets");
+      const videoFilename = episode.video_asset_path ? path.basename(episode.video_asset_path) : "quiz-video.mp4";
+      if (/^[a-z0-9][a-z0-9._-]*\.mp4$/i.test(videoFilename)) await rm(path.join(assetsDirectory, videoFilename), { force: true });
+      await rm(path.join(assetsDirectory, "render-manifest.json"), { force: true });
+      const next = EpisodeSchema.parse({
+        ...episode,
+        stage: episode.stage === "VIDEO_READY" ? "SCENE_READY" : episode.stage,
+        video_asset_path: null,
+        video_generated_at: null,
+        video_duration_seconds: null,
+        render_manifest_path: null,
+        updated_at: nowIso(),
+      });
+      await this.writeJsonAtomic(this.resolvePath("channels", channel.slug, "episodes", episode.slug, "episode.json"), next);
     }
     return removed;
   }
@@ -576,6 +598,10 @@ export class RepositoryService {
       ...(input.answer_mode === undefined ? {} : { answer_mode: input.answer_mode }),
       ...(input.visual_theme === undefined ? {} : { visual_theme: input.visual_theme }),
     };
+    const quizSettingsChanged = nextQuizConfig.question_count !== episode.quiz_config.question_count
+      || nextQuizConfig.quiz_format !== episode.quiz_config.quiz_format
+      || nextQuizConfig.age_band !== episode.quiz_config.age_band
+      || nextQuizConfig.visual_theme !== episode.quiz_config.visual_theme;
     const targetDurationMinutes = input.target_duration_minutes ?? estimateQuizTargetDurationMinutes(nextQuizConfig.question_count);
     const targetWordCount = estimateQuizTargetWordCount(targetDurationMinutes, episode.measured_narration_words_per_second ?? wordsPerSecond);
     const next = EpisodeSchema.parse({
@@ -586,6 +612,7 @@ export class RepositoryService {
       updated_at: nowIso(),
     });
     await this.writeJsonAtomic(this.resolvePath("channels", channel.slug, "episodes", episode.slug, "episode.json"), next);
+    if (quizSettingsChanged) await this.invalidateQuizSourceArtifacts(channelId, episodeId);
     return next;
   }
 
@@ -693,11 +720,19 @@ export class RepositoryService {
       if (previous && previous.dialogue !== scene.dialogue) return clearSceneAudio(scene);
       return scene;
     });
+    const scenesChanged = JSON.stringify(withFreshAudio) !== JSON.stringify(previousScenes);
     const episodeDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug);
     await this.writeTextAtomic(path.join(episodeDirectory, "scene_plan.md"), serializeScenes(withFreshAudio));
     await this.writeTextAtomic(path.join(episodeDirectory, "dialogue_script.md"), serializeDialogue(withFreshAudio));
     await this.writeTextAtomic(path.join(episodeDirectory, "video_prompts.md"), serializePrompts(withFreshAudio));
     await this.writeJsonAtomic(path.join(episodeDirectory, "episode.json"), EpisodeSchema.parse({ ...episode, stage: "SCENE_READY", updated_at: nowIso() }));
+    if (scenesChanged) await this.invalidateQuizSourceArtifacts(channelId, episodeId);
+  }
+
+  private async invalidateQuizSourceArtifacts(channelId: string, episodeId: string): Promise<void> {
+    const channel = await this.getChannel(channelId);
+    if (channel.engine !== "quiz") return;
+    await this.invalidateQuizArtifacts(channelId, episodeId, quizInvalidationStages("research"));
   }
 
   async saveSceneAudio(channelId: string, episodeId: string, sceneNumber: number, audioAssetPath: string, durationSeconds: number): Promise<void> {

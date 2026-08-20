@@ -77,4 +77,49 @@ describe("Quiz V2 repository artifacts", () => {
     expect(removed).toHaveLength(3);
     expect(await repository.readQuiz(channelId, episodeId)).toEqual(value);
   });
+
+  it("invalidates V2 artifacts from source files, settings, and changed scenes", async () => {
+    const { repository, channelId, episodeId } = await fixture();
+    const value = quiz(episodeId);
+
+    await repository.writeQuiz(channelId, episodeId, value);
+    await repository.saveEpisodeFile(channelId, episodeId, "research.md", "# Research\n\nC01 updated");
+    expect(await repository.readQuiz(channelId, episodeId)).toBeNull();
+
+    await repository.writeQuiz(channelId, episodeId, value);
+    await repository.updateEpisodeSettings(channelId, episodeId, { question_count: 9 }, 2.3);
+    expect(await repository.readQuiz(channelId, episodeId)).toBeNull();
+
+    const scene = {
+      scene_id: "scene-1", episode_id: episodeId, scene_number: 1, duration_seconds: 6,
+      dialogue: "Original question", visual_prompt: "Question card", transition_note: "", continuity_note: "",
+      source_ids: ["C01"], quiz: { phase: "question" as const, question_number: 1, question: "Which animal has stripes?", choices: ["Tiger", "Dolphin"], answer: "Tiger", explanation: "Tigers have stripes.", image_prompt: "" },
+    };
+    await repository.saveScenes(channelId, episodeId, [scene]);
+    await repository.writeQuiz(channelId, episodeId, value);
+    await repository.saveScenes(channelId, episodeId, [{ ...scene, dialogue: "Edited question" }]);
+    expect(await repository.readQuiz(channelId, episodeId)).toBeNull();
+  });
+
+  it("clears stale V2 renders but preserves a legacy render with no V2 artifact", async () => {
+    const { repository, channelId, episodeId } = await fixture();
+    const value = quiz(episodeId);
+    await repository.writeQuiz(channelId, episodeId, value);
+    const v2Video = await repository.writeVideoArtifact(channelId, episodeId, new Uint8Array([1, 2, 3]));
+    const manifest = await repository.writeRenderManifest(channelId, episodeId, "{\"quiz_engine_version\":2}");
+    await repository.saveVideoMetadata(channelId, episodeId, v2Video, 10, manifest);
+    await repository.invalidateQuizArtifacts(channelId, episodeId, ["render"]);
+    expect((await repository.getEpisode(channelId, episodeId)).video_asset_path).toBeNull();
+    await expect(repository.getEpisodeVideoFile(channelId, episodeId)).rejects.toThrow("not found");
+
+    const channel = await repository.getChannel(channelId);
+    const topics = await repository.listTopics(channelId);
+    const legacyEpisode = await repository.confirmTopic(channelId, topics[1]!.topic_id);
+    const legacyVideo = await repository.writeVideoArtifact(channelId, legacyEpisode.episode_id, new Uint8Array([4, 5, 6]));
+    const legacyManifest = await repository.writeRenderManifest(channelId, legacyEpisode.episode_id, "{\"quiz_engine_version\":1}");
+    await repository.saveVideoMetadata(channelId, legacyEpisode.episode_id, legacyVideo, 10, legacyManifest);
+    await repository.invalidateQuizArtifacts(channelId, legacyEpisode.episode_id, ["render"]);
+    expect((await repository.getEpisode(channelId, legacyEpisode.episode_id)).video_asset_path).toBe(legacyVideo);
+    expect(channel.engine).toBe("quiz");
+  });
 });

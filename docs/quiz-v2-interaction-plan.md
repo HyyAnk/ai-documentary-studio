@@ -1,17 +1,18 @@
-# Quiz Engine V2 interaction plan
+# Quiz Engine V2 stage detail
 
-## Primary operator flow
+Quiz V2 is part of the single Quiz production pipeline. Operators normally click **Build video** once; the pipeline creates and validates every stage automatically. This panel remains available for status, inspection, and advanced per-stage regeneration.
+
+## Advanced regeneration flow
 
 1. Open a Quiz episode in the existing production workspace.
-2. Review the Questions artifact, then generate or regenerate the Director plan.
-3. Resolve semantic assets and generate the voice plan through the existing Chatterbox boundary.
-4. Compile the deterministic timeline and run QA before starting HyperFrames.
-5. Render only when QA has no blockers, then inspect the MP4 evidence and download the result.
+2. Use a stale or failed stage action only when a targeted regeneration is needed.
+3. Render is enabled only after the complete V2 chain is present and QA has no blockers.
 
 ## State transitions
 
 - Artifact stages move from `not_started` to `running`, `ready`, `stale`, or `failed`.
 - Changing Quiz facts invalidates Director, assets, voice, timeline, render, and dependent QA.
+- Changing research, treatment, script, visual bible, scenes, question count, age band, format, or visual theme invalidates every affected downstream V2 artifact.
 - Changing only a semantic asset invalidates render and render QA.
 - Changing an SFX registry entry invalidates affected render evidence without changing Quiz facts.
 - A failed downstream stage preserves every confirmed upstream artifact and retries from the earliest stale dependency.

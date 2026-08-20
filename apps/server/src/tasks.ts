@@ -35,6 +35,7 @@ import { HyperframesRenderer } from "./quiz/render/hyperframesRenderer.js";
 import { preflightQuizRender } from "./quiz/qa/preflight.js";
 import { inspectRenderedVideo } from "./quiz/qa/postRenderQa.js";
 import { resolveQuizAssets } from "./quiz/assets/resolveQuizAssets.js";
+import { compileTimeline, generateDirector, generateQuiz, generateVoice, planAssets, readQuizArtifacts, resolveAssets, runQa } from "./quiz/pipeline/orchestrator.js";
 
 export { buildQuizComposition };
 
@@ -410,20 +411,25 @@ export class TaskManager extends EventEmitter {
       await this.repository.saveScenes(task.channel_id, episodeId, balancedScenes);
 
       if (run.cancelled) throw new Error("Pipeline cancelled");
-      await this.update(task.task_id, { progress_message: "Narration · generating the master voice track", progress_percent: 88 });
-      const episode = await this.repository.getEpisode(task.channel_id, episodeId);
-      if (upstreamChanged || !episode.narration_asset_path) {
-        const child = this.submit("GENERATE_NARRATION", task.channel_id, episodeId);
-        run.children.add(child.task_id);
-        try {
-          const completed = await this.waitForTaskTerminal(child.task_id, run);
-          if (completed.status !== "COMPLETED") throw new Error(`Narration failed: ${completed.error ?? completed.status}`);
-        } finally {
-          run.children.delete(child.task_id);
-        }
-      }
       const channel = await this.repository.getChannel(task.channel_id);
       if (channel.engine === "quiz") {
+        await this.runQuizV2Pipeline(task);
+      } else {
+        await this.update(task.task_id, { progress_message: "Narration · generating the master voice track", progress_percent: 88 });
+        const episode = await this.repository.getEpisode(task.channel_id, episodeId);
+        if (upstreamChanged || !episode.narration_asset_path) {
+          const child = this.submit("GENERATE_NARRATION", task.channel_id, episodeId);
+          run.children.add(child.task_id);
+          try {
+            const completed = await this.waitForTaskTerminal(child.task_id, run);
+            if (completed.status !== "COMPLETED") throw new Error(`Narration failed: ${completed.error ?? completed.status}`);
+          } finally {
+            run.children.delete(child.task_id);
+          }
+        }
+      }
+      if (channel.engine === "quiz") {
+        if (run.cancelled) throw new Error("Pipeline cancelled");
         await this.update(task.task_id, { progress_message: "Video · linting Quiz composition", progress_percent: 92 });
         const videoChild = this.submit("GENERATE_VIDEO", task.channel_id, episodeId);
         run.children.add(videoChild.task_id);
@@ -449,6 +455,7 @@ export class TaskManager extends EventEmitter {
       await this.update(task.task_id, { status: "RUNNING", started_at: nowIso(), queue_position: null, progress_message: "Preparing Quiz composition", progress_percent: 5 });
       if (!task.episode_id) throw new RepositoryError("Episode is required", "EPISODE_REQUIRED");
       const episode = await this.repository.getEpisode(task.channel_id, task.episode_id);
+      const channel = await this.repository.getChannel(task.channel_id);
       const scenes = await this.repository.readScenes(task.channel_id, task.episode_id);
       if (!episode.narration_asset_path) throw new RepositoryError("Generate the Chatterbox narration before rendering video", "NARRATION_REQUIRED");
       if (scenes.length === 0) throw new RepositoryError("Generate Quiz scenes before rendering video", "SCENES_REQUIRED");
@@ -464,10 +471,16 @@ export class TaskManager extends EventEmitter {
       const assetPlan = await this.repository.readAssetPlan(task.channel_id, task.episode_id);
       const voicePlan = await this.repository.readVoicePlan(task.channel_id, task.episode_id);
       const timeline = await this.repository.readQuizTimeline(task.channel_id, task.episode_id);
+      const completeQuizV2 = quizV2 && directorPlan && assetPlan && voicePlan && timeline
+        ? { quiz: quizV2, director: directorPlan, assetPlan, voicePlan, timeline }
+        : null;
+      if (channel.engine === "quiz" && !completeQuizV2 && !episode.video_asset_path) {
+        throw new RepositoryError("Quiz V2 artifacts are required before rendering a new Quiz video", "QUIZ_V2_REQUIRED");
+      }
       let assetResolution = await this.repository.readQuizAssetResolution(task.channel_id, task.episode_id);
-      if (quizV2 && assetPlan && !assetResolution) {
+      if (completeQuizV2 && !assetResolution) {
         await this.update(task.task_id, { progress_message: "Quiz · preparing visual assets", progress_percent: 10 });
-        assetResolution = (await resolveQuizAssets({ repository: this.repository, channelId: task.channel_id, episodeId: task.episode_id, plan: assetPlan })).resolution;
+        assetResolution = (await resolveQuizAssets({ repository: this.repository, channelId: task.channel_id, episodeId: task.episode_id, plan: completeQuizV2.assetPlan })).resolution;
       }
       // HyperFrames only discovers local media inside the composition directory.
       // Copy resolved assets into this ephemeral render root instead of exposing
@@ -487,14 +500,14 @@ export class TaskManager extends EventEmitter {
       }));
       const assetSources: Record<string, string> = Object.fromEntries(resolvedAssetEntries.filter((entry): entry is readonly [string, string] => entry !== null));
       let preflightAssessment: ReturnType<typeof preflightQuizRender>["assessment"] | null = null;
-      if (quizV2 && directorPlan && assetPlan && voicePlan && timeline) {
+      if (completeQuizV2) {
         const preflight = preflightQuizRender({
-          quiz: quizV2,
-          director: directorPlan,
-          assetPlan,
+          quiz: completeQuizV2.quiz,
+          director: completeQuizV2.director,
+          assetPlan: completeQuizV2.assetPlan,
           resolvedAssets: assetResolution?.assets ?? [],
-          voicePlan,
-          timeline,
+          voicePlan: completeQuizV2.voicePlan,
+          timeline: completeQuizV2.timeline,
           measuredAudio: episode.narration_duration_seconds !== null,
         });
         preflightAssessment = preflight.assessment;
@@ -504,8 +517,8 @@ export class TaskManager extends EventEmitter {
           throw new RepositoryError("Quiz V2 preflight blocked render: " + (blocker?.message ?? "Resolve the reported QA blockers before rendering."), "QUIZ_PREFLIGHT_BLOCKED");
         }
       }
-      const html = quizV2 && directorPlan && timeline
-        ? (await quizRenderer.prepare({ quiz: quizV2, director: directorPlan, timeline, scenes, audioPath: "./narration.wav", theme: episode.quiz_config.visual_theme, narrationDurationSeconds: episode.narration_duration_seconds ?? undefined, assets: assetSources })).html
+      const html = completeQuizV2
+        ? (await quizRenderer.prepare({ quiz: completeQuizV2.quiz, director: completeQuizV2.director, timeline: completeQuizV2.timeline, scenes, audioPath: "./narration.wav", theme: episode.quiz_config.visual_theme, narrationDurationSeconds: episode.narration_duration_seconds ?? undefined, assets: assetSources })).html
         : buildQuizComposition(episode.quiz_config, scenes, "./narration.wav", episode.narration_duration_seconds ?? undefined);
       await writeFile(compositionPath, html, "utf8");
       await this.update(task.task_id, { progress_message: "Video · checking layout and media", progress_percent: 20 });
@@ -521,8 +534,8 @@ export class TaskManager extends EventEmitter {
       if (!Number.isFinite(duration) || duration <= 0) throw new Error("Rendered MP4 has no readable duration");
       const manifestPath = await this.repository.writeRenderManifest(task.channel_id, task.episode_id, JSON.stringify({
         engine: "hyperframes",
-        quiz_engine_version: quizV2 ? 2 : 1,
-        schema_version: quizV2 ? 2 : 1,
+        quiz_engine_version: completeQuizV2 ? 2 : 1,
+        schema_version: completeQuizV2 ? 2 : 1,
         composition: "runtime/hyperframes/" + episode.episode_id + "/index.html",
         source_fingerprints: {},
         question_count: episode.quiz_config.question_count,
@@ -585,6 +598,50 @@ export class TaskManager extends EventEmitter {
     }
   }
 
+  private async runQuizV2Pipeline(task: Task): Promise<void> {
+    const input = { repository: this.repository, config: { audio_generation: this.audioConfig }, channelId: task.channel_id, episodeId: task.episode_id! };
+    let artifacts = await readQuizArtifacts(input);
+    let episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
+    if (!artifacts.quiz) {
+      await this.update(task.task_id, { progress_message: "Quiz · locking question facts", progress_percent: 68 });
+      await generateQuiz(input);
+      artifacts = await readQuizArtifacts(input);
+    }
+    if (!artifacts.director_plan) {
+      await this.update(task.task_id, { progress_message: "Quiz · directing question presentation", progress_percent: 72 });
+      await generateDirector(input);
+      artifacts = await readQuizArtifacts(input);
+    }
+    if (!artifacts.asset_plan) {
+      await this.update(task.task_id, { progress_message: "Quiz · planning semantic assets", progress_percent: 76 });
+      await planAssets(input);
+      artifacts = await readQuizArtifacts(input);
+    }
+    if (!artifacts.asset_resolution) {
+      await this.update(task.task_id, { progress_message: "Quiz · resolving semantic assets", progress_percent: 79 });
+      await resolveAssets(input);
+      artifacts = await readQuizArtifacts(input);
+    }
+    if (!artifacts.voice_plan || !episode.narration_asset_path || artifacts.voice_plan.segments.some((segment) => segment.duration_seconds === null)) {
+      await this.update(task.task_id, { progress_message: "Quiz · generating per-question voice", progress_percent: 83 });
+      await generateVoice(input);
+      artifacts = await readQuizArtifacts(input);
+      episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
+    }
+    if (!artifacts.timeline) {
+      await this.update(task.task_id, { progress_message: "Quiz · compiling deterministic timeline", progress_percent: 86 });
+      await compileTimeline(input);
+      artifacts = await readQuizArtifacts(input);
+    }
+    if (!artifacts.assessment) {
+      await this.update(task.task_id, { progress_message: "Quiz · running pre-render QA", progress_percent: 89 });
+      await runQa(input);
+      artifacts = await readQuizArtifacts(input);
+    }
+    const blocker = artifacts.assessment?.issues.find((issue) => issue.severity === "blocker");
+    if (blocker) throw new RepositoryError(`Quiz V2 QA blocked production: ${blocker.message}`, "QUIZ_QA_BLOCKED");
+  }
+
   private async attachPipelineBundleImages(channelId: string, episodeId: string): Promise<void> {
     const images = await this.repository.listBundleImages(channelId, episodeId);
     for (const image of images) await this.repository.attachBundleReference(channelId, episodeId, image.bundle_id, image.path);
@@ -620,6 +677,8 @@ export class TaskManager extends EventEmitter {
       await this.update(task.task_id, { status: "RUNNING", started_at: nowIso(), queue_position: null, progress_message: "Preparing audio", progress_percent: 0 });
       if (!task.episode_id) throw new RepositoryError("Episode is required", "EPISODE_REQUIRED");
       if (task.task_type === "GENERATE_NARRATION") {
+        const channel = await this.repository.getChannel(task.channel_id);
+        if (channel.engine === "quiz") throw new RepositoryError("Quiz channels use Quiz V2 voice generation", "QUIZ_V2_REQUIRED");
         await this.runNarrationTask(task);
         return;
       }

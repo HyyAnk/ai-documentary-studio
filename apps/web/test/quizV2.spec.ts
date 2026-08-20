@@ -19,7 +19,23 @@ test("Quiz Engine V2 rail acknowledges stage actions and stays usable on mobile"
   await page.route("**/api/channels/" + channel.channel_id + "/episodes/" + episode.episode_id + "/visual-bible/images", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ images: [] }) }));
   await page.route("**/api/channels/" + channel.channel_id + "/episodes/" + episode.episode_id + "/production-assessment", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ assessment: { score: 62, rating: "needs_work", assessed_at: "2026-08-17T00:00:00.000Z", metrics: { target_duration_seconds: 480, estimated_narration_seconds: 300, narration_word_count: 700, target_word_count: 1050, scene_count: 0, sequence_count: 0, unique_prompt_ratio: 1, structured_prompt_ratio: 0, continuity_coverage_ratio: 0, source_coverage_ratio: 0, narration_coverage_ratio: 1, factual_anchor_count: 2, research_source_count: 5 }, issues: [] } }) }));
   await page.route("**/api/channels/" + channel.channel_id + "/episodes/" + episode.episode_id + "/quiz-v2", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(v2) }));
-  await page.route("**/api/channels/" + channel.channel_id + "/episodes/" + episode.episode_id + "/quiz-v2/director/generate", async (route) => { v2 = { ...v2, director_plan: { schema_version: 2 }, stages: { ...v2.stages, director: "ready" } }; await route.fulfill({ contentType: "application/json", body: JSON.stringify({ director_plan: v2.director_plan, artifact_path: "quiz/director-plan.json", invalidated: [] }) }); });
+  await page.route("**/api/channels/" + channel.channel_id + "/episodes/" + episode.episode_id + "/quiz-v2/director/generate", async (route) => {
+    v2 = {
+      ...v2,
+      director_plan: { schema_version: 2, beats: [] },
+      asset_plan: { schema_version: 2, episode_id: episode.episode_id, assets: [], consistency_groups: [] },
+      voice_plan: { schema_version: 2, episode_id: episode.episode_id, segments: [] },
+      timeline: { schema_version: 2, episode_id: episode.episode_id, duration_seconds: 1, events: [] },
+      assessment: { schema_version: 2, episode_id: episode.episode_id, assessed_at: episode.updated_at, score: 90, rating: "production_ready", categories: { semantic: 100, visual: 100, pacing: 100, audio: 100, variety: 100, render_integrity: 100 }, issues: [] },
+      stages: { ...v2.stages, director: "ready", assets: "ready", voice: "ready", timeline: "ready", qa: "ready", render: "not_started" },
+    };
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ director_plan: v2.director_plan, artifact_path: "quiz/director-plan.json", invalidated: [] }) });
+  });
+  let renderQueued = false;
+  await page.route("**/api/channels/" + channel.channel_id + "/episodes/" + episode.episode_id + "/quiz-v2/render", async (route) => {
+    renderQueued = route.request().method() === "POST";
+    await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ task: { task_id: "quiz-render-task", task_type: "GENERATE_VIDEO", channel_id: channel.channel_id, episode_id: episode.episode_id, status: "QUEUED", created_at: episode.updated_at, started_at: null, completed_at: null, codex_thread_id: null, codex_turn_id: null, error: null, output_files: [], lock_key: episode.episode_id, queue_position: 1, progress_message: "Queued", scene_number: null } }) });
+  });
   let folderOpened = false;
   await page.route("**/api/channels/" + channel.channel_id + "/episodes/" + episode.episode_id + "/video/open-folder", async (route) => { folderOpened = route.request().method() === "POST"; await route.fulfill({ contentType: "application/json", body: JSON.stringify({ opened: true, folder_path: "channels/quiz-v2/episodes/quiz-story/assets" }) }); });
 
@@ -27,6 +43,7 @@ test("Quiz Engine V2 rail acknowledges stage actions and stays usable on mobile"
   await page.getByRole("button", { name: /01.*Quiz V2 channel/ }).click();
   await page.getByRole("button", { name: /Quiz Story/ }).click();
   await expect(page.getByRole("heading", { name: "Production rail", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Production narration", exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Rendered video")).toBeVisible();
   await page.getByRole("button", { name: "Open folder", exact: true }).click();
   await expect.poll(() => folderOpened).toBe(true);
@@ -36,6 +53,8 @@ test("Quiz Engine V2 rail acknowledges stage actions and stays usable on mobile"
   await page.getByRole("button", { name: "Generate Director", exact: true }).first().click();
   await expect(page.getByRole("status")).toContainText("Director stage updated");
   await expect(page.getByText("Regenerate", { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Render", exact: true }).click();
+  await expect.poll(() => renderQueued).toBe(true);
   await page.setViewportSize({ width: 390, height: 844 });
   const mobileWidth = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));
   expect(mobileWidth.scrollWidth).toBeLessThanOrEqual(mobileWidth.clientWidth);

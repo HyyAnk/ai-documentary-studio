@@ -5,7 +5,7 @@
 1. Open **Channels**, choose the **Quiz Channels** or **Documentary Channels** tab, then create or select a channel inside that tab. Only the selected group's channels are rendered.
 2. Generate exactly five topic candidates. Each candidate carries a quiz format, age band, and question count.
 3. Confirm one candidate to create a Quiz episode.
-4. Set the question count, then run the production pipeline: research → Quiz plan → script → visual system → scenes → Chatterbox audio → HyperFrames MP4.
+4. Set the question count, then click **Build video** once. The single pipeline runs research → treatment → script → visual bible → scenes → Quiz V2 → Director → assets → voice → timeline → QA → HyperFrames MP4.
 5. Review the inline video, download the MP4, or rerun only the failed/changed stage.
 6. Hover or focus a channel card to reveal **Delete channel**, or an episode row to reveal **Delete episode**. Channel deletion uses typed `Yes` confirmation; episode deletion uses a direct **Yes/No** confirmation.
 
@@ -16,7 +16,7 @@
 - Channel deletion: card delete affordance → yes/no choice → typed `Yes` confirmation → deleting → removed from every channel list.
 - Episode deletion: episode-row delete affordance → yes/no choice → deleting → removed after server confirmation.
 - Topic: generated → selected.
-- Quiz episode: selected → research ready → Quiz plan ready → script ready → visual system ready → scenes ready → narration ready → video rendering → video ready.
+- Quiz episode: selected → research → treatment → script → visual bible → scenes → Quiz V2 → Director → assets → voice → timeline → QA → rendering → video ready.
 - Task: queued → running → completed, failed, cancelled, or waiting for approval.
 
 ## Asynchronous behavior
@@ -32,6 +32,7 @@
 
 - A successful render stores `quiz-video.mp4` and `render-manifest.json`, updates episode metadata, and exposes inline playback/download.
 - Failed Codex, image, Chatterbox, lint, inspect, or render steps retain completed upstream artifacts and expose retry.
+- `QuizV2Panel` is a live status and advanced regeneration surface. **Generate questions** is optional; it is never required before **Build video**.
 - Cancelling the parent pipeline cancels active child tasks and leaves the last confirmed artifacts intact.
 - HyperFrames preflight reports missing FFmpeg, FFprobe, Chrome, or source audio as the exact failed step.
 

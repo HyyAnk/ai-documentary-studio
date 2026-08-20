@@ -42,16 +42,7 @@ import { composeMergedVisualPrompt, mergeEditorialOverlays, optimizeShortScenes 
 import { assessProduction, countWords, extractNarration, extractNarrationChunks, extractNarrationSections } from "./production.js";
 import { parseContinuityBundles } from "./visualBundles.js";
 import { loadServerEnv } from "./env.js";
-import { buildQuizVoicePlan } from "./quiz/audio/voicePlan.js";
-import { assembleQuizNarration, synthesizeQuizVoiceSegments } from "./quiz/audio/voiceSynthesis.js";
-import { planQuizAssets } from "./quiz/assets/assetPlanner.js";
-import { resolveQuizAssets } from "./quiz/assets/resolveQuizAssets.js";
-import { createDefaultDirectorPlan } from "./quiz/director/parseDirectorPlan.js";
-import { assertDirectorPlanValid } from "./quiz/director/validateDirectorPlan.js";
-import { deriveQuizV2FromScenes } from "./quiz/domain/quiz.js";
-import { assessQuiz } from "./quiz/qa/quizAssessment.js";
-import { compileQuizTimeline } from "./quiz/timeline/compileTimeline.js";
-import { invalidateQuizArtifacts } from "./quiz/pipeline/invalidation.js";
+import { assertQuizRenderReady, compileTimeline, generateDirector, generateQuiz, generateVoice, planAssets, planVoice, readQuizArtifacts, resolveAssets, runQa } from "./quiz/pipeline/orchestrator.js";
 
 const VOICE_PREVIEW_TEXT = "This is a preview of this narrator voice for AI Documentary Studio.";
 
@@ -326,19 +317,13 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
   server.get("/api/channels/:channelId/episodes/:episodeId/quiz-v2", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };
     const episode = await repository.getEpisode(params.channelId, params.episodeId);
-    const [quiz, directorPlan, assetPlan, voicePlan, timeline, assessment] = await Promise.all([
-      repository.readQuiz(params.channelId, params.episodeId),
-      repository.readDirectorPlan(params.channelId, params.episodeId),
-      repository.readAssetPlan(params.channelId, params.episodeId),
-      repository.readVoicePlan(params.channelId, params.episodeId),
-      repository.readQuizTimeline(params.channelId, params.episodeId),
-      repository.readQuizAssessment(params.channelId, params.episodeId),
-    ]);
+    const { quiz, director_plan: directorPlan, asset_plan: assetPlan, asset_resolution: assetResolution, voice_plan: voicePlan, timeline, assessment } = await readQuizArtifacts({ repository, config, channelId: params.channelId, episodeId: params.episodeId });
     const active = tasks.list().find((task) => task.episode_id === params.episodeId && ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(task.status));
     return {
       quiz,
       director_plan: directorPlan,
       asset_plan: assetPlan,
+      asset_resolution: assetResolution,
       voice_plan: voicePlan,
       timeline,
       assessment,
@@ -356,103 +341,43 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
   });
   server.post("/api/channels/:channelId/episodes/:episodeId/quiz-v2/generate", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };
-    const [episode, channel, scenes] = await Promise.all([
-      repository.getEpisode(params.channelId, params.episodeId),
-      repository.getChannel(params.channelId),
-      repository.readScenes(params.channelId, params.episodeId),
-    ]);
-    const quiz = deriveQuizV2FromScenes({ episodeId: episode.episode_id, language: channel.language, ageBand: episode.quiz_config.age_band, format: episode.quiz_config.quiz_format, scenes });
-    const artifactPath = await repository.writeQuiz(params.channelId, params.episodeId, quiz);
-    const invalidated = invalidateQuizArtifacts("quiz");
-    await repository.invalidateQuizArtifacts(params.channelId, params.episodeId, invalidated);
-    return { quiz, artifact_path: artifactPath, invalidated };
+    return generateQuiz({ repository, config, channelId: params.channelId, episodeId: params.episodeId });
   });
   server.post("/api/channels/:channelId/episodes/:episodeId/quiz-v2/director/generate", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };
-    const quiz = await repository.readQuiz(params.channelId, params.episodeId);
-    if (!quiz) throw new RepositoryError("Generate the Quiz facts before the Director plan", "QUIZ_REQUIRED");
-    const directorPlan = createDefaultDirectorPlan(quiz);
-    const artifactPath = await repository.writeDirectorPlan(params.channelId, params.episodeId, directorPlan);
-    const invalidated = invalidateQuizArtifacts("director");
-    await repository.invalidateQuizArtifacts(params.channelId, params.episodeId, invalidated);
-    return { director_plan: directorPlan, artifact_path: artifactPath, invalidated };
+    return generateDirector({ repository, config, channelId: params.channelId, episodeId: params.episodeId });
   });
   server.post("/api/channels/:channelId/episodes/:episodeId/quiz-v2/assets/plan", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };
-    const [quiz, directorPlan] = await Promise.all([repository.readQuiz(params.channelId, params.episodeId), repository.readDirectorPlan(params.channelId, params.episodeId)]);
-    if (!quiz) throw new RepositoryError("Generate the Quiz facts before planning assets", "QUIZ_REQUIRED");
-    if (!directorPlan) throw new RepositoryError("Generate the Director plan before planning assets", "DIRECTOR_REQUIRED");
-    const assetPlan = planQuizAssets(quiz, directorPlan);
-    const artifactPath = await repository.writeAssetPlan(params.channelId, params.episodeId, assetPlan);
-    const invalidated = invalidateQuizArtifacts("assets");
-    await repository.invalidateQuizArtifacts(params.channelId, params.episodeId, invalidated);
-    return { asset_plan: assetPlan, artifact_path: artifactPath, invalidated };
+    return planAssets({ repository, config, channelId: params.channelId, episodeId: params.episodeId });
   });
   server.post("/api/channels/:channelId/episodes/:episodeId/quiz-v2/assets/resolve", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };
-    const assetPlan = await repository.readAssetPlan(params.channelId, params.episodeId);
-    if (!assetPlan) throw new RepositoryError("Plan Quiz assets before resolving them", "ASSET_PLAN_REQUIRED");
-    const result = await resolveQuizAssets({ repository, channelId: params.channelId, episodeId: params.episodeId, plan: assetPlan });
-    return { asset_resolution: result.resolution, issues: result.issues };
+    return resolveAssets({ repository, config, channelId: params.channelId, episodeId: params.episodeId });
   });
   server.post("/api/channels/:channelId/episodes/:episodeId/quiz-v2/voice/plan", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };
-    const quiz = await repository.readQuiz(params.channelId, params.episodeId);
-    if (!quiz) throw new RepositoryError("Generate the Quiz facts before planning voice", "QUIZ_REQUIRED");
-    const voicePlan = buildQuizVoicePlan(quiz);
-    const artifactPath = await repository.writeVoicePlan(params.channelId, params.episodeId, voicePlan);
-    const invalidated = invalidateQuizArtifacts("voice");
-    await repository.invalidateQuizArtifacts(params.channelId, params.episodeId, invalidated);
-    return { voice_plan: voicePlan, artifact_path: artifactPath, invalidated };
+    return planVoice({ repository, config, channelId: params.channelId, episodeId: params.episodeId });
   });
   server.post("/api/channels/:channelId/episodes/:episodeId/quiz-v2/voice/generate", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };
-    const [quiz, directorPlan] = await Promise.all([repository.readQuiz(params.channelId, params.episodeId), repository.readDirectorPlan(params.channelId, params.episodeId)]);
-    if (!quiz) throw new RepositoryError("Generate the Quiz facts before generating voice", "QUIZ_REQUIRED");
-    if (!directorPlan) throw new RepositoryError("Generate the Director plan before generating voice", "DIRECTOR_REQUIRED");
-    assertDirectorPlanValid(quiz, directorPlan);
-    const invalidated = invalidateQuizArtifacts("voice");
-    await repository.invalidateQuizArtifacts(params.channelId, params.episodeId, invalidated);
-    const plannedVoice = buildQuizVoicePlan(quiz);
-    const measured = await synthesizeQuizVoiceSegments({ repository, config: config.audio_generation, channelId: params.channelId, episodeId: params.episodeId, voicePlan: plannedVoice });
-    const audioDurations = Object.fromEntries(measured.voicePlan.segments.flatMap((segment) => segment.duration_seconds === null ? [] : [[segment.segment_id, segment.duration_seconds]]));
-    const timeline = compileQuizTimeline({ quiz, director: directorPlan, voicePlan: measured.voicePlan, audioDurations });
-    const narration = await assembleQuizNarration({ repository, channelId: params.channelId, episodeId: params.episodeId, voicePlan: measured.voicePlan, timeline, segmentPaths: measured.segmentPaths });
-    const [voicePath, timelinePath] = await Promise.all([
-      repository.writeVoicePlan(params.channelId, params.episodeId, measured.voicePlan),
-      repository.writeQuizTimeline(params.channelId, params.episodeId, timeline),
-    ]);
-    return { voice_plan: measured.voicePlan, timeline, narration_asset_path: narration.assetPath, narration_duration_seconds: narration.durationSeconds, artifact_path: voicePath, timeline_path: timelinePath, invalidated };
+    return generateVoice({ repository, config, channelId: params.channelId, episodeId: params.episodeId });
   });
   server.post("/api/channels/:channelId/episodes/:episodeId/quiz-v2/timeline/compile", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };
-    const [quiz, directorPlan, voicePlan] = await Promise.all([repository.readQuiz(params.channelId, params.episodeId), repository.readDirectorPlan(params.channelId, params.episodeId), repository.readVoicePlan(params.channelId, params.episodeId)]);
-    if (!quiz) throw new RepositoryError("Generate the Quiz facts before compiling the timeline", "QUIZ_REQUIRED");
-    if (!directorPlan) throw new RepositoryError("Generate the Director plan before compiling the timeline", "DIRECTOR_REQUIRED");
-    if (!voicePlan) throw new RepositoryError("Generate the voice plan before compiling the timeline", "VOICE_PLAN_REQUIRED");
-    assertDirectorPlanValid(quiz, directorPlan);
-    const audioDurations: Record<string, number> = {};
-    for (const segment of voicePlan.segments) if (segment.duration_seconds !== null) audioDurations[segment.segment_id] = segment.duration_seconds;
-    const timeline = compileQuizTimeline({ quiz, director: directorPlan, voicePlan, audioDurations });
-    const artifactPath = await repository.writeQuizTimeline(params.channelId, params.episodeId, timeline);
-    const invalidated = invalidateQuizArtifacts("timeline");
-    await repository.invalidateQuizArtifacts(params.channelId, params.episodeId, invalidated);
-    return { timeline, artifact_path: artifactPath, invalidated };
+    return compileTimeline({ repository, config, channelId: params.channelId, episodeId: params.episodeId });
   });
   server.post("/api/channels/:channelId/episodes/:episodeId/quiz-v2/qa", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };
-    const [quiz, directorPlan, assetPlan, assetResolution, voicePlan, timeline] = await Promise.all([
-      repository.readQuiz(params.channelId, params.episodeId),
-      repository.readDirectorPlan(params.channelId, params.episodeId),
-      repository.readAssetPlan(params.channelId, params.episodeId),
-      repository.readQuizAssetResolution(params.channelId, params.episodeId),
-      repository.readVoicePlan(params.channelId, params.episodeId),
-      repository.readQuizTimeline(params.channelId, params.episodeId),
-    ]);
-    if (!quiz) throw new RepositoryError("Generate the Quiz facts before running QA", "QUIZ_REQUIRED");
-    const assessment = assessQuiz({ quiz, director: directorPlan, assetPlan, resolvedAssets: assetResolution?.assets ?? [], voicePlan, timeline, measuredAudio: voicePlan ? voicePlan.segments.every((segment) => segment.duration_seconds !== null) : false });
-    const artifactPath = await repository.writeQuizAssessment(params.channelId, params.episodeId, assessment);
-    return { assessment, artifact_path: artifactPath };
+    return runQa({ repository, config, channelId: params.channelId, episodeId: params.episodeId });
+  });
+  server.post("/api/channels/:channelId/episodes/:episodeId/quiz-v2/render", async (request, reply) => {
+    const params = request.params as { channelId: string; episodeId: string };
+    const channel = await repository.getChannel(params.channelId);
+    if (channel.engine !== "quiz") throw new RepositoryError("Quiz V2 rendering is only available for Quiz channels", "QUIZ_CHANNEL_REQUIRED");
+    await assertQuizRenderReady({ repository, config, channelId: params.channelId, episodeId: params.episodeId });
+    const task = tasks.submit("GENERATE_VIDEO", params.channelId, params.episodeId);
+    return reply.code(202).send({ task });
   });
   server.get("/api/channels/:channelId/episodes/:episodeId/visual-bible/images", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };
@@ -531,6 +456,8 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
   });
   server.post("/api/channels/:channelId/episodes/:episodeId/narration/assemble", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };
+    const channel = await repository.getChannel(params.channelId);
+    if (channel.engine === "quiz") throw new RepositoryError("Quiz channels use Quiz V2 voice generation", "QUIZ_V2_REQUIRED");
     const [episode, script] = await Promise.all([
       repository.getEpisode(params.channelId, params.episodeId),
       repository.getEpisodeFile(params.channelId, params.episodeId, "script.md"),

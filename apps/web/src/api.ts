@@ -2,7 +2,7 @@ import type { AppConfig, Channel, CodexSettingsInput, CodexSettingsResponse, Dir
 
 export type BundleImage = { bundle_id: string; bundle_number: number; variant: number; filename: string; path: string; size: number; modified_at: string };
 export type QuizV2Stages = Record<"research" | "questions" | "director" | "assets" | "voice" | "timeline" | "qa" | "render", "not_started" | "ready" | "stale" | "running" | "failed">;
-export type QuizV2State = { quiz: QuizV2 | null; director_plan: DirectorPlan | null; asset_plan: QuizAssetPlan | null; voice_plan: VoicePlan | null; timeline: QuizTimeline | null; assessment: QuizAssessment | null; stages: QuizV2Stages };
+export type QuizV2State = { quiz: QuizV2 | null; director_plan: DirectorPlan | null; asset_plan: QuizAssetPlan | null; asset_resolution?: { assets: Array<{ asset_id: string; path: string; source: string }> } | null; voice_plan: VoicePlan | null; timeline: QuizTimeline | null; assessment: QuizAssessment | null; stages: QuizV2Stages };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
@@ -45,6 +45,7 @@ export const api = {
   synthesizeQuizVoice: (channelId: string, episodeId: string) => request<{ voice_plan: VoicePlan; timeline: QuizTimeline; narration_asset_path: string; narration_duration_seconds: number; artifact_path: string; timeline_path: string; invalidated: string[] }>(`/api/channels/${channelId}/episodes/${episodeId}/quiz-v2/voice/generate`, { method: "POST", body: "{}" }),
   compileQuizTimeline: (channelId: string, episodeId: string) => request<{ timeline: QuizTimeline; artifact_path: string; invalidated: string[] }>(`/api/channels/${channelId}/episodes/${episodeId}/quiz-v2/timeline/compile`, { method: "POST", body: "{}" }),
   assessQuiz: (channelId: string, episodeId: string) => request<{ assessment: QuizAssessment; artifact_path: string }>(`/api/channels/${channelId}/episodes/${episodeId}/quiz-v2/qa`, { method: "POST", body: "{}" }),
+  renderQuizVideo: (channelId: string, episodeId: string) => request<{ task: Task }>(`/api/channels/${channelId}/episodes/${episodeId}/quiz-v2/render`, { method: "POST", body: "{}" }),
   bundleImages: (channelId: string, episodeId: string) => request<{ images: BundleImage[] }>(`/api/channels/${channelId}/episodes/${episodeId}/visual-bible/images`),
   generateBundleImage: (channelId: string, episodeId: string, bundleNumber: number) => request<{ task: Task }>(`/api/channels/${channelId}/episodes/${episodeId}/visual-bible/bundles/${bundleNumber}/image`, { method: "POST", body: "{}" }),
   generateAllBundleImages: (channelId: string, episodeId: string, force = false) => request<{ tasks: Task[]; bundle_count: number }>(`/api/channels/${channelId}/episodes/${episodeId}/visual-bible/images/generate-all`, { method: "POST", body: JSON.stringify({ force }) }),
