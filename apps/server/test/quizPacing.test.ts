@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { QuizV2Schema } from "@studio/shared";
-import { buildQuizVoicePlan } from "../src/quiz/audio/voicePlan.js";
-import { quizVoiceFingerprint, quizVoiceTempo } from "../src/quiz/audio/voiceSynthesis.js";
+import { buildQuizVoicePlan, splitChoicePhrases } from "../src/quiz/audio/voicePlan.js";
+import { MIN_QUIZ_VOICE_SLOWDOWN_TEMPO, quizVoiceFingerprint, quizVoicePaceCorrectionTempo, quizVoiceTempo, voicePerformanceConfig } from "../src/quiz/audio/voiceSynthesis.js";
 import { quizVoicePacingLimit, quizVoicePlanNeedsRegeneration, quizVoiceTargetWordsPerSecond, quizVoiceWordsPerSecond } from "../src/quiz/audio/voicePolicy.js";
+import { DEFAULT_CONFIG } from "../src/config.js";
 import { createDefaultDirectorPlan } from "../src/quiz/director/parseDirectorPlan.js";
 import { assessQuiz } from "../src/quiz/qa/quizAssessment.js";
 import { compileQuizTimeline } from "../src/quiz/timeline/compileTimeline.js";
@@ -62,6 +63,26 @@ describe("Quiz V2 pacing", () => {
     expect(quizVoiceTempo("explanation")).toBeGreaterThanOrEqual(1);
     expect(quizVoiceTempo("explanation")).toBeLessThan(quizVoiceTempo("question"));
     expect(quizVoiceTempo("countdown")).toBe(1);
+  });
+
+  it("keeps short choice lists in one prosodic TTS phrase and calms reveals", () => {
+    const voice = buildQuizVoicePlan(quiz);
+    const choice = voice.segments.find((segment) => segment.role === "choice");
+    expect(choice?.phrases).toHaveLength(1);
+    expect(choice?.phrases[0]?.text).toContain("Tiger, Dolphin, or Rabbit?");
+    expect(splitChoicePhrases("Elephant, Giraffe, or Tiger?")).toEqual(["Elephant, Giraffe, or Tiger?"]);
+    expect(splitChoicePhrases("Choose the best answer, then explain why it fits.")).toEqual(["Choose the best answer,", "then explain why it fits."]);
+    expect(voice.segments.find((segment) => segment.role === "reveal")?.text).toBe("Tiger!");
+    expect(voicePerformanceConfig(DEFAULT_CONFIG.audio_generation, "reveal").exaggeration).toBe(.66);
+  });
+
+  it("never slows a voice segment below the audible correction floor", () => {
+    const pacingLimit = quizVoicePacingLimit(quizVoiceTargetWordsPerSecond(quiz.age_band));
+    expect(quizVoicePaceCorrectionTempo(pacingLimit, pacingLimit)).toBe(1);
+    for (const actual of [pacingLimit + .1, 3, 10, 100, Number.POSITIVE_INFINITY]) {
+      expect(quizVoicePaceCorrectionTempo(actual, pacingLimit)).toBeGreaterThanOrEqual(MIN_QUIZ_VOICE_SLOWDOWN_TEMPO);
+    }
+    expect(quizVoicePaceCorrectionTempo(100, pacingLimit)).toBe(MIN_QUIZ_VOICE_SLOWDOWN_TEMPO);
   });
 
   it("flags measured speech that is too fast for the selected age band", () => {

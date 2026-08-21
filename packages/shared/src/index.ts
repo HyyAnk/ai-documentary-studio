@@ -282,7 +282,7 @@ export const AssetConsistencyGroupSchema = z.object({
   saturation: z.string().min(1).max(120),
   edge_treatment: z.string().min(1).max(120),
   detail_level: z.string().min(1).max(120).default("medium, simplified child-friendly detail"),
-  face_policy: z.enum(["none", "all", "natural_only"]).default("none"),
+  face_policy: z.enum(["none", "all", "natural_only"]).default("natural_only"),
   asset_ids: z.string().min(1).array().min(2),
 });
 export type AssetConsistencyGroup = z.infer<typeof AssetConsistencyGroupSchema>;

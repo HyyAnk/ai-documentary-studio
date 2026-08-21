@@ -40,6 +40,8 @@ describe("Candy Arcade visual regression contract", () => {
   it("keeps the timer marker circular and synchronized without nesting it under the scaled fill", () => {
     const html = renderHtml();
     const markerCss = html.match(/\.timer-marker \{([^}]+)\}/)?.[1] ?? "";
+    const thinkingBarCss = html.match(/\n ?\.thinking-bar \{([^}]+)\}/)?.[1] ?? "";
+    const timerProgressCss = html.match(/\.timer-progress \{([^}]+)\}/)?.[1] ?? "";
     const width = Number(markerCss.match(/width: ([\d.]+)px/)?.[1]);
     const height = Number(markerCss.match(/height: ([\d.]+)px/)?.[1]);
     expect(width / height).toBeGreaterThanOrEqual(.92);
@@ -47,6 +49,8 @@ describe("Candy Arcade visual regression contract", () => {
     expect(html).toContain('<div class="timer-progress"></div><span class="timer-marker">?</span>');
     expect(html).not.toContain('<div class="timer-progress"><span class="timer-marker">?</span></div>');
     expect(html).toContain("@keyframes quiz-timer-marker-slide { from { left: 100%; } to { left: 0%; } }");
+    expect(thinkingBarCss).toContain("animation: phase-hold var(--timer-duration) steps(1,end) var(--clip-start) both");
+    expect(timerProgressCss).toContain("animation: quiz-timer-drain var(--timer-duration) linear var(--clip-start) both");
 
     for (const progress of [0, .25, .5, .75, 1]) {
       const fillEdge = 1 - progress;
@@ -83,5 +87,31 @@ describe("Candy Arcade visual regression contract", () => {
     expect(html).toContain("hero-ken-burn");
     expect(html).not.toContain(".option-image img { animation");
     expect(html).toContain("scale(1.12)");
+  });
+
+  it("keeps the progress bar fixed, colorful, caption-free, and edge-safe", () => {
+    const html = renderHtml();
+    const raysCss = html.match(/\.bg-rays \{([^}]+)\}/)?.[1] ?? "";
+    const phaseCss = html.match(/\.phase-region \{([^}]+)\}/)?.[1] ?? "";
+    expect(raysCss).toContain("inset: -30%");
+    expect(raysCss).not.toContain("width:");
+    expect(raysCss).not.toContain("height:");
+    expect(html).toContain("@keyframes ray-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }");
+    expect(html).not.toContain("translate(-50%,-50%) rotate(360deg)");
+    expect(phaseCss).toContain("position: absolute");
+    expect(phaseCss).toContain("bottom: 54px");
+    expect(html).not.toContain("grid-area: phase");
+    expect(html).not.toContain("Think it through!");
+    expect(html).not.toContain("Lock in your answer!");
+    expect(html).not.toContain("timer-caption");
+  });
+
+  it("stagger-floats answer images and composes visual reveal motion", () => {
+    const html = renderHtml();
+    expect(html).toMatch(/\.option-image \{[^}]*animation: answer-float/);
+    expect(html).toMatch(/\.answer-card img \{[^}]*animation: answer-float/);
+    expect(html).toContain("--item-phase:");
+    expect(html).toContain("answer-float var(--scene-duration)");
+    expect(html).toContain("visual-correct-border");
   });
 });

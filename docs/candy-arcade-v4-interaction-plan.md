@@ -23,3 +23,7 @@ The existing artifact invalidation chain remains authoritative: asset changes in
 ## Desktop and mobile behavior
 
 The production composition remains a fixed 1920×1080 canvas for HyperFrames. Media-left uses a large split stage at render resolution; media-top uses a wide hero with a shorter thinking-phase height so the answer grid and Thinking Bar stay inside the frame. Reduced-motion users receive the same states and copy with animation collapsed to an instant acknowledgement. No quiz content or canonical answer mapping changes between layout variants.
+
+## Locked Thinking Bar invariant
+
+The Thinking/Progress Bar is present in 100% of question clips, at one fixed pixel position relative to the 1920×1080 frame, identical across every layout and every question. It becomes visible at the same instant as the question and drains continuously until the reveal. This is a locked invariant of the Candy Arcade template.

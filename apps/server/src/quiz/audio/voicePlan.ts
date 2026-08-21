@@ -26,7 +26,7 @@ function withPhrases(segment: Omit<VoicePlan["segments"][number], "phrases">): V
 
 export function performancePhrases(text: string, role: VoiceSegmentRole): VoicePhrase[] {
   const normalized = text.trim().replace(/\s+/g, " ");
-  const chunks = role === "question" ? splitQuestionPhrases(normalized) : splitPunctuationPhrases(normalized);
+  const chunks = role === "question" ? splitQuestionPhrases(normalized) : role === "choice" ? splitChoicePhrases(normalized) : splitPunctuationPhrases(normalized);
   return chunks.map((phrase, index) => ({
     text: phrase,
     delivery: role === "reveal" ? "emphasis" : role === "fun_fact" || role === "explanation" ? "warm" : role === "outro" || role === "intro" ? "playful" : role === "question" && index === chunks.length - 1 ? "question_end" : index === 1 ? "emphasis" : "normal",
@@ -42,6 +42,25 @@ function splitQuestionPhrases(text: string): string[] {
   const preferred = words.findIndex((word, index) => index >= 2 && index <= words.length - 3 && /^(is|are|can|does|do|has|have|will|was|were)$/i.test(word.replace(/^[^A-Za-z]+/, "")));
   const splitAt = preferred > 0 ? preferred : Math.round(words.length / 2);
   return [words.slice(0, splitAt).join(" "), words.slice(splitAt).join(" ")];
+}
+
+export function splitChoicePhrases(text: string): string[] {
+  const commaParts = text.split(/(?<=,)\s+/).map((part) => part.trim()).filter(Boolean);
+  if (commaParts.length <= 1) return splitPunctuationPhrases(text);
+
+  const phrases: string[] = [];
+  let current: string[] = [];
+  for (const [index, part] of commaParts.entries()) {
+    current.push(part);
+    const wordsBeforeBoundary = current.join(" ").split(/\s+/).filter(Boolean).length;
+    const wordsAfterBoundary = commaParts.slice(index + 1).join(" ").split(/\s+/).filter(Boolean).length;
+    if (wordsAfterBoundary >= 3 && wordsBeforeBoundary >= 3) {
+      phrases.push(current.join(" "));
+      current = [];
+    }
+  }
+  if (current.length) phrases.push(current.join(" "));
+  return phrases.length > 1 ? phrases : [text];
 }
 
 function splitPunctuationPhrases(text: string): string[] {

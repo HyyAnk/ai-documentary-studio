@@ -39,6 +39,7 @@ import { inspectRenderedVideo } from "./quiz/qa/postRenderQa.js";
 import { isQuizAssetResolutionComplete, resolveQuizAssets } from "./quiz/assets/resolveQuizAssets.js";
 import { compileTimeline, generateDirector, generateQuiz, generateVoice, planAssets, readQuizArtifacts, resolveAssets, runQa } from "./quiz/pipeline/orchestrator.js";
 import { quizVoicePlanNeedsRegeneration } from "./quiz/audio/voicePolicy.js";
+import type { QuizVoicePacingClamp } from "./quiz/audio/voiceSynthesis.js";
 import { canonicalizeVisibleQuizAnswer, resolveVisibleQuizChoice, stripQuizChoiceLabel } from "./quiz/domain/quiz.js";
 
 export { buildQuizComposition };
@@ -667,6 +668,9 @@ export class TaskManager extends EventEmitter {
       },
       onVoiceProgress: async ({ completed, total, reused }: { completed: number; total: number; reused: boolean }) => {
         await this.update(task.task_id, { progress_message: `Quiz · ${reused ? "reusing" : "generating"} voice ${completed}/${total}`, progress_percent: 83 + Math.round((completed / Math.max(1, total)) * 3) });
+      },
+      onVoicePacingClamp: (details: QuizVoicePacingClamp) => {
+        this.logger.warn(`Quiz voice pacing clamp hit ${JSON.stringify(details)}`, { profileId: task.channel_id, workerId: task.task_id, step: "voice_pacing_clamp" });
       },
     };
     let artifacts = await readQuizArtifacts(input);
