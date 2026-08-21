@@ -14,6 +14,7 @@ import { planQuizAssets } from "../assets/assetPlanner.js";
 import { resolveQuizAssets } from "../assets/resolveQuizAssets.js";
 import { buildQuizVoicePlan } from "../audio/voicePlan.js";
 import { assembleQuizNarration, synthesizeQuizVoiceSegments } from "../audio/voiceSynthesis.js";
+import { quizVoiceTargetWordsPerSecond } from "../audio/voicePolicy.js";
 import { createDefaultDirectorPlan } from "../director/parseDirectorPlan.js";
 import { assertDirectorPlanValid } from "../director/validateDirectorPlan.js";
 import { deriveQuizV2FromScenes } from "../domain/quiz.js";
@@ -120,7 +121,7 @@ export async function generateVoice(input: QuizOrchestratorInput): Promise<{ voi
   const invalidatedStages = invalidateQuizArtifacts("voice");
   const invalidated = await input.repository.invalidateQuizArtifacts(input.channelId, input.episodeId, invalidatedStages);
   const plannedVoice = buildQuizVoicePlan(quiz);
-  const measured = await synthesizeQuizVoiceSegments({ repository: input.repository, config: input.config.audio_generation, channelId: input.channelId, episodeId: input.episodeId, voicePlan: plannedVoice, onProgress: input.onVoiceProgress });
+  const measured = await synthesizeQuizVoiceSegments({ repository: input.repository, config: input.config.audio_generation, channelId: input.channelId, episodeId: input.episodeId, voicePlan: plannedVoice, targetWordsPerSecond: quizVoiceTargetWordsPerSecond(quiz.age_band), onProgress: input.onVoiceProgress });
   const audioDurations = Object.fromEntries(measured.voicePlan.segments.flatMap((segment) => segment.duration_seconds === null ? [] : [[segment.segment_id, segment.duration_seconds]]));
   const timeline = compileQuizTimeline({ quiz, director: director_plan, voicePlan: measured.voicePlan, audioDurations });
   const narration = await assembleQuizNarration({ repository: input.repository, channelId: input.channelId, episodeId: input.episodeId, voicePlan: measured.voicePlan, timeline, segmentPaths: measured.segmentPaths });

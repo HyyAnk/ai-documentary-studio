@@ -7,7 +7,7 @@ import { QuizAssessmentSchema, QuizAssetPlanSchema, QuizAssetResolutionSchema } 
 import { ContextEngine } from "../src/context.js";
 import { StudioLogger } from "../src/logger.js";
 import { RepositoryService } from "../src/repository.js";
-import { TaskManager, isSequenceOutputFailure, parseBeatsOutput, planSequenceResume } from "../src/tasks.js";
+import { TaskManager, isSequenceOutputFailure, normalizeQuizBeatMetadata, parseBeatsOutput, planSequenceResume } from "../src/tasks.js";
 import type { AudioProvider } from "../src/providers/index.js";
 import { buildQuizVoicePlan } from "../src/quiz/audio/voicePlan.js";
 import { createDefaultDirectorPlan } from "../src/quiz/director/parseDirectorPlan.js";
@@ -20,6 +20,29 @@ describe("sequence retry planning", () => {
   it("classifies malformed shot-plan JSON as retryable", () => {
     expect(() => parseBeatsOutput('[{"dialogue":"Opening",}]')).toThrow("Shot-plan JSON output malformed");
     expect(isSequenceOutputFailure("Shot-plan JSON output malformed: Expected double-quoted property name")).toBe(true);
+  });
+
+  it("canonicalizes quiz answer labels and prefixes to the visible choice text", () => {
+    const beats = parseBeatsOutput(JSON.stringify([{
+      dialogue: "The answer is ready.",
+      visual_prompt: "CAMERA\nCard\nACTION\nChoices appear\nLIGHTING\nSoft\nATMOSPHERE\nBright\nCONTINUITY\nQuiz palette",
+      quiz: { phase: "question", question_number: 1, question: "Which lever?", choices: ["A. Lever", "B. Inclined plane", "C. Pulley"], answer: "The correct answer is B — Inclined plane", explanation: "It changes force direction." },
+    }]));
+
+    expect(beats[0]!.quiz?.choices).toEqual(["Lever", "Inclined plane", "Pulley"]);
+    expect(beats[0]!.quiz?.answer).toBe("Inclined plane");
+  });
+
+  it("repairs repeated quiz beats that omit or corrupt redundant answer metadata", () => {
+    const beats = parseBeatsOutput(JSON.stringify([
+      { dialogue: "Question.", visual_prompt: "CAMERA\nA\nACTION\nB\nLIGHTING\nC\nATMOSPHERE\nD\nCONTINUITY\nE", quiz: { phase: "question", question_number: 1, question: "Which lever?", choices: ["Lever", "Inclined plane", "Pulley"], answer: "Inclined plane", explanation: "It changes force direction." } },
+      { dialogue: "Reveal.", visual_prompt: "CAMERA\nA2\nACTION\nB2\nLIGHTING\nC2\nATMOSPHERE\nD2\nCONTINUITY\nE2", quiz: { phase: "reveal", question_number: 1, question: "Which lever?", choices: ["Wrong choice", "Another choice"], answer: "Option C", explanation: "" } },
+    ]));
+
+    const normalized = normalizeQuizBeatMetadata(beats);
+    expect(normalized[1]!.quiz?.choices).toEqual(["Lever", "Inclined plane", "Pulley"]);
+    expect(normalized[1]!.quiz?.answer).toBe("Inclined plane");
+    expect(normalized[1]!.quiz?.explanation).toBe("It changes force direction.");
   });
 
   it("reuses fresh sequence drafts and queues only missing sequences", () => {

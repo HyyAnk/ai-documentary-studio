@@ -7,9 +7,10 @@ import { VoicePlanSchema, type AppConfig, type QuizTimeline, type VoiceSegment, 
 import type { RepositoryService } from "../../repository.js";
 import { synthesizeWav } from "../../providers/chatterbox.js";
 import { audioDiagnosticsForTimeline, type VoiceAudioDiagnostics } from "./audioDiagnostics.js";
+import { countQuizVoiceWords, quizVoicePacingLimit } from "./voicePolicy.js";
 
 const execFileAsync = promisify(execFile);
-const QUIZ_VOICE_PACING_VERSION = "paced-v10-natural-speed-performance";
+export const QUIZ_VOICE_PACING_VERSION = "paced-v11-age-targeted-performance";
 
 export type MeasuredQuizVoice = {
   voicePlan: VoicePlan;
@@ -22,6 +23,7 @@ export async function synthesizeQuizVoiceSegments(input: {
   channelId: string;
   episodeId: string;
   voicePlan: VoicePlan;
+  targetWordsPerSecond: number;
   onProgress?: (progress: { completed: number; total: number; reused: boolean }) => Promise<void> | void;
 }): Promise<MeasuredQuizVoice> {
   const channel = await input.repository.getChannel(input.channelId);
@@ -31,11 +33,12 @@ export async function synthesizeQuizVoiceSegments(input: {
   const segments: VoicePlan["segments"] = [];
   const pacingDirectory = input.repository.resolvePath("runtime", "quiz-voice", input.episodeId);
   await mkdir(pacingDirectory, { recursive: true });
+  const pacingLimit = quizVoicePacingLimit(input.targetWordsPerSecond);
   for (const [index, segment] of input.voicePlan.segments.entries()) {
     const tempo = quizVoiceTempo(segment.role);
-    const fingerprint = quizVoiceFingerprint(segment, tempo, voice, input.config);
+    const fingerprint = quizVoiceFingerprint(segment, tempo, voice, input.config, input.targetWordsPerSecond);
     const key = fingerprint;
-    const pacingVersion = `${segment.role === "outro" ? "paced-v10-outro" : "paced-v10"}-${fingerprint.slice(0, 20)}`;
+    const pacingVersion = `${segment.role === "outro" ? "paced-v11-outro" : "paced-v11"}-${fingerprint.slice(0, 20)}`;
     let rendered = cache.get(key);
     let reused = Boolean(rendered);
     if (!rendered) {
@@ -44,7 +47,7 @@ export async function synthesizeQuizVoiceSegments(input: {
         try {
           const audio = new Uint8Array(await readFile(existing.absolutePath));
           const duration = wavDurationSeconds(audio);
-          if (duration > 0.05) {
+          if (duration > 0.05 && segmentPace(segment, duration) <= pacingLimit) {
             rendered = { duration, absolutePath: existing.absolutePath };
             reused = true;
           }
@@ -53,9 +56,11 @@ export async function synthesizeQuizVoiceSegments(input: {
         }
       }
       if (!rendered) {
-        const audio = await renderPerformanceSegment(input.config, segment, voice, pacingDirectory, index + 1);
+        const sourceAudio = await renderPerformanceSegment(input.config, segment, voice, pacingDirectory, index + 1);
+        const audio = await enforceQuizVoicePace(sourceAudio, segment, pacingLimit, pacingDirectory, index + 1);
+        const duration = wavDurationSeconds(audio);
         const assetPath = await input.repository.writeQuizVoiceSegmentAudio(input.channelId, input.episodeId, index + 1, audio, pacingVersion);
-        rendered = { duration: wavDurationSeconds(audio), absolutePath: input.repository.resolveContextPath(assetPath) };
+        rendered = { duration, absolutePath: input.repository.resolveContextPath(assetPath) };
       }
       cache.set(key, rendered);
     }
@@ -75,7 +80,7 @@ export function quizVoiceTempo(role: VoicePlan["segments"][number]["role"]): num
   return 1;
 }
 
-export function quizVoiceFingerprint(segment: VoiceSegment, tempo: number, voice: string, config: AppConfig["audio_generation"]): string {
+export function quizVoiceFingerprint(segment: VoiceSegment, tempo: number, voice: string, config: AppConfig["audio_generation"], targetWordsPerSecond = 0): string {
   const performance = voicePerformanceConfig(config, segment.role);
   return createHash("sha256").update(JSON.stringify({
     version: QUIZ_VOICE_PACING_VERSION,
@@ -85,6 +90,7 @@ export function quizVoiceFingerprint(segment: VoiceSegment, tempo: number, voice
     text: segment.text.trim().replace(/\s+/g, " "),
     phrases: segment.phrases,
     tempo,
+    targetWordsPerSecond,
     voice,
     provider: config.provider,
     service_url: config.service_url,
@@ -172,13 +178,40 @@ async function paceQuizVoiceAudio(audio: Uint8Array, tempo: number, directory: s
   const outputPath = path.join(directory, `${base}-paced.wav`);
   try {
     await writeFile(inputPath, audio);
-    const filters = [`atempo=${tempo}`];
+    const filters = atempoFilters(tempo);
     if (gainDb !== 0) filters.push(`volume=${Math.pow(10, gainDb / 20).toFixed(4)}`);
     await execFileAsync("ffmpeg", ["-y", "-i", inputPath, "-filter:a", filters.join(","), "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", outputPath], { timeout: 2 * 60_000, windowsHide: true });
     return new Uint8Array(await readFile(outputPath));
   } finally {
     await Promise.all([rm(inputPath, { force: true }), rm(outputPath, { force: true })]);
   }
+}
+
+function segmentPace(segment: VoiceSegment, duration: number): number {
+  if (segment.role === "countdown") return 0;
+  return countQuizVoiceWords(segment.text) / Math.max(0.1, duration);
+}
+
+async function enforceQuizVoicePace(audio: Uint8Array, segment: VoiceSegment, pacingLimit: number, directory: string, segmentNumber: number): Promise<Uint8Array> {
+  const actual = segmentPace(segment, wavDurationSeconds(audio));
+  if (actual <= pacingLimit) return audio;
+  return paceQuizVoiceAudio(audio, pacingLimit / actual, directory, segmentNumber * 1000 + 7);
+}
+
+function atempoFilters(tempo: number): string[] {
+  if (!Number.isFinite(tempo) || tempo <= 0) throw new Error("Quiz voice tempo must be positive");
+  const filters: string[] = [];
+  let remaining = tempo;
+  while (remaining < 0.5) {
+    filters.push("atempo=0.5");
+    remaining /= 0.5;
+  }
+  while (remaining > 2) {
+    filters.push("atempo=2");
+    remaining /= 2;
+  }
+  if (Math.abs(remaining - 1) > 0.0001) filters.push(`atempo=${remaining.toFixed(6)}`);
+  return filters;
 }
 
 export async function assembleQuizNarration(input: {
@@ -240,5 +273,5 @@ export function wavDurationSeconds(buffer: Uint8Array): number {
 }
 
 function wordCount(value: string): number {
-  return value.trim().split(/\s+/).filter(Boolean).length;
+  return countQuizVoiceWords(value);
 }

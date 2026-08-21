@@ -112,4 +112,33 @@ describe("ContextEngine", () => {
     expect(context.included_files.some((file) => file.path === target.absolutePath)).toBe(true);
     expect(context.prompt).toContain(target.absolutePath);
   });
+
+  it("keeps sequence shot generation recoverable when a legacy visual bible is missing a later bundle", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "documentary-sequence-context-recovery-"));
+    roots.push(root);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await mkdir(path.join(root, "shared"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
+    const repository = new RepositoryService(root);
+    const channel = await repository.createChannel({ name: "Sequence Recovery", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });
+    const topic = { topic_id: "sequence_recovery_topic", channel_id: channel.channel_id, title: "Sequence Recovery Topic", premise: "A test premise", why_it_fits: "A test fit", hook: "A test hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false };
+    await repository.saveTopicRun(channel.channel_id, [topic, ...Array.from({ length: 4 }, (_, index) => ({ ...topic, topic_id: `sequence_recovery_topic_${index + 2}`, title: `Other Recovery Topic ${index + 2}` }))]);
+    const episode = await repository.confirmTopic(channel.channel_id, topic.topic_id);
+    const sequenceHeadings = Array.from({ length: 6 }, (_, index) => `## Sequence ${index + 1} — Part ${index + 1}\n\nSequence ${index + 1} narration.`).join("\n\n");
+    const scriptHeadings = Array.from({ length: 6 }, (_, index) => `## Sequence ${index + 1} — Part ${index + 1}\n\nSequence ${index + 1} narration.`).join("\n\n");
+    const bundleHeadings = Array.from({ length: 5 }, (_, index) => `## Continuity bundle CB-${String(index + 1).padStart(2, "0")} — Bundle ${index + 1}\n\n- Anchor-frame prompt: Bundle ${index + 1}.`).join("\n\n");
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "research.md", "# Research Dossier\n\nC01 verified");
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "treatment.md", `# Documentary Treatment\n\n${sequenceHeadings}`);
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "script.md", `# Sequence Recovery\n\n<!-- HUMOR_POLICY: v1 -->\n\n${scriptHeadings}`);
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "visual_bible.md", `# Episode Visual Bible\n\n${bundleHeadings}`);
+    const logger = new StudioLogger(root, true);
+    await logger.init();
+
+    const context = await new ContextEngine(repository, logger).build("GENERATE_SEQUENCE_SCENES", channel.channel_id, episode.episode_id, 6);
+
+    expect(context.prompt).toContain("visual bible fallback for requested section 6");
+    expect(context.prompt).toContain("CB-05");
+    expect(context.prompt).toContain('continuity_bundle_id \\"CB-06\\"');
+  });
 });

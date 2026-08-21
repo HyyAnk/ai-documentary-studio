@@ -48,6 +48,10 @@ describe("Quiz V2 domain and Director", () => {
     expect(resolveVisibleQuizChoice(["Lever", "Inclined plane", "Pulley"], "B — Inclined plane")).toBe(1);
     expect(resolveVisibleQuizChoice(["A. Lever", "B. Inclined plane", "C. Pulley"], "B — Inclined plane")).toBe(1);
     expect(resolveVisibleQuizChoice(["A. Lever", "B. Second-class lever", "C. Third-class lever"], "B — Second-class lever.")).toBe(1);
+    expect(resolveVisibleQuizChoice(["Lever", "Inclined plane", "Pulley"], "Option B")).toBe(1);
+    expect(resolveVisibleQuizChoice(["Lever", "Inclined plane", "Pulley"], "The correct answer is B — Inclined plane")).toBe(1);
+    expect(resolveVisibleQuizChoice(["Lever", "Inclined plane", "Pulley"], "2")).toBe(1);
+    expect(resolveVisibleQuizChoice(["Lever", "Inclined plane", "Pulley"], "Answer: Inclined plane")).toBe(1);
     expect(resolveVisibleQuizChoice(["Lever", "Inclined plane", "Pulley"], "B — Wedge")).toBeNull();
   });
 

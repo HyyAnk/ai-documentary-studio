@@ -2,6 +2,7 @@ import { nowIso, QuizAssessmentSchema, type DirectorPlan, type QuizAssessment, t
 import { validateDirectorPlan } from "../director/validateDirectorPlan.js";
 import { validateQuizTimeline } from "../timeline/validateTimeline.js";
 import { assessQuizVisualLayout } from "./visualQa.js";
+import { quizVoiceTargetWordsPerSecond, quizVoiceWordsPerSecond } from "../audio/voicePolicy.js";
 
 export type QuizAssessmentInput = {
   quiz: QuizV2;
@@ -54,11 +55,8 @@ export function assessQuiz(input: QuizAssessmentInput): QuizAssessment {
   }
   if (input.voicePlan && input.measuredAudio === false) add({ code: "voice_measurement_missing", severity: "blocker", message: "Voice segments exist but measured narration durations are missing.", next_action: "Synthesize narration through Chatterbox and persist measured WAV durations.", question_ids: [], stage: "voice" });
   if (input.voicePlan && input.measuredAudio && input.voicePlan.segments.every((segment) => segment.duration_seconds !== null)) {
-    const spoken = input.voicePlan.segments.filter((segment) => segment.role !== "countdown");
-    const spokenWords = spoken.reduce((total, segment) => total + countWords(segment.text), 0);
-    const spokenDuration = spoken.reduce((total, segment) => total + (segment.duration_seconds ?? 0), 0);
-    const wordsPerSecond = spokenWords / Math.max(0.1, spokenDuration);
-    const target = maximumChildSpeechRate(input.quiz.age_band);
+    const wordsPerSecond = quizVoiceWordsPerSecond(input.voicePlan);
+    const target = quizVoiceTargetWordsPerSecond(input.quiz.age_band);
     if (wordsPerSecond > target + 0.45) add({ code: "voice_pace_unsafe", severity: "blocker", message: `Measured narration is ${wordsPerSecond.toFixed(2)} words per second for ${input.quiz.age_band}.`, next_action: `Regenerate paced quiz voice at or below ${target.toFixed(2)} words per second before rendering.`, question_ids: [], stage: "voice" });
     else if (wordsPerSecond > target) add({ code: "voice_pace_fast", severity: "warning", message: `Measured narration is ${wordsPerSecond.toFixed(2)} words per second for ${input.quiz.age_band}.`, next_action: `Slow the question and explanation delivery to ${target.toFixed(2)} words per second or below.`, question_ids: [], stage: "voice" });
   }
@@ -102,10 +100,6 @@ export function assessQuiz(input: QuizAssessmentInput): QuizAssessment {
   const hasBlocker = issues.some((issue) => issue.severity === "blocker");
   const rating = !hasBlocker && score >= 85 && candyArcadeVisual.total >= 85 ? "production_ready" : score >= 70 ? "needs_review" : "not_ready";
   return QuizAssessmentSchema.parse({ schema_version: 2, episode_id: input.quiz.episode_id, assessed_at: nowIso(), score, rating, categories, candy_arcade_visual: candyArcadeVisual, issues });
-}
-
-function maximumChildSpeechRate(ageBand: QuizV2["age_band"]): number {
-  return { "4-6": 1.9, "7-9": 2.1, "10-12": 2.25, family: 2.2 }[ageBand];
 }
 
 function questionCycleRangeSeconds(ageBand: QuizV2["age_band"]): [number, number] {

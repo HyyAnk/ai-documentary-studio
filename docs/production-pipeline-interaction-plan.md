@@ -11,6 +11,14 @@
 7. Generate production narration by sequence, then use its measured duration to calibrate future shot packing.
 8. Review the production assessment and resolve blockers before export.
 
+## Shot-plan synchronization contract
+
+- Generate shots reads the numbered script sections, reconciles them with treatment sections and continuity bundles, then queues one task per canonical sequence ID.
+- A sequence task starts with an immediate queued/running state, loads its exact numbered upstream sections, writes an isolated draft, and only commits the complete ordered set after every sequence succeeds.
+- If an existing visual bible is missing a required bundle, the pipeline marks it stale and regenerates it with the missing IDs before shot tasks are queued. Legacy artifacts use the complete upstream document as a recoverable fallback, so a retry does not fail during context assembly.
+- Success persists all drafts and refreshes scenes, sequence progress, assessment, and bundle references through task events. Failure preserves completed drafts and keeps retry available; stale or out-of-order responses cannot overwrite a newer committed plan.
+- Desktop shows the batch progress rail and per-sequence task status; mobile keeps the same status text and primary retry action visible while secondary artifact details remain collapsible.
+
 ## State and recovery
 
 - Codex and audio operations are queued, acknowledged immediately, and scoped to one episode lock.

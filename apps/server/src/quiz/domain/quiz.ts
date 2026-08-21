@@ -19,7 +19,7 @@ export function normalizeQuizText(value: string): string {
 }
 
 export function stripQuizChoiceLabel(value: string): string {
-  return value.trim().replace(/^(?:choice\s*)?[a-z]\s*[-–—:.)]\s+/i, "").trim();
+  return value.trim().replace(/^(?:(?:choice|option)[\s_-]*)?(?:[a-z]|\d{1,2})\s*[-–—:.)]\s+/i, "").trim();
 }
 
 function normalizeQuizChoiceText(value: string): string {
@@ -34,19 +34,45 @@ function normalizeQuizChoiceText(value: string): string {
  */
 export function resolveVisibleQuizChoice(choices: string[], answer: string): number | null {
   const normalizedAnswer = normalizeQuizChoiceText(answer);
-  const exactMatches = choices
-    .map((choice, index) => ({ index, normalized: normalizeQuizChoiceText(choice) }))
-    .filter((choice) => choice.normalized === normalizedAnswer);
+  const normalizedChoices = choices.map((choice, index) => ({ index, normalized: normalizeQuizChoiceText(choice) }));
+  const exactMatches = normalizedChoices.filter((choice) => choice.normalized === normalizedAnswer);
   if (exactMatches.length === 1) return exactMatches[0].index;
   if (exactMatches.length > 1) return null;
 
-  const labeled = answer.trim().match(/^(?:choice\s*)?([a-z])(?:\s*(?:[-–—:.)]\s*(.*)|\s+(.+)))?$/i);
-  if (!labeled) return null;
-  const index = labeled[1].toLowerCase().charCodeAt(0) - 97;
-  const visibleChoice = choices[index];
-  if (!visibleChoice) return null;
-  const suffix = normalizeQuizText(labeled[2] ?? labeled[3] ?? "");
-  return !suffix || normalizeQuizChoiceText(suffix) === normalizeQuizChoiceText(visibleChoice) ? index : null;
+  const candidates = [answer.trim(), stripAnswerLead(answer)].filter(Boolean);
+  for (const candidate of candidates) {
+    const candidateNormalized = normalizeQuizChoiceText(candidate);
+    const candidateExactMatches = normalizedChoices.filter((choice) => choice.normalized === candidateNormalized);
+    if (candidateExactMatches.length === 1) return candidateExactMatches[0].index;
+    if (candidateExactMatches.length > 1) return null;
+
+    const labeled = candidate.match(/^(?:(?:choice|option)[\s_-]*)?([a-z]|\d{1,2})(?:\s*(?:[-–—:.)]\s*|\s+)(.*))?$/i);
+    if (!labeled) continue;
+    const token = labeled[1] ?? "";
+    const index = /^[a-z]$/i.test(token) ? token.toLowerCase().charCodeAt(0) - 97 : Number(token) - 1;
+    const visibleChoice = normalizedChoices[index];
+    if (!visibleChoice) continue;
+    const suffix = normalizeQuizChoiceText(labeled[2] ?? "");
+    if (!suffix || matchesVisibleChoiceText(suffix, visibleChoice.normalized)) return index;
+  }
+
+  return null;
+}
+
+export function canonicalizeVisibleQuizAnswer(choices: string[], answer: string): string | null {
+  const index = resolveVisibleQuizChoice(choices, answer);
+  return index === null ? null : stripQuizChoiceLabel(choices[index] ?? "");
+}
+
+function stripAnswerLead(value: string): string {
+  return value.trim().replace(/^(?:(?:the\s+)?(?:correct|right|canonical)\s+)?(?:answer|choice|option)\s*(?:is|:|=|-)?\s*/i, "").trim();
+}
+
+function matchesVisibleChoiceText(candidate: string, visibleChoice: string): boolean {
+  if (candidate === visibleChoice) return true;
+  if (!candidate.startsWith(`${visibleChoice} `)) return false;
+  const remainder = candidate.slice(visibleChoice.length).trim();
+  return /^(?:because|since|as|is|means|[([—–,:;])/i.test(remainder);
 }
 
 export function validateQuizV2(value: unknown): QuizV2 {

@@ -31,13 +31,15 @@ import { optimizeShortScenes, packBeatsIntoScenes, rebalanceEditorialOverlays, t
 import { calibratedScriptTargetWords, countWords, extractNarration, extractNarrationChunks, extractNarrationSections, hasHumorPolicyMarker, scriptWordBounds } from "./production.js";
 import { stripEditorialOverlayInstructions } from "./visualPrompt.js";
 import { parseContinuityBundles } from "./visualBundles.js";
+import { extractArtifactSectionNumbers, formatArtifactSectionNumbers, missingArtifactSectionNumbers, contiguousArtifactNumbers } from "./artifactSections.js";
 import { buildQuizComposition } from "./quiz/render/buildComposition.js";
 import { HyperframesRenderer } from "./quiz/render/hyperframesRenderer.js";
 import { preflightQuizRender } from "./quiz/qa/preflight.js";
 import { inspectRenderedVideo } from "./quiz/qa/postRenderQa.js";
 import { isQuizAssetResolutionComplete, resolveQuizAssets } from "./quiz/assets/resolveQuizAssets.js";
 import { compileTimeline, generateDirector, generateQuiz, generateVoice, planAssets, readQuizArtifacts, resolveAssets, runQa } from "./quiz/pipeline/orchestrator.js";
-import { resolveVisibleQuizChoice } from "./quiz/domain/quiz.js";
+import { quizVoicePlanNeedsRegeneration } from "./quiz/audio/voicePolicy.js";
+import { canonicalizeVisibleQuizAnswer, resolveVisibleQuizChoice, stripQuizChoiceLabel } from "./quiz/domain/quiz.js";
 
 export { buildQuizComposition };
 
@@ -311,7 +313,7 @@ export class TaskManager extends EventEmitter {
       await this.runShopAiKeyImageTask(task);
       return;
     }
-    const context = { profileId: task.channel_id, workerId: task.task_id, step: "run_task" };
+    const context = { profileId: task.channel_id, workerId: task.task_id, step: `run_task:${task.task_type}` };
     try {
       await this.update(task.task_id, { status: "RUNNING", started_at: nowIso(), queue_position: null, progress_message: "Preparing scoped context" });
       const manifest = await this.contextEngine.build(task.task_type, task.channel_id, task.episode_id, this.findSceneNumber(task.task_id), this.imageVariants.get(task.task_id) ?? 0);
@@ -326,7 +328,7 @@ export class TaskManager extends EventEmitter {
       this.logger.step("Codex turn started", context);
     } catch (error) {
       await this.finish(task.task_id, "FAILED", error instanceof Error ? error.message : "Task failed");
-      this.logger.error("Codex task failed", { ...context, step: "run_task" });
+      this.logger.error("Codex task failed", context);
     }
   }
 
@@ -602,7 +604,23 @@ export class TaskManager extends EventEmitter {
 
   private async hasReadyArtifact(channelId: string, episodeId: string, filename: string): Promise<boolean> {
     const file = await this.repository.getEpisodeFile(channelId, episodeId, filename);
-    return !isPlaceholderArtifact(file.content);
+    if (isPlaceholderArtifact(file.content)) return false;
+    if (filename !== "visual_bible.md") return true;
+    const channel = await this.repository.getChannel(channelId);
+    const treatment = await this.repository.getEpisodeFile(channelId, episodeId, "treatment.md");
+    const requiredBundles = channel.engine === "quiz"
+      ? extractArtifactSectionNumbers(treatment.content, "question").length > 0
+        ? Array.from({ length: (await this.repository.getEpisode(channelId, episodeId)).quiz_config.question_count }, (_, index) => index + 1)
+        : []
+      : extractArtifactSectionNumbers(treatment.content, "sequence");
+    if (requiredBundles.length === 0) return true;
+    try {
+      if (channel.engine === "quiz") validateQuizVisualBible(file.content, requiredBundles);
+      else validateVisualBible(file.content, requiredBundles);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private async generatePipelineBundleImages(task: Task, run: PipelineRun): Promise<void> {
@@ -673,7 +691,14 @@ export class TaskManager extends EventEmitter {
       await resolveAssets(input);
       artifacts = await readQuizArtifacts(input);
     }
-    if (!artifacts.voice_plan || !(await this.hasValidNarrationAsset(task.channel_id, task.episode_id!, episode.narration_asset_path)) || artifacts.voice_plan.segments.some((segment) => segment.duration_seconds === null)) {
+    const voicePaceNeedsRegeneration = artifacts.quiz
+      ? quizVoicePlanNeedsRegeneration({
+        voicePlan: artifacts.voice_plan,
+        ageBand: artifacts.quiz.age_band,
+        assessmentIssueCodes: artifacts.assessment?.issues.map((issue) => issue.code),
+      })
+      : false;
+    if (!artifacts.voice_plan || voicePaceNeedsRegeneration || !(await this.hasValidNarrationAsset(task.channel_id, task.episode_id!, episode.narration_asset_path)) || artifacts.voice_plan.segments.some((segment) => segment.duration_seconds === null)) {
       await this.update(task.task_id, { progress_message: "Quiz · generating per-question voice", progress_percent: 83 });
       await generateVoice(input);
       artifacts = await readQuizArtifacts(input);
@@ -700,7 +725,11 @@ export class TaskManager extends EventEmitter {
 
   private async hasReadyScript(channelId: string, episodeId: string): Promise<boolean> {
     const file = await this.repository.getEpisodeFile(channelId, episodeId, "script.md");
-    return !isPlaceholderArtifact(file.content) && hasHumorPolicyMarker(file.content);
+    if (isPlaceholderArtifact(file.content) || !hasHumorPolicyMarker(file.content)) return false;
+    const treatment = await this.repository.getEpisodeFile(channelId, episodeId, "treatment.md");
+    const expectedSequences = extractArtifactSectionNumbers(treatment.content, "sequence");
+    const actualSequences = extractArtifactSectionNumbers(file.content, "sequence");
+    return expectedSequences.length === 0 || actualSequences.length === 0 || missingArtifactSectionNumbers(file.content, expectedSequences, "sequence").length === 0;
   }
 
   private async hasValidNarrationAsset(channelId: string, episodeId: string, assetPath: string | null): Promise<boolean> {
@@ -925,7 +954,11 @@ export class TaskManager extends EventEmitter {
       } else if (task.task_type === "GENERATE_VISUAL_BIBLE") {
         const visualBible = extractMarkdown(output, "# Episode Visual Bible");
         const episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
-        if (isQuiz) validateQuizVisualBible(visualBible, episode.quiz_config.question_count); else validateVisualBible(visualBible);
+        const treatment = await this.repository.getEpisodeFile(task.channel_id, task.episode_id!, "treatment.md");
+        const requiredSections = isQuiz
+          ? Array.from({ length: episode.quiz_config.question_count }, (_, index) => index + 1)
+          : extractArtifactSectionNumbers(treatment.content, "sequence");
+        if (isQuiz) validateQuizVisualBible(visualBible, requiredSections); else validateVisualBible(visualBible, requiredSections);
         await this.repository.saveEpisodeFile(task.channel_id, task.episode_id!, "visual_bible.md", visualBible);
         await this.repository.updateEpisodeStage(task.channel_id, task.episode_id!, "VISUAL_BIBLE_READY");
         outputFiles = [(await this.repository.getEpisodeFile(task.channel_id, task.episode_id!, "visual_bible.md")).path];
@@ -948,7 +981,8 @@ export class TaskManager extends EventEmitter {
       } else if (task.task_type === "GENERATE_SEQUENCE_SCENES") {
         const sequenceNumber = this.findSceneNumber(task.task_id);
         if (!sequenceNumber) throw new Error("Sequence number is required");
-        const beats = parseBeatsOutput(output);
+        const parsedBeats = parseBeatsOutput(output);
+        const beats = isQuiz ? normalizeQuizBeatMetadata(parsedBeats) : parsedBeats;
         validateBeatOutput(beats, 1, isQuiz);
         const episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
         const script = await this.repository.getEpisodeFile(task.channel_id, task.episode_id!, "script.md");
@@ -972,7 +1006,8 @@ export class TaskManager extends EventEmitter {
           }
         }
       } else if (task.task_type === "GENERATE_SCENES") {
-        const beats = parseBeatsOutput(output);
+        const parsedBeats = parseBeatsOutput(output);
+        const beats = isQuiz ? normalizeQuizBeatMetadata(parsedBeats) : parsedBeats;
         validateBeatOutput(beats, 5, isQuiz);
         const episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
         const script = await this.repository.getEpisodeFile(task.channel_id, task.episode_id!, "script.md");
@@ -1082,9 +1117,15 @@ export class TaskManager extends EventEmitter {
     const channel = await this.repository.getChannel(active.task.channel_id);
     const episode = await this.repository.getEpisode(active.task.channel_id, active.task.episode_id!);
     const isQuiz = channel.engine === "quiz";
+    const treatment = await this.repository.getEpisodeFile(active.task.channel_id, active.task.episode_id!, "treatment.md");
+    const requiredBundleNumbers = isQuiz
+      ? Array.from({ length: episode.quiz_config.question_count }, (_, index) => index + 1)
+      : extractArtifactSectionNumbers(treatment.content, "sequence");
     const bundleRequirement = isQuiz
-      ? `Create exactly ${episode.quiz_config.question_count} continuity bundles formatted as \`## Continuity bundle CB-01 — Title\` through CB-${String(episode.quiz_config.question_count).padStart(2, "0")}.`
-      : "Include at least five stable bundles using exact second-level headings `## Continuity bundle CB-01 — Title`, `CB-02`, and so on.";
+      ? `Create continuity bundles for every question using the exact IDs ${requiredBundleNumbers.map((number) => `CB-${String(number).padStart(2, "0")}`).join(", ")}.`
+      : requiredBundleNumbers.length
+        ? `Create one continuity bundle for every treatment sequence using the exact IDs ${requiredBundleNumbers.map((number) => `CB-${String(number).padStart(2, "0")}`).join(", ")}.`
+        : "Include at least five stable bundles using exact second-level headings `## Continuity bundle CB-01 — Title`, `CB-02`, and so on.";
     const quizMotionRequirement = isQuiz
       ? "Include an explicit second-level section named exactly `## Safe motion` with labeled Allowed motion, Prohibited motion, and Reduced-motion fallback rules. The exact phrase `safe motion` must appear in the returned Markdown."
       : "";
@@ -1107,7 +1148,7 @@ export class TaskManager extends EventEmitter {
     const section = extractNarrationSections(script.content)[sequenceNumber - 1];
     const exactNarration = section?.text.trim() ?? "";
     const strictContract = isQuiz
-      ? `Preserve every quiz field and return only a JSON array. Copy every word from the exact narration below verbatim and in order into one or more dialogue fields. Split only at natural boundaries; never paraphrase, shorten, add, or omit words. The final narration coverage must be at least 97.5%. Every beat must use a non-empty continuity_bundle_id exactly "CB-${String(sequenceNumber).padStart(2, "0")}", a non-empty continuity_note, and a distinct visual_prompt with the exact uppercase sections CAMERA, ACTION, LIGHTING, ATMOSPHERE, and CONTINUITY. Every non-intro/outro beat must also include complete quiz question, choices, answer, and explanation data.`
+      ? `Preserve every quiz field and return only a JSON array. Copy every word from the exact narration below verbatim and in order into one or more dialogue fields. Split only at natural boundaries; never paraphrase, shorten, add, or omit words. The final narration coverage must be at least 97.5%. Every beat must use a non-empty continuity_bundle_id exactly "CB-${String(sequenceNumber).padStart(2, "0")}", a non-empty continuity_note, and a distinct visual_prompt with the exact uppercase sections CAMERA, ACTION, LIGHTING, ATMOSPHERE, and CONTINUITY. Every non-intro/outro beat must repeat the same question, visible choices, canonical answer, and explanation for this question. Set answer to the exact text of one visible choice; do not return a bare mismatched label, invented choice, or a different answer per beat. Every beat must include complete quiz question, choices, answer, and explanation data.`
       : "Return only a JSON array. Copy every word from the exact narration below verbatim and in order into one or more dialogue fields. Split only at natural boundaries; never paraphrase, shorten, add, or omit words. The final narration coverage must be at least 97.5%. Every beat must use a non-empty continuity_bundle_id, a non-empty continuity_note, and a distinct visual_prompt with the exact uppercase sections CAMERA, ACTION, LIGHTING, ATMOSPHERE, and CONTINUITY.";
     const narrationBlock = exactNarration ? `\n\nEXACT NARRATION TO COVER VERBATIM:\n<NARRATION>\n${exactNarration}\n</NARRATION>` : "";
     const previousThreadId = active.threadId;
@@ -1443,12 +1484,17 @@ function parseQuizSceneContent(value: unknown): Scene["quiz"] {
   const raw = value as Record<string, unknown>;
   const phases = ["intro", "question", "reveal", "explanation", "outro"] as const;
   const phaseValue = String(raw.phase ?? "question") as typeof phases[number];
+  const choices = Array.isArray(raw.choices)
+    ? raw.choices.map(String).map((item) => stripQuizChoiceLabel(item.trim())).filter(Boolean).slice(0, 4)
+    : [];
+  const rawAnswer = String(raw.answer ?? "").trim();
+  const canonicalAnswer = canonicalizeVisibleQuizAnswer(choices, rawAnswer);
   return {
     phase: phases.includes(phaseValue) ? phaseValue : "question",
     question_number: Number.isInteger(Number(raw.question_number)) && Number(raw.question_number) > 0 ? Number(raw.question_number) : null,
     question: String(raw.question ?? "").trim(),
-    choices: Array.isArray(raw.choices) ? raw.choices.map(String).map((item) => item.trim()).filter(Boolean).slice(0, 4) : [],
-    answer: String(raw.answer ?? "").trim(),
+    choices,
+    answer: canonicalAnswer ?? rawAnswer,
     explanation: String(raw.explanation ?? "").trim(),
     image_prompt: String(raw.image_prompt ?? "").trim(),
   };
@@ -1510,19 +1556,24 @@ export function validateQuizScript(markdown: string, questionCount: number): voi
   if (!/answer|correct/i.test(markdown) || !/guess|think/i.test(markdown)) throw new Error("Quiz script quality gate failed: guess and answer beats are required");
 }
 
-function validateQuizVisualBible(markdown: string, questionCount: number): void {
-  const bundles = new Set(markdown.match(/\bCB[-_ ]?\d{1,2}\b/gi) ?? []).size;
-  if (bundles < questionCount) throw new Error(`Quiz visual bible quality gate failed: found ${bundles} continuity bundles for ${questionCount} questions`);
+function validateQuizVisualBible(markdown: string, requiredBundleNumbers: number[]): void {
+  const bundles = parseContinuityBundles(markdown);
+  const missing = missingArtifactSectionNumbers(markdown, requiredBundleNumbers, "continuity_bundle");
+  if (missing.length) throw new Error(`Quiz visual bible quality gate failed: missing continuity bundle${missing.length === 1 ? "" : "s"} ${formatArtifactSectionNumbers(missing)}`);
+  if (bundles.length < requiredBundleNumbers.length) throw new Error(`Quiz visual bible quality gate failed: found ${bundles.length} continuity bundles for ${requiredBundleNumbers.length} questions`);
   for (const required of ["palette", "countdown", "answer", "safe motion"]) if (!markdown.toLowerCase().includes(required)) throw new Error(`Quiz visual bible quality gate failed: missing ${required}`);
 }
 
 function validateTreatment(markdown: string): void {
+  const sequenceNumbers = extractArtifactSectionNumbers(markdown, "sequence");
   const sequenceCount = Math.max(
-    new Set(markdown.match(/\bSequence\s+\d+\b/gi) ?? []).size,
+    new Set(sequenceNumbers).size,
     (markdown.match(/\bTime budget\b/gi) ?? []).length,
-    (markdown.match(/^##+\s+\d+[.):-]\s+/gim) ?? []).length,
   );
   if (sequenceCount < 5) throw new Error(`Treatment quality gate failed: found ${sequenceCount} sequences; at least 5 are required`);
+  if (sequenceNumbers.length > 0 && (!contiguousArtifactNumbers(sequenceNumbers) || new Set(sequenceNumbers).size !== sequenceNumbers.length)) {
+    throw new Error("Treatment quality gate failed: sequence headings must be numbered consecutively from 1");
+  }
   if (!/time budget/i.test(markdown) || !/claim/i.test(markdown)) throw new Error("Treatment quality gate failed: time budgets and claim IDs are required");
 }
 
@@ -1540,13 +1591,15 @@ export function validateScript(markdown: string, targetWords: number): void {
   if (anchors < 6) throw new Error(`Script quality gate failed: found ${anchors} factual anchors; at least 6 are required`);
 }
 
-function validateVisualBible(markdown: string): void {
-  const bundles = Math.max(
-    new Set(markdown.match(/\bCB[-_ ]?\d{1,2}\b/gi) ?? []).size,
-    new Set([...markdown.matchAll(/Bundle ID:\s*([^\r\n]+)/gi)].map((match) => match[1].trim().toLowerCase())).size,
-    (markdown.match(/^##+\s+Continuity bundle\b/gim) ?? []).length,
-  );
-  if (!/continuity bundle/i.test(markdown) || bundles < 5) throw new Error(`Visual bible quality gate failed: found ${bundles} stable continuity bundle IDs; at least 5 are required`);
+function validateVisualBible(markdown: string, requiredBundleNumbers: number[] = []): void {
+  const bundles = parseContinuityBundles(markdown);
+  const bundleNumbers = [...new Set(bundles.map((bundle) => bundle.bundle_number))];
+  const missing = missingArtifactSectionNumbers(markdown, requiredBundleNumbers, "continuity_bundle");
+  const minimum = requiredBundleNumbers.length > 0 ? requiredBundleNumbers.length : 5;
+  if (!/continuity bundle/i.test(markdown) || bundles.length < 5) throw new Error(`Visual bible quality gate failed: found ${bundles.length} stable continuity bundle IDs; at least 5 are required`);
+  if (bundles.length < minimum) throw new Error(`Visual bible quality gate failed: found ${bundles.length} stable continuity bundles; ${minimum} are required`);
+  if (missing.length) throw new Error(`Visual bible quality gate failed: missing continuity bundle${missing.length === 1 ? "" : "s"} ${formatArtifactSectionNumbers(missing)}`);
+  if (bundleNumbers.length > 0 && !contiguousArtifactNumbers(bundleNumbers)) throw new Error("Visual bible quality gate failed: continuity bundle IDs must be numbered consecutively from 1");
   for (const required of ["palette", "lighting", "reference asset", "anchor-frame"]) {
     if (!markdown.toLowerCase().includes(required)) throw new Error(`Visual bible quality gate failed: missing ${required}`);
   }
@@ -1558,6 +1611,45 @@ export function isSequenceOutputFailure(message: string): boolean {
     || message.startsWith("Shot-plan JSON output malformed")
     || message === "Codex output did not contain JSON"
     || message.startsWith("Codex beat ");
+}
+
+export function normalizeQuizBeatMetadata(beats: Beat[]): Beat[] {
+  const canonicalByQuestion = new Map<number, NonNullable<Beat["quiz"]>>();
+  for (const beat of beats) {
+    const quiz = beat.quiz;
+    if (!quiz || ["intro", "outro"].includes(quiz.phase) || !quiz.question_number) continue;
+    const canonicalAnswer = canonicalizeVisibleQuizAnswer(quiz.choices, quiz.answer);
+    if (!quiz.question.trim() || quiz.choices.length < 2 || !canonicalAnswer) continue;
+    if (!canonicalByQuestion.has(quiz.question_number)) {
+      canonicalByQuestion.set(quiz.question_number, {
+        ...quiz,
+        choices: quiz.choices.map(stripQuizChoiceLabel),
+        answer: canonicalAnswer,
+      });
+    }
+  }
+
+  return beats.map((beat) => {
+    const quiz = beat.quiz;
+    if (!quiz || ["intro", "outro"].includes(quiz.phase) || !quiz.question_number) return beat;
+    const canonical = canonicalByQuestion.get(quiz.question_number);
+    if (!canonical) return beat;
+    const ownAnswer = canonicalizeVisibleQuizAnswer(quiz.choices, quiz.answer);
+    if (ownAnswer) {
+      return { ...beat, quiz: { ...quiz, choices: quiz.choices.map(stripQuizChoiceLabel), answer: ownAnswer } };
+    }
+    return {
+      ...beat,
+      quiz: {
+        ...quiz,
+        question: quiz.question.trim() || canonical.question,
+        choices: canonical.choices,
+        answer: canonical.answer,
+        explanation: quiz.explanation.trim() || canonical.explanation,
+        image_prompt: quiz.image_prompt.trim() || canonical.image_prompt,
+      },
+    };
+  });
 }
 
 function validateBeatOutput(beats: Beat[], minimumSequences = 5, quiz = false): void {
@@ -1577,8 +1669,8 @@ function validateBeatOutput(beats: Beat[], minimumSequences = 5, quiz = false): 
   if (quiz) {
     const incompleteQuiz = beats.filter((beat) => !beat.quiz || (!["intro", "outro"].includes(beat.quiz.phase) && (!beat.quiz.question_number || !beat.quiz.question || !beat.quiz.answer)));
     if (incompleteQuiz.length) throw new Error(`Quiz scene quality gate failed: ${incompleteQuiz.length} beats lack structured question or answer data`);
-    const invalidAnswers = beats.filter((beat) => beat.quiz && !["intro", "outro"].includes(beat.quiz.phase) && resolveVisibleQuizChoice(beat.quiz.choices, beat.quiz.answer) === null);
-    if (invalidAnswers.length) throw new Error(`Quiz scene quality gate failed: ${invalidAnswers.length} beats contain an answer that does not match a visible choice`);
+    const invalidAnswers = beats.flatMap((beat, index) => beat.quiz && !["intro", "outro"].includes(beat.quiz.phase) && resolveVisibleQuizChoice(beat.quiz.choices, beat.quiz.answer) === null ? [index + 1] : []);
+    if (invalidAnswers.length) throw new Error(`Quiz scene quality gate failed: ${invalidAnswers.length} beats contain an answer that does not match a visible choice (beats ${invalidAnswers.join(", ")})`);
   }
 }
 

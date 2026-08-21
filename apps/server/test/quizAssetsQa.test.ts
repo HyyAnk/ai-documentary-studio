@@ -91,6 +91,7 @@ describe("Quiz V2 assets and QA", () => {
     const segment = voice.segments.find((item) => item.role === "question")!;
     const config = { provider: "chatterbox" as const, service_url: "http://127.0.0.1:8890", exaggeration: 0.5, cfg_weight: 0.5, max_concurrent_tasks: 2, merge_gap_ms: 300, match_target_duration: true };
     expect(quizVoiceFingerprint(segment, quizVoiceTempo(segment.role), "default", config)).not.toBe(quizVoiceFingerprint({ ...segment, text: `${segment.text} changed` }, quizVoiceTempo(segment.role), "default", config));
+    expect(quizVoiceFingerprint(segment, quizVoiceTempo(segment.role), "default", config, 1.9)).not.toBe(quizVoiceFingerprint(segment, quizVoiceTempo(segment.role), "default", config, 2.1));
   });
 
   it("blocks preflight when required assets are unresolved and validates render probe evidence", () => {

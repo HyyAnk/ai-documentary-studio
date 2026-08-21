@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { QuizV2Schema } from "@studio/shared";
 import { buildQuizVoicePlan } from "../src/quiz/audio/voicePlan.js";
-import { quizVoiceTempo } from "../src/quiz/audio/voiceSynthesis.js";
+import { quizVoiceFingerprint, quizVoiceTempo } from "../src/quiz/audio/voiceSynthesis.js";
+import { quizVoicePacingLimit, quizVoicePlanNeedsRegeneration, quizVoiceTargetWordsPerSecond, quizVoiceWordsPerSecond } from "../src/quiz/audio/voicePolicy.js";
 import { createDefaultDirectorPlan } from "../src/quiz/director/parseDirectorPlan.js";
 import { assessQuiz } from "../src/quiz/qa/quizAssessment.js";
 import { compileQuizTimeline } from "../src/quiz/timeline/compileTimeline.js";
@@ -41,6 +42,14 @@ describe("Quiz V2 pacing", () => {
     expect(timing.transition_seconds).toBeLessThanOrEqual(.95);
   });
 
+  it("centralizes age-band voice targets and leaves a rounding safety margin", () => {
+    expect(quizVoiceTargetWordsPerSecond("4-6")).toBe(1.9);
+    expect(quizVoiceTargetWordsPerSecond("7-9")).toBe(2.1);
+    expect(quizVoiceTargetWordsPerSecond("10-12")).toBe(2.25);
+    expect(quizVoiceTargetWordsPerSecond("family")).toBe(2.2);
+    expect(quizVoicePacingLimit(quizVoiceTargetWordsPerSecond("4-6"))).toBeLessThan(1.9);
+  });
+
   it("writes conversational child-friendly prompts and slows narrative roles", () => {
     const voice = buildQuizVoicePlan(quiz);
     expect(voice.segments.some((segment) => segment.role === "thinking_prompt")).toBe(true);
@@ -62,6 +71,13 @@ describe("Quiz V2 pacing", () => {
     const assessment = assessQuiz({ quiz, director: createDefaultDirectorPlan(quiz), voicePlan: measured, timeline, measuredAudio: true, renderIntegrity: true });
     expect(assessment.issues.some((issue) => issue.code === "voice_pace_unsafe" && issue.severity === "blocker")).toBe(true);
     expect(assessment.candy_arcade_visual?.pacing).toBeLessThan(20);
+  });
+
+  it("forces stale fast voice plans through regeneration", () => {
+    const fast = { ...buildQuizVoicePlan(quiz), segments: buildQuizVoicePlan(quiz).segments.map((segment) => ({ ...segment, duration_seconds: segment.role === "countdown" ? 1 : 0.25 })) };
+    expect(quizVoiceWordsPerSecond(fast)).toBeGreaterThan(quizVoiceTargetWordsPerSecond(quiz.age_band));
+    expect(quizVoicePlanNeedsRegeneration({ voicePlan: fast, ageBand: quiz.age_band })).toBe(true);
+    expect(quizVoicePlanNeedsRegeneration({ voicePlan: buildQuizVoicePlan(quiz), ageBand: quiz.age_band, assessmentIssueCodes: ["voice_pace_unsafe"] })).toBe(true);
   });
 
   it("adds an encouragement visual beat during the extended thinking pause", () => {

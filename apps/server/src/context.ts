@@ -14,6 +14,7 @@ import { StudioLogger } from "./logger.js";
 import { DEFAULT_CONFIG } from "./config.js";
 import { calibratedScriptTargetWords, scriptWordBounds } from "./production.js";
 import { continuityBundleId } from "./visualBundles.js";
+import { extractArtifactSectionNumbers, parseArtifactSectionNumber, type ArtifactSectionKind } from "./artifactSections.js";
 
 type ContextFile = { path: string; reason: string; content: string };
 
@@ -140,9 +141,9 @@ export class ContextEngine {
       const script = await loadArtifact("script.md", true);
       const visualBible = await loadArtifact("visual_bible.md", true);
       add({ path: research.path, reason: "research claim and source ledger", content: research.content });
-      add({ path: `${treatment.path}#sequence-${sequenceNumber}`, reason: `treatment sequence ${sequenceNumber}`, content: selectMarkdownSection(treatment.content, sequenceNumber, isQuiz ? /^##\s+Question\s+\d+/i : /^##\s+Sequence\s+\d+/i) });
-      add({ path: `${script.path}#sequence-${sequenceNumber}`, reason: `script sequence ${sequenceNumber}`, content: selectMarkdownSection(script.content, sequenceNumber) });
-      add({ path: `${visualBible.path}#CB-${String(sequenceNumber).padStart(2, "0")}`, reason: `continuity bundle ${sequenceNumber}`, content: selectMarkdownSection(visualBible.content, sequenceNumber, /^##\s+Continuity bundle/i) });
+      add({ path: `${treatment.path}#sequence-${sequenceNumber}`, reason: `treatment sequence ${sequenceNumber}`, content: selectMarkdownSectionOrFallback(treatment.content, sequenceNumber, isQuiz ? /^##\s+Question\s+\d+/i : /^##\s+Sequence\s+\d+/i, isQuiz ? "question" : "sequence", "treatment") });
+      add({ path: `${script.path}#sequence-${sequenceNumber}`, reason: `script sequence ${sequenceNumber}`, content: selectMarkdownSectionOrFallback(script.content, sequenceNumber, /^##\s+/i, isQuiz ? "question" : "sequence", "script") });
+      add({ path: `${visualBible.path}#CB-${String(sequenceNumber).padStart(2, "0")}`, reason: `continuity bundle ${sequenceNumber}`, content: selectMarkdownSectionOrFallback(visualBible.content, sequenceNumber, /^##\s+Continuity bundle/i, "continuity_bundle", "visual bible") });
       await this.readSharedRules(["visual_rules.md", "prompt_rules.md", "cinematic_prompt_reference.md"], sharedFiles);
       add({ path: ".documentary-studio/config.json", reason: "shot duration and narration pace", content: JSON.stringify(runtimeConfig) });
     } else if (taskType === "GENERATE_SCENES") {
@@ -165,6 +166,12 @@ export class ContextEngine {
       add({ path: dnaPath, reason: "relevant continuity guidance", content: selectSections(dna, ["Visual Language", "Scene Rules", "Narrative Style"]) });
     }
 
+    const treatmentForPrompt = files.find((file) => file.path.endsWith("/treatment.md"))?.content ?? "";
+    const treatmentKind = isQuiz ? "question" : "sequence";
+    const requiredBundleNumbers = extractArtifactSectionNumbers(treatmentForPrompt, treatmentKind);
+    const requiredBundleInstruction = requiredBundleNumbers.length
+      ? `Create exactly ${requiredBundleNumbers.length} continuity bundles with IDs ${requiredBundleNumbers.map((number) => `CB-${String(number).padStart(2, "0")}`).join(", ")}, one bundle for every upstream ${isQuiz ? "question" : "sequence"}.`
+      : "Create one continuity bundle for every upstream sequence in order.";
     const outputContract = isQuiz && taskType === "GENERATE_RESEARCH"
       ? `Return only a completed Markdown quiz research dossier. The episode has exactly ${quizQuestionCount} questions. Build an answer ledger with exactly ${quizQuestionCount} entries, one entry for every question in order, and assign each entry one unique claim ID exactly once from C01 through ${quizLastClaimId}. Do not stop early, merge questions, reuse a claim ID, or invent extra question numbers. Every ledger entry must include Question number, Claim ID, canonical answer, one child-friendly explanation, direct authoritative URL(s), and a note about ambiguity or safety. Include at least ${quizSourceMinimum} distinct direct authoritative URLs and enough evidence for every answer. Before returning, silently check that every ID in the complete sequence C01, C02, ... ${quizLastClaimId} appears in the ledger and that each question has evidence.`
       : isQuiz && taskType === "GENERATE_TREATMENT"
@@ -180,7 +187,7 @@ export class ContextEngine {
         : taskType === "GENERATE_SCRIPT"
           ? `Return only one completed Markdown narration script for the confirmed episode. Do not return planning notes, reasoning, research, treatment, tool output, JSON, file excerpts, or an explanation. The final answer must be only the script. Target approximately ${calibratedTargetWords} spoken words for ${episode.target_duration_minutes} minutes at ${narrationWordsPerSecond.toFixed(2)} words per second; the hard acceptable range is ${scriptBounds.lower}–${scriptBounds.upper} spoken words. Aim near ${Math.round(calibratedTargetWords * 1.05)} words and never add padding to reach the number. Humor must replace generic explanation, not add new paragraphs or extend the runtime. The legacy ${episode.target_word_count}-word metadata target is only a planning hint. Add this exact hidden marker immediately after the title: <!-- HUMOR_POLICY: v1 -->. Follow the treatment sequence order. Build the argument from dated events, named programs/people/organizations, measurable facts, decisions, and consequences from research. Add a restrained humor layer: ${humorGuidance}. Never invent a quote, statistic, anecdote, or reaction for a joke; never mock victims or sensitive subjects. After a humorous spoken line, add only an HTML comment of the form <!-- AUDIO_CUE: chuckle --> or, rarely, <!-- AUDIO_CUE: laugh -->. Use at most one laugh cue per three minutes and prefer chuckle. Do not write (laughs), [laugh], or visual directions in the visible narration. Before returning, silently verify that the marker exists, humor beats are spaced across the argument, every joke is grounded in the scoped research, and the spoken word count is between ${scriptBounds.lower} and ${scriptBounds.upper}.`
           : taskType === "GENERATE_VISUAL_BIBLE"
-            ? "Return only a completed Markdown Episode Visual Bible. Define fixed channel constants, episode palette, typography/graphic language, editorial overlay system, recurring hero objects, evidence treatment, and asset mix. Provenance is tracked in production metadata; do not require a visible AI or reconstruction label inside footage prompts. Create one continuity bundle per treatment sequence. Format every bundle as a second-level heading exactly like `## Continuity bundle CB-01 — Title`, incrementing CB-02, CB-03, and so on. Each bundle needs labeled Era, Location, Subjects, Wardrobe/objects, Palette, Lighting, Texture, Anchor-frame prompt, Reference asset slots, and Allowed shot variation fields."
+            ? `Return only a completed Markdown Episode Visual Bible. Define fixed channel constants, episode palette, typography/graphic language, editorial overlay system, recurring hero objects, evidence treatment, and asset mix. Provenance is tracked in production metadata; do not require a visible AI or reconstruction label inside footage prompts. ${requiredBundleInstruction} Format every bundle as a second-level heading exactly like \`## Continuity bundle CB-01 — Title\`, using the exact numeric IDs from the upstream artifact. Each bundle needs labeled Era, Location, Subjects, Wardrobe/objects, Palette, Lighting, Texture, Anchor-frame prompt, Reference asset slots, and Allowed shot variation fields.`
           : taskType === "GENERATE_BUNDLE_IMAGE"
             ? `Generate exactly one reference image for continuity bundle ${continuityBundleId(sceneNumber ?? 0)}. Follow the bundle's Anchor-frame prompt and the channel Visual Style/Visual Language locks. Depict only the described environment, subjects, era, palette, lighting, and texture. No text, captions, logos, UI, split panels, charts, watermarks, or labels. Save the final PNG exactly to the requested image output path in the task instructions. If the connected image capability returns bytes instead of writing a file, return a data:image/png;base64 payload or report the saved PNG path.`
             : isQuiz && taskType === "GENERATE_SEQUENCE_SCENES"
@@ -283,13 +290,33 @@ function excerptForScene(script: string, sceneNumber: number): string {
   return lines.slice(Math.max(0, center - 18), center + 18).join("\n");
 }
 
-function selectMarkdownSection(markdown: string, sectionNumber: number, headingPattern: RegExp = /^##\s+/i): string {
+function selectMarkdownSection(markdown: string, sectionNumber: number, headingPattern: RegExp = /^##\s+/i, kind?: ArtifactSectionKind): string {
   const lines = markdown.split(/\r?\n/);
   const starts = lines.map((line, index) => headingPattern.test(line) ? index : -1).filter((index) => index >= 0);
-  const start = starts[sectionNumber - 1];
+  const numberedStarts = kind
+    ? starts.filter((index) => parseArtifactSectionNumber(lines[index]!.replace(/^##\s+/, ""), kind) !== null)
+    : [];
+  const explicitStart = kind
+    ? numberedStarts.find((index) => parseArtifactSectionNumber(lines[index]!.replace(/^##\s+/, ""), kind) === sectionNumber)
+    : undefined;
+  const start = explicitStart ?? (kind && numberedStarts.length > 0 ? undefined : starts[sectionNumber - 1]);
   if (start === undefined) throw new Error(`Sequence ${sectionNumber} was not found in an upstream artifact`);
-  const next = starts[sectionNumber] ?? lines.length;
+  const next = starts.find((candidate) => candidate > start) ?? lines.length;
   return lines.slice(start, next).join("\n").trim();
+}
+
+function selectMarkdownSectionOrFallback(markdown: string, sectionNumber: number, headingPattern: RegExp, kind: ArtifactSectionKind, artifactName: string): string {
+  try {
+    return selectMarkdownSection(markdown, sectionNumber, headingPattern, kind);
+  } catch {
+    const content = markdown.trim();
+    if (!content) throw new Error(`Sequence ${sectionNumber} was not found in an upstream artifact`);
+    return [
+      `## ${artifactName} fallback for requested section ${sectionNumber}`,
+      "The upstream artifact has no dedicated numbered section for this request. Preserve the requested sequence/question number and infer only stable identity rules from the complete artifact below.",
+      content,
+    ].join("\n\n");
+  }
 }
 
 function escapeRegExp(value: string): string {
