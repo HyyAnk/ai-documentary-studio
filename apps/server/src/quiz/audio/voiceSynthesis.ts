@@ -10,12 +10,27 @@ import { audioDiagnosticsForTimeline, type VoiceAudioDiagnostics } from "./audio
 import { countQuizVoiceWords, quizVoicePacingLimit } from "./voicePolicy.js";
 
 const execFileAsync = promisify(execFile);
-export const QUIZ_VOICE_PACING_VERSION = "paced-v11-age-targeted-performance";
+export const QUIZ_VOICE_PACING_VERSION = "paced-v12-age-targeted-performance";
 
 export type MeasuredQuizVoice = {
   voicePlan: VoicePlan;
   segmentPaths: Map<string, string>;
 };
+
+export const MIN_QUIZ_VOICE_SLOWDOWN_TEMPO = 0.85;
+
+export type QuizVoicePacingClamp = {
+  segment_id: string;
+  role: VoiceSegmentRole;
+  actual: number;
+  pacingLimit: number;
+  appliedTempo: number;
+};
+
+export function quizVoicePaceCorrectionTempo(actual: number, pacingLimit: number): number {
+  if (!Number.isFinite(actual) || actual <= pacingLimit) return 1;
+  return Math.max(MIN_QUIZ_VOICE_SLOWDOWN_TEMPO, pacingLimit / actual);
+}
 
 export async function synthesizeQuizVoiceSegments(input: {
   repository: RepositoryService;
@@ -25,6 +40,7 @@ export async function synthesizeQuizVoiceSegments(input: {
   voicePlan: VoicePlan;
   targetWordsPerSecond: number;
   onProgress?: (progress: { completed: number; total: number; reused: boolean }) => Promise<void> | void;
+  onPacingClamp?: (details: QuizVoicePacingClamp) => Promise<void> | void;
 }): Promise<MeasuredQuizVoice> {
   const channel = await input.repository.getChannel(input.channelId);
   const voice = channel.voice_reference_path ? input.repository.resolveContextPath(channel.voice_reference_path) : "default";
@@ -38,7 +54,7 @@ export async function synthesizeQuizVoiceSegments(input: {
     const tempo = quizVoiceTempo(segment.role);
     const fingerprint = quizVoiceFingerprint(segment, tempo, voice, input.config, input.targetWordsPerSecond);
     const key = fingerprint;
-    const pacingVersion = `${segment.role === "outro" ? "paced-v11-outro" : "paced-v11"}-${fingerprint.slice(0, 20)}`;
+      const pacingVersion = `${segment.role === "outro" ? "paced-v12-outro" : "paced-v12"}-${fingerprint.slice(0, 20)}`;
     let rendered = cache.get(key);
     let reused = Boolean(rendered);
     if (!rendered) {
@@ -57,7 +73,7 @@ export async function synthesizeQuizVoiceSegments(input: {
       }
       if (!rendered) {
         const sourceAudio = await renderPerformanceSegment(input.config, segment, voice, pacingDirectory, index + 1);
-        const audio = await enforceQuizVoicePace(sourceAudio, segment, pacingLimit, pacingDirectory, index + 1);
+        const audio = await enforceQuizVoicePace(sourceAudio, segment, pacingLimit, pacingDirectory, index + 1, input.onPacingClamp);
         const duration = wavDurationSeconds(audio);
         const assetPath = await input.repository.writeQuizVoiceSegmentAudio(input.channelId, input.episodeId, index + 1, audio, pacingVersion);
         rendered = { duration, absolutePath: input.repository.resolveContextPath(assetPath) };
@@ -107,7 +123,7 @@ export function voicePerformanceConfig(config: AppConfig["audio_generation"], ro
     choice: { exaggeration: .48, cfg_weight: .52 },
     thinking_prompt: { exaggeration: .62, cfg_weight: .44 },
     countdown: { exaggeration: .5, cfg_weight: .5 },
-    reveal: { exaggeration: .8, cfg_weight: .38 },
+    reveal: { exaggeration: .66, cfg_weight: .38 },
     explanation: { exaggeration: .42, cfg_weight: .56 },
     fun_fact: { exaggeration: .4, cfg_weight: .58 },
     midpoint: { exaggeration: .55, cfg_weight: .48 },
@@ -192,10 +208,21 @@ function segmentPace(segment: VoiceSegment, duration: number): number {
   return countQuizVoiceWords(segment.text) / Math.max(0.1, duration);
 }
 
-async function enforceQuizVoicePace(audio: Uint8Array, segment: VoiceSegment, pacingLimit: number, directory: string, segmentNumber: number): Promise<Uint8Array> {
+async function enforceQuizVoicePace(audio: Uint8Array, segment: VoiceSegment, pacingLimit: number, directory: string, segmentNumber: number, onPacingClamp?: (details: QuizVoicePacingClamp) => Promise<void> | void): Promise<Uint8Array> {
   const actual = segmentPace(segment, wavDurationSeconds(audio));
   if (actual <= pacingLimit) return audio;
-  return paceQuizVoiceAudio(audio, pacingLimit / actual, directory, segmentNumber * 1000 + 7);
+  const requestedTempo = pacingLimit / actual;
+  const tempo = quizVoicePaceCorrectionTempo(actual, pacingLimit);
+  if (requestedTempo < MIN_QUIZ_VOICE_SLOWDOWN_TEMPO) {
+    await onPacingClamp?.({
+      segment_id: segment.segment_id,
+      role: segment.role,
+      actual: Number(actual.toFixed(3)),
+      pacingLimit: Number(pacingLimit.toFixed(3)),
+      appliedTempo: Number(tempo.toFixed(3)),
+    });
+  }
+  return paceQuizVoiceAudio(audio, tempo, directory, segmentNumber * 1000 + 7);
 }
 
 function atempoFilters(tempo: number): string[] {

@@ -39,7 +39,7 @@ export function planQuizAssets(quiz: QuizV2, director: DirectorPlan): QuizAssetP
         saturation: "bright but matched across every option",
         edge_treatment: "soft rounded edges with a thin consistent rim light",
         detail_level: "medium, simplified child-friendly detail with one clear silhouette",
-        face_policy: "none",
+        face_policy: "natural_only",
         asset_ids: optionAssetIds,
       });
       question.choices.forEach((choice) => assets.push({

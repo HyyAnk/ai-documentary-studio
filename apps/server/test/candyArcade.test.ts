@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { QuizV2Schema } from "@studio/shared";
+import { AssetConsistencyGroupSchema, QuizV2Schema } from "@studio/shared";
 import { compileQuizAssetPrompt } from "../src/quiz/assets/promptCompiler.js";
 import { planQuizAssets } from "../src/quiz/assets/assetPlanner.js";
 import { buildQuizVoicePlan } from "../src/quiz/audio/voicePlan.js";
@@ -76,12 +76,20 @@ describe("Candy Arcade visual template", () => {
     expect(prompt.prompt).toContain("consistent with the other answer options");
     expect(prompt.prompt).toContain("Every option in this set must share this exact art direction");
     expect(prompt.prompt).toContain("No words");
+    expect(group.face_policy).toBe("natural_only");
+    expect(prompt.prompt).toContain("face policy natural_only");
+    expect(prompt.prompt).toContain("Use facial features only when naturally present in the subject");
+    const { face_policy: _facePolicy, ...groupWithoutFacePolicy } = group;
+    expect(AssetConsistencyGroupSchema.parse(groupWithoutFacePolicy).face_policy).toBe("natural_only");
     const hero = assetPlan.assets.find((asset) => asset.asset_id === "asset-question-01-hero")!;
     const heroPrompt = compileQuizAssetPrompt(hero);
     expect(heroPrompt.prompt).toContain("polished 3D clay-like illustration");
     expect(heroPrompt.prompt).toContain("gentle upper-left highlight");
     expect(heroPrompt.prompt).toContain("Face policy: none");
     expect(assessQuizVisualLayout({ quiz, director }).filter((issue) => issue.severity === "blocker")).toEqual([]);
+    const fairnessIssues = assessQuizVisualLayout({ quiz, director, assetPlan });
+    expect(fairnessIssues.filter((issue) => issue.severity === "blocker")).toEqual([]);
+    expect(fairnessIssues.some((issue) => issue.code === "needs_visual_review")).toBe(true);
   });
 
   it("keeps the reveal focused on the canonical answer card and drives the Thinking Bar from timeline ranges", () => {
@@ -124,7 +132,8 @@ describe("Candy Arcade visual template", () => {
     const html = buildCandyArcadeComposition({ quiz: maximumQuiz, director, timeline, theme: "candy_arcade", audioPath: "./narration.wav", narrationDurationSeconds: timeline.duration_seconds });
     expect((html.match(/<section id="quiz-q/g) ?? [])).toHaveLength(50);
     expect((html.match(/class="image-card hero-image"/g) ?? [])).toHaveLength(50);
-    expect(html).not.toContain("infinite");
+    expect(html).toContain("ray-spin 150s");
+    expect(html).not.toContain("repeat:-1");
     expect(html).not.toContain("filter:");
     expect(html).not.toContain("clip-path");
   });
