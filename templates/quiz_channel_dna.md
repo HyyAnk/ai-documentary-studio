@@ -41,10 +41,12 @@ Rotate formats across a five-topic suggestion run:
 
 ## Visual language
 
-- Use one high-contrast palette with a soft dark ink background, sunny yellow, coral, mint, and sky blue accents.
-- Prefer rounded cards, large readable type, friendly geometric icons, stars, dots, and simple illustrated objects.
+- Use vibrant, cheerful, high-contrast palettes tailored to children: sunny yellows, energetic corals, rich mints, sky blues, bright lilacs, and warm berry tones. Never use dull, washed-out, dark ink, or gloomy backgrounds.
+- Art direction must be dynamic, playful, and visually engaging for children: highly polished 3D claymation, storybook 3D renders, lively cartoon diorama, or colorful dimensional stylized art. Avoid flat 2D monochrome, dull sketches, or corporate minimalist graphics.
+- Keep lighting bright, warm, and inviting with soft studio shadows and specular highlights that make subjects pop with depth.
+- Show one clear, captivating focal subject at a time. Avoid visual clutter, scary/creepy imagery, flashing strobes, or overwhelming noise.
+- Visual style should adapt flexibly to each episode topic (e.g. glowing cosmic adventures for Space, lush emerald tones for Nature, juicy candy colors for Food & Games) while strictly maintaining child appeal, high saturation, and cheerful warmth.
 - Keep text inside safe margins and at least 56 px at 1920×1080 composition size.
-- Show one focal object at a time. Avoid visual clutter, scary imagery, flashing effects, and rapid strobing.
 - Use visual countdowns, answer cards, correct/try-again states, and a final score moment.
 
 ## Safety and trust

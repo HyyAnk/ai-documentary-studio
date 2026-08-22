@@ -614,6 +614,7 @@ export const AppConfigSchema = z.object({
     provider: z.string().default("gpti2"),
     model: z.string().default("gpt-image-2"),
     api_key: z.string().default(""),
+    has_api_key: z.boolean().optional(),
     quality: z.string().default("low"),
     max_concurrent_tasks: z.number().int().positive().default(3),
   }),

@@ -1,4 +1,4 @@
-import { ArrowLeft, CheckCircle, CircleNotch, DownloadSimple, FilmSlate, FloppyDisk, FolderOpen, PencilSimple, Play, SpeakerHigh, WarningCircle, X } from "@phosphor-icons/react";
+import { ArrowLeft, CheckCircle, CircleNotch, DownloadSimple, Eye, FilmSlate, FloppyDisk, FolderOpen, PencilSimple, Play, SpeakerHigh, WarningCircle, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { QUIZ_MAX_QUESTION_COUNT, QUIZ_MIN_QUESTION_COUNT, type Channel, type ProductionAssessment, type Scene, type Task } from "@studio/shared";
 import { api, type BundleImage } from "../api";
@@ -11,6 +11,17 @@ import { SceneCard } from "./SceneCard";
 import { TaskProgressPanel } from "./TaskProgressPanel";
 import { QuizV2Panel } from "./QuizV2Panel";
 import type { Notice } from "./types";
+
+export type PreviewImageData = {
+  url: string;
+  filename: string;
+  bundleId: string;
+  title: string;
+  prompt: string;
+  priceVnd?: number;
+  model?: string;
+  aspectRatio?: string;
+};
 
 type ArtifactName = "research.md" | "treatment.md" | "script.md" | "visual_bible.md";
 
@@ -30,6 +41,7 @@ export function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxD
   const [episodeClock, setEpisodeClock] = useState(() => Date.now());
   const [questionCountDraft, setQuestionCountDraft] = useState(8);
   const [durationDraft, setDurationDraft] = useState(8);
+  const [previewImage, setPreviewImage] = useState<PreviewImageData | null>(null);
   const episodeTasks = tasks.filter((task) => task.episode_id === episodeId);
   const sequenceShotTasks = episodeTasks.filter((task) => task.task_type === "GENERATE_SEQUENCE_SCENES");
   const latestShotBatchStartedAt = sequenceShotTasks.map((task) => task.created_at).sort().at(-1) ?? null;
@@ -164,6 +176,12 @@ export function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxD
     {isQuiz ? <QuizV2Panel state={quizV2} readiness={readiness} pipelineTask={pipelineTask} tasks={episodeTasks} questionCount={episode.quiz_config?.question_count ?? 0} /> : <PipelineRail readiness={readiness} quiz={false} />}
     {assessment && !isQuiz ? <AssessmentPanel assessment={assessment} /> : null}
 
+    <section className="panel quiz-video-panel">
+      <div className="panel-heading"><div><p className="eyebrow">Final output</p><h2>{isQuiz ? "Quiz video" : "Final video"}</h2></div>{!isQuiz ? <button className="primary-button compact" disabled={!readiness.narration || !readiness.scenes || Boolean(activeEpisodeTask)} onClick={() => void createTask("GENERATE_VIDEO")}>{latestTask(episodeTasks, ["GENERATE_VIDEO"]) && isTaskActive(latestTask(episodeTasks, ["GENERATE_VIDEO"])!) ? <CircleNotch className="spin" size={15} /> : <FilmSlate size={15} />}{readiness.video ? "Render again" : "Render video"}</button> : null}</div>
+      {latestTask(episodeTasks, ["GENERATE_VIDEO"]) ? <TaskProgressPanel task={latestTask(episodeTasks, ["GENERATE_VIDEO"])!} title="HyperFrames render" activeLabel="Rendering Quiz video" completionLabel="Video ready" now={episodeClock} compact /> : null}
+      {episode.video_asset_path ? <div className="quiz-video-result"><video controls preload="metadata" src={`${api.videoUrl(channel.channel_id, episodeId)}?v=${encodeURIComponent(episode.video_generated_at ?? "")}`} aria-label="Rendered video" /><div><strong>MP4 with Chatterbox audio</strong><span>{formatDuration(episode.video_duration_seconds ?? 0)} · HyperFrames</span><div className="video-result-actions"><a className="quiet-button compact" href={api.videoUrl(channel.channel_id, episodeId)} download={`${episode.slug}.mp4`}><DownloadSimple size={15} />Download</a><button className="quiet-button compact" disabled={busy === "video-folder"} onClick={() => void openVideoFolder()}>{busy === "video-folder" ? <CircleNotch className="spin" size={15} /> : <FolderOpen size={15} />}{busy === "video-folder" ? "Opening…" : "Open folder"}</button></div></div></div> : <p className="artifact-empty">Render after narration and scenes are ready.</p>}
+    </section>
+
     <div className="artifact-stack">
       {artifactConfig.map((config, index) => {
         const artifact = artifactValues[config.filename];
@@ -172,7 +190,7 @@ export function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxD
       })}
     </div>
 
-    {imageGenerationEnabled ? <BundleImagesPanel bundles={parseContinuityBundles(visualBible)} images={bundleImages} tasks={episodeTasks} now={episodeClock} channelId={channel.channel_id} episodeId={episodeId} imagesPerBundle={imagesPerBundle} busy={busy} disabled={false} onGenerate={(bundleNumber) => void generateBundleImage(bundleNumber)} onGenerateAll={() => void generateAllBundleImages()} /> : null}
+    {imageGenerationEnabled ? <BundleImagesPanel bundles={parseContinuityBundles(visualBible)} images={bundleImages} tasks={episodeTasks} now={episodeClock} channelId={channel.channel_id} episodeId={episodeId} imagesPerBundle={imagesPerBundle} busy={busy} disabled={false} onGenerate={(bundleNumber) => void generateBundleImage(bundleNumber)} onGenerateAll={() => void generateAllBundleImages()} onPreviewImage={(img) => setPreviewImage(img)} /> : null}
 
     {!isQuiz ? <section className="panel narration-production-panel">
       <div className="panel-heading"><div><p className="eyebrow">Audio master</p><h2>Production narration</h2></div><button className="primary-button compact" disabled={!readiness.script || Boolean(activeEpisodeTask)} onClick={() => void createTask("GENERATE_NARRATION")}>{latestTask(episodeTasks, ["GENERATE_NARRATION"]) && isTaskActive(latestTask(episodeTasks, ["GENERATE_NARRATION"])!) ? <CircleNotch className="spin" size={15} /> : <SpeakerHigh size={15} />}{readiness.narration ? "Regenerate" : "Generate"}</button></div>
@@ -180,17 +198,13 @@ export function EpisodeDetail({ channel, episodeId, tasks, onTaskSubmitted, maxD
       {episode.narration_asset_path ? <div className="master-audio-row"><audio controls preload="metadata" src={`${api.narrationAudioUrl(channel.channel_id, episodeId, episode.narration_asset_path.split("/").at(-1))}?v=${encodeURIComponent(episode.narration_generated_at ?? "")}`} aria-label="Production narration audio" /><span>{formatDuration(episode.narration_duration_seconds ?? 0)} · {episode.narration_segment_count} segments · {(episode.measured_narration_words_per_second ?? narrationWordsPerSecond).toFixed(2)} words/sec</span><a className="quiet-button compact" href={api.narrationAudioUrl(channel.channel_id, episodeId, episode.narration_asset_path.split("/").at(-1))} download={`${episode.slug}-narration.wav`}><DownloadSimple size={15} />Download</a></div> : <p className="artifact-empty">Generate after the script is approved to preserve long-form phrasing and calibrate timing.</p>}
     </section> : null}
 
-    <section className="panel quiz-video-panel">
-      <div className="panel-heading"><div><p className="eyebrow">Final output</p><h2>{isQuiz ? "Quiz video" : "Final video"}</h2></div>{!isQuiz ? <button className="primary-button compact" disabled={!readiness.narration || !readiness.scenes || Boolean(activeEpisodeTask)} onClick={() => void createTask("GENERATE_VIDEO")}>{latestTask(episodeTasks, ["GENERATE_VIDEO"]) && isTaskActive(latestTask(episodeTasks, ["GENERATE_VIDEO"])!) ? <CircleNotch className="spin" size={15} /> : <FilmSlate size={15} />}{readiness.video ? "Render again" : "Render video"}</button> : null}</div>
-      {latestTask(episodeTasks, ["GENERATE_VIDEO"]) ? <TaskProgressPanel task={latestTask(episodeTasks, ["GENERATE_VIDEO"])!} title="HyperFrames render" activeLabel="Rendering Quiz video" completionLabel="Video ready" now={episodeClock} compact /> : null}
-      {episode.video_asset_path ? <div className="quiz-video-result"><video controls preload="metadata" src={`${api.videoUrl(channel.channel_id, episodeId)}?v=${encodeURIComponent(episode.video_generated_at ?? "")}`} aria-label="Rendered video" /><div><strong>MP4 with Chatterbox audio</strong><span>{formatDuration(episode.video_duration_seconds ?? 0)} · HyperFrames</span><div className="video-result-actions"><a className="quiet-button compact" href={api.videoUrl(channel.channel_id, episodeId)} download={`${episode.slug}.mp4`}><DownloadSimple size={15} />Download</a><button className="quiet-button compact" disabled={busy === "video-folder"} onClick={() => void openVideoFolder()}>{busy === "video-folder" ? <CircleNotch className="spin" size={15} /> : <FolderOpen size={15} />}{busy === "video-folder" ? "Opening…" : "Open folder"}</button></div></div></div> : <p className="artifact-empty">Render after narration and scenes are ready.</p>}
-    </section>
-
     <section className="shot-plan-section">
       <div className="section-heading scene-heading"><div><p className="eyebrow">Edit timeline</p><h2>Shot plan</h2></div><div className="scene-heading-actions"><button className="primary-button" disabled={!readiness.visualBible || Boolean(activeEpisodeTask)} onClick={() => void createTask("GENERATE_SCENES")}>{latestTask(episodeTasks, ["GENERATE_SCENES"]) && isTaskActive(latestTask(episodeTasks, ["GENERATE_SCENES"])!) ? <CircleNotch className="spin" size={17} /> : <FilmSlate size={17} />}{scenes.length ? "Regenerate shots" : "Generate shots"}</button></div></div>
       {currentShotBatch.length > 0 ? <div className="batch-shot-progress" role="progressbar" aria-label="Shot sequence progress" aria-valuemin={0} aria-valuemax={currentShotBatch.length} aria-valuenow={completedShotSequences}><div><strong>{completedShotSequences} / {currentShotBatch.length} sequences</strong><span>{currentShotBatch.some((task) => task.status === "FAILED") ? "Retry failed sequences from Tasks" : currentShotBatch.some(isTaskActive) ? "Generating in parallel" : "Sequence batch complete"}</span></div><div><span style={{ transform: `scaleX(${completedShotSequences / currentShotBatch.length})` }} /></div></div> : latestTask(episodeTasks, ["GENERATE_SCENES"]) ? <TaskProgressPanel task={latestTask(episodeTasks, ["GENERATE_SCENES"])!} title="Shot generation" activeLabel="Building sequence-aware shots" completionLabel="Shot plan ready" now={episodeClock} /> : null}
-      {scenes.length === 0 ? <EmptyState compact icon={<FilmSlate size={23} />} title="No shots yet" copy="Complete the visual bible first." action="Generate shots" disabled={!readiness.visualBible || Boolean(activeEpisodeTask)} busy={Boolean(latestTask(episodeTasks, ["GENERATE_SCENES"]) && isTaskActive(latestTask(episodeTasks, ["GENERATE_SCENES"])!))} busyLabel="Generating…" onAction={() => void createTask("GENERATE_SCENES")} /> : <div className="scene-list">{scenes.map((scene, index) => <div key={scene.scene_id}>{index === 0 || scenes[index - 1].sequence_id !== scene.sequence_id ? <SequenceDivider scene={scene} images={bundleImages} channelId={channel.channel_id} episodeId={episodeId} /> : null}<SceneCard scene={scene} nextScene={scenes[index + 1] ?? null} task={latestTask(episodeTasks, ["REGENERATE_DIALOGUE", "REGENERATE_PROMPT", "REGENERATE_BOTH"], scene.scene_number)} audioTask={latestTask(episodeTasks, ["GENERATE_AUDIO"], scene.scene_number)} channelId={channel.channel_id} episodeId={episodeId} now={episodeClock} maxDuration={maxDuration} narrationWordsPerSecond={episode.measured_narration_words_per_second ?? narrationWordsPerSecond} copied={copied} busy={busy} onCopy={copy} onChange={(next) => setScenes((current) => current.map((item) => item.scene_id === scene.scene_id ? next : item))} onRegenerate={(type) => void createTask(type, scene.scene_number)} onGenerateAudio={() => void createTask("GENERATE_AUDIO", scene.scene_number)} onMergeNext={() => void mergeNext(scene.scene_number)} /></div>)}<div className="scene-save-row"><span>Manual edits update the assessment after save</span><button className="primary-button compact" disabled={busy === "scenes" || episodeTasks.some(isTaskActive)} onClick={() => void saveScenes()}>{busy === "scenes" ? <CircleNotch className="spin" size={15} /> : <FloppyDisk size={15} />}{busy === "scenes" ? "Saving…" : "Save shots"}</button></div></div>}
+      {scenes.length === 0 ? <EmptyState compact icon={<FilmSlate size={23} />} title="No shots yet" copy="Complete the visual bible first." action="Generate shots" disabled={!readiness.visualBible || Boolean(activeEpisodeTask)} busy={Boolean(latestTask(episodeTasks, ["GENERATE_SCENES"]) && isTaskActive(latestTask(episodeTasks, ["GENERATE_SCENES"])!))} busyLabel="Generating…" onAction={() => void createTask("GENERATE_SCENES")} /> : <div className="scene-list">{scenes.map((scene, index) => <div key={scene.scene_id}>{index === 0 || scenes[index - 1].sequence_id !== scene.sequence_id ? <SequenceDivider scene={scene} images={bundleImages} channelId={channel.channel_id} episodeId={episodeId} onPreviewImage={(img) => setPreviewImage(img)} /> : null}<SceneCard scene={scene} nextScene={scenes[index + 1] ?? null} task={latestTask(episodeTasks, ["REGENERATE_DIALOGUE", "REGENERATE_PROMPT", "REGENERATE_BOTH"], scene.scene_number)} audioTask={latestTask(episodeTasks, ["GENERATE_AUDIO"], scene.scene_number)} channelId={channel.channel_id} episodeId={episodeId} now={episodeClock} maxDuration={maxDuration} narrationWordsPerSecond={episode.measured_narration_words_per_second ?? narrationWordsPerSecond} copied={copied} busy={busy} onCopy={copy} onChange={(next) => setScenes((current) => current.map((item) => item.scene_id === scene.scene_id ? next : item))} onRegenerate={(type) => void createTask(type, scene.scene_number)} onGenerateAudio={() => void createTask("GENERATE_AUDIO", scene.scene_number)} onMergeNext={() => void mergeNext(scene.scene_number)} /></div>)}<div className="scene-save-row"><span>Manual edits update the assessment after save</span><button className="primary-button compact" disabled={busy === "scenes" || episodeTasks.some(isTaskActive)} onClick={() => void saveScenes()}>{busy === "scenes" ? <CircleNotch className="spin" size={15} /> : <FloppyDisk size={15} />}{busy === "scenes" ? "Saving…" : "Save shots"}</button></div></div>}
     </section>
+
+    {previewImage ? <ImagePreviewModal image={previewImage} onClose={() => setPreviewImage(null)} /> : null}
   </section>;
 }
 
@@ -221,7 +235,49 @@ function PromptCollapsible({ prompt }: { prompt: string }) {
   );
 }
 
-function BundleImagesPanel({ bundles, images, tasks, now, channelId, episodeId, imagesPerBundle, busy, disabled, onGenerate, onGenerateAll }: { bundles: ReturnType<typeof parseContinuityBundles>; images: BundleImage[]; tasks: Task[]; now: number; channelId: string; episodeId: string; imagesPerBundle: number; busy: string | null; disabled: boolean; onGenerate: (bundleNumber: number) => void; onGenerateAll: () => void }) {
+function ImagePreviewModal({ image, onClose }: { image: PreviewImageData; onClose: () => void }) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="image-preview-modal-overlay" onClick={onClose} role="dialog" aria-modal="true" aria-label="Xem ảnh phóng to">
+      <div className="image-preview-modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="image-preview-modal-header">
+          <div className="image-preview-title">
+            <span className="continuity-badge">{image.bundleId}</span>
+            <strong>{image.title}</strong>
+          </div>
+          <div className="image-preview-actions">
+            <a className="primary-button compact" href={image.url} download={image.filename} title="Tải ảnh về máy">
+              <DownloadSimple size={15} /> Tải ảnh
+            </a>
+            <button className="quiet-button compact icon-only" onClick={onClose} aria-label="Đóng">
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+        <div className="image-preview-body">
+          <img src={image.url} alt={`${image.bundleId} preview`} />
+        </div>
+        <div className="image-preview-footer">
+          <p className="image-preview-prompt">{image.prompt}</p>
+          <div className="image-preview-meta">
+            {typeof image.priceVnd === "number" ? <span className="cost-badge">💰 {image.priceVnd}đ</span> : null}
+            {image.aspectRatio ? <span className="aspect-badge">{image.aspectRatio}</span> : null}
+            {image.model ? <span className="cost-model">{image.model}</span> : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BundleImagesPanel({ bundles, images, tasks, now, channelId, episodeId, imagesPerBundle, busy, disabled, onGenerate, onGenerateAll, onPreviewImage }: { bundles: ReturnType<typeof parseContinuityBundles>; images: BundleImage[]; tasks: Task[]; now: number; channelId: string; episodeId: string; imagesPerBundle: number; busy: string | null; disabled: boolean; onGenerate: (bundleNumber: number) => void; onGenerateAll: () => void; onPreviewImage: (data: PreviewImageData) => void }) {
   const activeImageTask = tasks.some((task) => task.task_type === "GENERATE_BUNDLE_IMAGE" && isTaskActive(task));
   return <section className="panel bundle-images-panel">
     <div className="panel-heading"><div><p className="eyebrow">Style lock</p><h2>Continuity images</h2></div><div className="panel-heading-actions"><a className="quiet-button compact" href={images.length ? api.downloadBundleImagesUrl(channelId, episodeId) : undefined} aria-disabled={!images.length} download><DownloadSimple size={15} />Download all</a><button className="primary-button compact" disabled={disabled || activeImageTask || busy === "bundle-images-all" || bundles.length === 0} onClick={onGenerateAll}>{busy === "bundle-images-all" || activeImageTask ? <CircleNotch className="spin" size={15} /> : <Play size={15} />}{activeImageTask ? "Generating…" : "Generate all"}</button></div></div>
@@ -238,9 +294,27 @@ function BundleImagesPanel({ bundles, images, tasks, now, channelId, episodeId, 
         <div className="bundle-image-assets">
           {bundleImages.map((image) => (
             <div className="bundle-image-item" key={image.filename}>
-              <a className="bundle-image-link" href={api.bundleImageUrl(channelId, episodeId, image.filename)} target="_blank" rel="noreferrer" download={image.filename}>
+              <button
+                type="button"
+                className="bundle-image-thumb-btn"
+                onClick={() => onPreviewImage({
+                  url: api.bundleImageUrl(channelId, episodeId, image.filename),
+                  filename: image.filename,
+                  bundleId: bundle.bundle_id,
+                  title: bundle.title,
+                  prompt: bundle.anchor_prompt,
+                  priceVnd: image.price_vnd,
+                  model: image.model,
+                  aspectRatio: image.aspect_ratio,
+                })}
+                title="Nhấn để xem ảnh phóng to"
+              >
                 <img src={api.bundleImageUrl(channelId, episodeId, image.filename)} alt={`${bundle.bundle_id} anchor`} />
-              </a>
+                <span className="bundle-image-zoom-overlay">
+                  <Eye size={16} weight="bold" />
+                  <span>Phóng to</span>
+                </span>
+              </button>
               {typeof image.price_vnd === "number" ? (
                 <div className="bundle-image-cost-tag" title={image.price_breakdown ? Object.entries(image.price_breakdown).map(([k, v]) => `${k}: ${v}đ`).join(", ") : `${image.price_vnd}đ`}>
                   <span className="cost-badge">💰 {image.price_vnd}đ</span>
@@ -258,9 +332,31 @@ function BundleImagesPanel({ bundles, images, tasks, now, channelId, episodeId, 
   </section>;
 }
 
-function SequenceDivider({ scene, images, channelId, episodeId }: { scene: Scene; images: BundleImage[]; channelId: string; episodeId: string }) {
+function SequenceDivider({ scene, images, channelId, episodeId, onPreviewImage }: { scene: Scene; images: BundleImage[]; channelId: string; episodeId: string; onPreviewImage?: (data: PreviewImageData) => void }) {
   const image = images.find((item) => item.bundle_id === scene.continuity_bundle_id && item.variant === 0);
-  return <div className="sequence-divider"><span>{scene.sequence_id}</span><strong>{scene.sequence_title}</strong>{image ? <a className="sequence-anchor" href={api.bundleImageUrl(channelId, episodeId, image.filename)} target="_blank" rel="noreferrer"><img src={api.bundleImageUrl(channelId, episodeId, image.filename)} alt={`${scene.continuity_bundle_id} anchor`} /><span>{scene.continuity_bundle_id}</span></a> : null}</div>;
+  return (
+    <div className="sequence-divider">
+      <span>{scene.sequence_id}</span>
+      <strong>{scene.sequence_title}</strong>
+      {image ? (
+        <button
+          type="button"
+          className="sequence-anchor-btn"
+          onClick={() => onPreviewImage?.({
+            url: api.bundleImageUrl(channelId, episodeId, image.filename),
+            filename: image.filename,
+            bundleId: scene.continuity_bundle_id,
+            title: scene.sequence_title,
+            prompt: scene.visual_prompt,
+          })}
+          title="Nhấn để xem ảnh phóng to"
+        >
+          <img src={api.bundleImageUrl(channelId, episodeId, image.filename)} alt={`${scene.continuity_bundle_id} anchor`} />
+          <span>{scene.continuity_bundle_id}</span>
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 function AssessmentPanel({ assessment }: { assessment: ProductionAssessment }) {

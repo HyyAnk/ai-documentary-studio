@@ -25,11 +25,10 @@ const stages: Array<{ key: RailStage; label: string }> = [
 type Readiness = { research: boolean; treatment: boolean; script: boolean; visualBible: boolean; scenes: boolean; video: boolean };
 
 export function QuizV2Panel({ state, readiness, pipelineTask, tasks, questionCount = 0 }: { state: QuizV2State | null; readiness: Readiness; pipelineTask: Task | null; tasks: Task[]; questionCount?: number }) {
-  if (!state) return <section className="panel quiz-v2-panel"><div className="panel-heading"><div><p className="eyebrow">Quiz engine V2</p><h2>Production rail</h2></div></div><p className="artifact-empty">Loading Quiz Engine V2 state</p></section>;
+  if (!state) return <section className="panel quiz-v2-panel"><p className="artifact-empty">Loading Quiz Engine V2 state</p></section>;
   const currentStage = pipelineStage(pipelineTask);
-  return <section className="panel quiz-v2-panel" aria-labelledby="quiz-v2-title">
-    <div className="panel-heading"><div><p className="eyebrow">Quiz production</p><h2 id="quiz-v2-title">Production rail</h2></div></div>
-    <p className="quiz-v2-panel-note">{currentStage ? `${pipelineTask?.status === "FAILED" ? "Stopped at" : "Current"}: ${currentStage.label}${pipelineTask?.progress_message && pipelineTask.status !== "FAILED" ? ` · ${pipelineTask.progress_message}` : ""}` : "Build video runs every stage automatically."}</p>
+  return <section className="panel quiz-v2-panel" aria-label="Quiz production stages">
+    {currentStage ? <p className="quiz-v2-panel-note">{pipelineTask?.status === "FAILED" ? "Stopped at" : "Current"}: {currentStage.label}{pipelineTask?.progress_message && pipelineTask.status !== "FAILED" ? ` · ${pipelineTask.progress_message}` : ""}</p> : null}
     <ol className="quiz-v2-rail" aria-label="Quiz production stages">
       {stages.map((stage, index) => {
         const status = resolveStatus(stage.key, index, readiness, state, pipelineTask, tasks, currentStage);
