@@ -33,6 +33,11 @@ export const DEFAULT_CONFIG: AppConfig = {
   image_generation: {
     enabled: true,
     images_per_bundle: 1,
+    provider: "gpti2",
+    model: "gpt-image-2",
+    api_key: "",
+    quality: "low",
+    max_concurrent_tasks: 3,
   },
   codex: {
     max_concurrent_tasks: 3,
@@ -218,7 +223,7 @@ export async function saveImageSettings(rootDirectory: string, input: ImageSetti
   const currentLocal = await readJsonFile(localPath);
   const currentImage = currentLocal.image_generation && typeof currentLocal.image_generation === "object" ? currentLocal.image_generation as Record<string, unknown> : {};
   const nextImage = { ...currentImage } as Record<string, unknown>;
-  for (const key of ["enabled", "images_per_bundle"] as const) {
+  for (const key of ["enabled", "images_per_bundle", "provider", "model", "api_key", "quality", "max_concurrent_tasks"] as const) {
     const value = parsed[key];
     if (value !== undefined) nextImage[key] = value;
   }

@@ -51,6 +51,14 @@ function estimateQuizTargetWordCount(targetDurationMinutes: number, wordsPerSeco
 
 type TopicRun = { generated_at: string; candidates: TopicCandidate[] };
 
+export type BundleImageMeta = {
+  price_vnd?: number;
+  price_breakdown?: Record<string, number>;
+  model?: string;
+  aspect_ratio?: string;
+  size?: string;
+};
+
 export type BundleImageAsset = {
   bundle_id: string;
   bundle_number: number;
@@ -60,6 +68,10 @@ export type BundleImageAsset = {
   absolutePath: string;
   size: number;
   modified_at: string;
+  price_vnd?: number;
+  price_breakdown?: Record<string, number>;
+  model?: string;
+  aspect_ratio?: string;
 };
 
 const allowedEpisodeFiles = new Set([
@@ -415,7 +427,7 @@ export class RepositoryService {
     return this.writeQuizArtifact(channelId, episodeId, "asset-resolution.json", QuizAssetResolutionSchema.parse(resolution));
   }
 
-  async writeQuizImageAsset(channelId: string, episodeId: string, assetId: string, fingerprint: string, content: Uint8Array): Promise<string> {
+  async writeQuizImageAsset(channelId: string, episodeId: string, assetId: string, fingerprint: string, content: Uint8Array, meta?: BundleImageMeta): Promise<string> {
     if (!/^[a-z0-9][a-z0-9_-]{0,119}$/i.test(assetId)) throw new RepositoryError("Quiz asset ID is invalid", "INVALID_ASSET");
     if (!/^[a-f0-9]{64}$/i.test(fingerprint)) throw new RepositoryError("Quiz asset fingerprint is invalid", "INVALID_ASSET");
     if (!isPng(content)) throw new RepositoryError("Quiz image output is not a PNG file", "INVALID_IMAGE");
@@ -426,6 +438,10 @@ export class RepositoryService {
     const filename = `${assetId}-${fingerprint.slice(0, 12)}.png`;
     const absolutePath = path.join(directory, filename);
     await this.writeBinaryAtomic(absolutePath, content);
+    if (meta) {
+      const metaPath = path.join(directory, `${assetId}-${fingerprint.slice(0, 12)}.meta.json`);
+      await this.writeJsonAtomic(metaPath, meta);
+    }
     return `channels/${channel.slug}/episodes/${episode.slug}/assets/quiz-images/${filename}`;
   }
 
@@ -634,6 +650,13 @@ export class RepositoryService {
       const absolutePath = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets", "bundles", entry.name);
       try {
         const metadata = await stat(absolutePath);
+        let meta: BundleImageMeta = {};
+        const metaPath = absolutePath.replace(/\.png$/i, ".meta.json");
+        try {
+          meta = JSON.parse(await readFile(metaPath, "utf8")) as BundleImageMeta;
+        } catch {
+          // No meta file
+        }
         images.push({
           bundle_id: `CB-${String(Number(match[1])).padStart(2, "0")}`,
           bundle_number: Number(match[1]),
@@ -643,6 +666,10 @@ export class RepositoryService {
           absolutePath,
           size: metadata.size,
           modified_at: metadata.mtime.toISOString(),
+          price_vnd: meta.price_vnd,
+          price_breakdown: meta.price_breakdown,
+          model: meta.model,
+          aspect_ratio: meta.aspect_ratio,
         });
       } catch {
         // Ignore an image that disappeared during a refresh.
@@ -668,13 +695,33 @@ export class RepositoryService {
       await this.assertRealPathInside(path.dirname(absolutePath), absolutePath);
       const metadata = await stat(absolutePath);
       const bundleNumber = Number(/^CB-(\d+)/i.exec(filename)?.[1] ?? 0);
-      return { bundle_id: `CB-${String(bundleNumber).padStart(2, "0")}`, bundle_number: bundleNumber, variant: /-alt\.png$/i.test(filename) ? 1 : 0, filename, path: `channels/${channel.slug}/episodes/${episode.slug}/assets/bundles/${filename}`, absolutePath, size: metadata.size, modified_at: metadata.mtime.toISOString() };
+      let meta: BundleImageMeta = {};
+      const metaPath = absolutePath.replace(/\.png$/i, ".meta.json");
+      try {
+        meta = JSON.parse(await readFile(metaPath, "utf8")) as BundleImageMeta;
+      } catch {
+        // No meta file
+      }
+      return {
+        bundle_id: `CB-${String(bundleNumber).padStart(2, "0")}`,
+        bundle_number: bundleNumber,
+        variant: /-alt\.png$/i.test(filename) ? 1 : 0,
+        filename,
+        path: `channels/${channel.slug}/episodes/${episode.slug}/assets/bundles/${filename}`,
+        absolutePath,
+        size: metadata.size,
+        modified_at: metadata.mtime.toISOString(),
+        price_vnd: meta.price_vnd,
+        price_breakdown: meta.price_breakdown,
+        model: meta.model,
+        aspect_ratio: meta.aspect_ratio,
+      };
     } catch {
       throw new RepositoryError("Image asset not found", "IMAGE_NOT_FOUND");
     }
   }
 
-  async writeBundleImage(channelId: string, episodeId: string, bundleNumber: number, content: Uint8Array, variant = 0): Promise<string> {
+  async writeBundleImage(channelId: string, episodeId: string, bundleNumber: number, content: Uint8Array, variant = 0, meta?: BundleImageMeta): Promise<string> {
     if (!isPng(content)) throw new RepositoryError("Image output is not a PNG file", "INVALID_IMAGE");
     const target = await this.getBundleImagePath(channelId, episodeId, bundleNumber, variant);
     const directory = path.dirname(target.absolutePath);
@@ -682,21 +729,28 @@ export class RepositoryService {
     await mkdir(directory, { recursive: true });
     await this.assertRealPathInside(episodeDirectory, directory);
     await this.writeBinaryAtomic(target.absolutePath, content);
+    if (meta) {
+      const metaPath = target.absolutePath.replace(/\.png$/i, ".meta.json");
+      await this.writeJsonAtomic(metaPath, meta);
+    }
     return target.path;
   }
 
-  async writeBundleImageFromFile(channelId: string, episodeId: string, bundleNumber: number, sourcePath: string, variant = 0): Promise<string> {
+  async writeBundleImageFromFile(channelId: string, episodeId: string, bundleNumber: number, sourcePath: string, variant = 0, meta?: BundleImageMeta): Promise<string> {
     const resolvedSource = path.resolve(sourcePath);
     const sourceRoot = [this.rootDirectory, this.storageRoot].find((root) => this.isInside(root, resolvedSource));
     if (!sourceRoot) throw new RepositoryError("Codex image path is outside the studio workspace", "UNSAFE_PATH");
     await this.assertRealPathInside(sourceRoot, resolvedSource);
-    return this.writeBundleImage(channelId, episodeId, bundleNumber, await readFile(resolvedSource), variant);
+    return this.writeBundleImage(channelId, episodeId, bundleNumber, await readFile(resolvedSource), variant, meta);
   }
 
   async clearBundleImages(channelId: string, episodeId: string, bundleNumber: number): Promise<void> {
     const images = await this.listBundleImages(channelId, episodeId);
     const id = `CB-${String(this.assertBundleNumber(bundleNumber)).padStart(2, "0")}`;
-    await Promise.all(images.filter((image) => image.bundle_id === id).map((image) => rm(image.absolutePath, { force: true })));
+    await Promise.all(images.filter((image) => image.bundle_id === id).flatMap((image) => [
+      rm(image.absolutePath, { force: true }),
+      rm(image.absolutePath.replace(/\.png$/i, ".meta.json"), { force: true }),
+    ]));
   }
 
   async attachBundleReference(channelId: string, episodeId: string, bundleId: string, assetPath: string): Promise<number> {

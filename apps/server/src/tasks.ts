@@ -29,6 +29,7 @@ import { ChatterboxProvider, synthesizeWav, type ChatterboxTarget } from "./prov
 import { CodexImageProvider } from "./providers/codexImage.js";
 import { ShopAiKeyImageProvider } from "./providers/shopAiKeyImage.js";
 import { AntigravityImageChainProvider } from "./providers/antigravityImageChain.js";
+import { Gpti2ImageProvider } from "./providers/gpti2Image.js";
 import type { AudioProvider } from "./providers/index.js";
 import { optimizeShortScenes, packBeatsIntoScenes, rebalanceEditorialOverlays, type Beat } from "./sceneTiming.js";
 import { calibratedScriptTargetWords, countWords, extractNarration, extractNarrationChunks, extractNarrationSections, hasHumorPolicyMarker, scriptWordBounds } from "./production.js";
@@ -113,7 +114,7 @@ export class TaskManager extends EventEmitter {
     },
     audioProviderFactory?: (target: ChatterboxTarget, config: AppConfig["audio_generation"]) => AudioProvider,
     codexConfig: CodexCleanupConfig = { auto_delete_threads: true, failed_thread_retention_days: 7 },
-    imageConfig: AppConfig["image_generation"] = { enabled: true, images_per_bundle: 1 },
+    imageConfig: AppConfig["image_generation"] = DEFAULT_CONFIG.image_generation,
     private readonly antigravity?: AntigravityClient,
     activeEngine: "codex" | "antigravity" = "codex",
   ) {
@@ -354,7 +355,8 @@ export class TaskManager extends EventEmitter {
         void this.pump();
       });
     }
-    while (this.runningImageCount < 1) {
+    const maxImageConcurrent = this.imageConfig.max_concurrent_tasks ?? 3;
+    while (this.runningImageCount < maxImageConcurrent) {
       const next = this.list().reverse().find((task) => task.status === "QUEUED" && imageTaskTypes.has(task.task_type) && !this.locks.has(task.lock_key));
       if (!next) break;
       this.locks.add(next.lock_key);
@@ -388,6 +390,10 @@ export class TaskManager extends EventEmitter {
       return;
     }
     if (task.task_type === "GENERATE_BUNDLE_IMAGE") {
+      if (Gpti2ImageProvider.isConfigured(this.imageConfig.api_key)) {
+        await this.runGpti2BundleImageTask(task);
+        return;
+      }
       if (this.activeEngine === "antigravity") {
         await this.runAntigravityBundleImageTask(task);
         return;
@@ -420,6 +426,50 @@ export class TaskManager extends EventEmitter {
     } catch (error) {
       await this.finish(task.task_id, "FAILED", error instanceof Error ? error.message : "Task failed");
       this.logger.error(`${this.activeEngine === "antigravity" ? "Antigravity" : "Codex"} task failed`, context);
+    }
+  }
+
+  private async runGpti2BundleImageTask(task: Task): Promise<void> {
+    const context = { profileId: task.channel_id, workerId: task.task_id, step: "run_gpti2_image" };
+    const controller = new AbortController();
+    this.activeImageControllers.set(task.task_id, controller);
+    try {
+      await this.update(task.task_id, { status: "RUNNING", started_at: nowIso(), queue_position: null, progress_message: "Preparing continuity context", progress_percent: 10 });
+      if (!task.episode_id) throw new RepositoryError("Episode is required", "EPISODE_REQUIRED");
+      const bundleNumber = this.findSceneNumber(task.task_id);
+      if (!bundleNumber) throw new RepositoryError("Bundle number is required", "BUNDLE_REQUIRED");
+      const manifest = await this.contextEngine.build(task.task_type, task.channel_id, task.episode_id, bundleNumber, this.imageVariants.get(task.task_id) ?? 0);
+      const imageModel = this.imageConfig.model || "gpt-image-2";
+      await this.update(task.task_id, { progress_message: `Generating continuity image (${imageModel})`, progress_percent: 35 });
+      const visualBible = await this.repository.getEpisodeFile(task.channel_id, task.episode_id, "visual_bible.md").catch(() => null);
+      let promptToUse = manifest.prompt;
+      if (visualBible?.content) {
+        const bundles = parseContinuityBundles(visualBible.content);
+        const bundle = bundles.find((b) => b.bundle_number === bundleNumber);
+        if (bundle?.anchor_prompt) {
+          promptToUse = bundle.anchor_prompt;
+        }
+      }
+      const image = await new Gpti2ImageProvider(this.repository, {
+        channelId: task.channel_id,
+        episodeId: task.episode_id,
+        bundleNumber,
+        variant: this.imageVariants.get(task.task_id) ?? 0,
+      }, {
+        apiKey: this.imageConfig.api_key,
+        model: this.imageConfig.model,
+      }).generateReference(promptToUse, controller.signal);
+      const bundleId = `CB-${String(bundleNumber).padStart(2, "0")}`;
+      await this.repository.attachBundleReference(task.channel_id, task.episode_id, bundleId, image.asset_path);
+      await this.update(task.task_id, { progress_message: "Saving continuity image", progress_percent: 90 });
+      await this.finish(task.task_id, "COMPLETED", null, [image.asset_path]);
+    } catch (error) {
+      if (this.get(task.task_id).status === "CANCELLED") return;
+      const message = error instanceof Error ? error.message : "Image generation failed";
+      await this.finish(task.task_id, "FAILED", message);
+      this.logger.error(message, { ...context, step: "run_gpti2_image" });
+    } finally {
+      this.activeImageControllers.delete(task.task_id);
     }
   }
 
@@ -642,6 +692,7 @@ export class TaskManager extends EventEmitter {
           episodeId: task.episode_id,
           plan: completeQuizV2.assetPlan,
           activeEngine: this.activeEngine,
+          imageConfig: { api_key: this.imageConfig.api_key, model: this.imageConfig.model },
         })).resolution;
       }
       // HyperFrames only discovers local media inside the composition directory.
@@ -1132,7 +1183,12 @@ export class TaskManager extends EventEmitter {
             promptToUse = bundle.anchor_prompt;
           }
         }
-        const image = this.activeEngine === "antigravity"
+        const image = Gpti2ImageProvider.isConfigured(this.imageConfig.api_key)
+          ? await new Gpti2ImageProvider(this.repository, imageTarget, {
+              apiKey: this.imageConfig.api_key,
+              model: this.imageConfig.model,
+            }).generateReference(promptToUse)
+          : this.activeEngine === "antigravity"
           ? await new AntigravityImageChainProvider(this.repository, imageTarget, this.antigravity, { allowTier3Fallback: false }).generateReference(promptToUse)
           : ShopAiKeyImageProvider.isConfigured()
           ? await new ShopAiKeyImageProvider(this.repository, imageTarget).generateReference(promptToUse)

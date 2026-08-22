@@ -160,8 +160,8 @@ describe("bundle image tasks", () => {
       async interruptTurn(): Promise<void> { return undefined; }
     }
 
-    // maxConcurrent = 4 (for standard tasks), but image tasks should still run with concurrency = 1
-    const manager = new TaskManager(repository, new ContextEngine(repository, logger), new SlowImageCodex() as never, 4, 8, logger, undefined, undefined, undefined, { enabled: true, images_per_bundle: 1 });
+    // maxConcurrent = 4 (for standard tasks), but image tasks should still run with concurrency = 1 when max_concurrent_tasks: 1
+    const manager = new TaskManager(repository, new ContextEngine(repository, logger), new SlowImageCodex() as never, 4, 8, logger, undefined, undefined, undefined, { enabled: true, images_per_bundle: 1, max_concurrent_tasks: 1 });
     await manager.load();
 
     const task1 = manager.submit("GENERATE_BUNDLE_IMAGE", channel.channel_id, episode.episode_id, 1);

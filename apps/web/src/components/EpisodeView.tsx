@@ -199,6 +199,28 @@ function PipelineRail({ readiness, quiz }: { readiness: { research: boolean; tre
   return <ol className="pipeline-rail" aria-label="Episode production progress">{steps.map(([label, ready], index) => <li className={ready ? "is-ready" : ""} key={label}><span>{ready ? <CheckCircle size={15} weight="fill" /> : index + 1}</span><strong>{label}</strong></li>)}</ol>;
 }
 
+function PromptCollapsible({ prompt }: { prompt: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = prompt.length > 120;
+  if (!isLong) {
+    return <p className="bundle-prompt-text">{prompt}</p>;
+  }
+  return (
+    <div className="bundle-prompt-collapsible">
+      <p className={`bundle-prompt-text ${expanded ? "is-expanded" : "is-collapsed"}`}>
+        {expanded ? prompt : `${prompt.slice(0, 120)}…`}
+      </p>
+      <button
+        type="button"
+        className="prompt-toggle-btn"
+        onClick={() => setExpanded(!expanded)}
+      >
+        {expanded ? "Thu gọn ▲" : "Xem chi tiết prompt ▼"}
+      </button>
+    </div>
+  );
+}
+
 function BundleImagesPanel({ bundles, images, tasks, now, channelId, episodeId, imagesPerBundle, busy, disabled, onGenerate, onGenerateAll }: { bundles: ReturnType<typeof parseContinuityBundles>; images: BundleImage[]; tasks: Task[]; now: number; channelId: string; episodeId: string; imagesPerBundle: number; busy: string | null; disabled: boolean; onGenerate: (bundleNumber: number) => void; onGenerateAll: () => void }) {
   const activeImageTask = tasks.some((task) => task.task_type === "GENERATE_BUNDLE_IMAGE" && isTaskActive(task));
   return <section className="panel bundle-images-panel">
@@ -207,7 +229,31 @@ function BundleImagesPanel({ bundles, images, tasks, now, channelId, episodeId, 
       const bundleImages = images.filter((image) => image.bundle_id === bundle.bundle_id);
       const task = latestTask(tasks, ["GENERATE_BUNDLE_IMAGE"], bundle.bundle_number);
       const taskActive = Boolean(task && isTaskActive(task));
-      return <article className="bundle-image-card" key={bundle.bundle_id}><div className="bundle-image-copy"><div><span className="continuity-badge">{bundle.bundle_id}</span><strong>{bundle.title}</strong></div><p>{bundle.anchor_prompt}</p><span className="bundle-image-count">{bundleImages.length} / {imagesPerBundle} image{imagesPerBundle === 1 ? "" : "s"}</span></div><div className="bundle-image-assets">{bundleImages.map((image) => <a key={image.filename} href={api.bundleImageUrl(channelId, episodeId, image.filename)} target="_blank" rel="noreferrer" download={image.filename}><img src={api.bundleImageUrl(channelId, episodeId, image.filename)} alt={`${bundle.bundle_id} anchor`} /></a>)}<button className="quiet-button compact" disabled={disabled || taskActive || busy === `bundle-image-${bundle.bundle_number}`} onClick={() => onGenerate(bundle.bundle_number)}>{taskActive || busy === `bundle-image-${bundle.bundle_number}` ? <CircleNotch className="spin" size={14} /> : <Play size={14} />}{bundleImages.length ? "Regenerate" : "Generate anchor"}</button></div>{task ? <TaskProgressPanel task={task} title={bundle.bundle_id} activeLabel="Generating anchor image" completionLabel="Anchor image ready" now={now} compact /> : null}</article>;
+      return <article className="bundle-image-card" key={bundle.bundle_id}>
+        <div className="bundle-image-copy">
+          <div><span className="continuity-badge">{bundle.bundle_id}</span><strong>{bundle.title}</strong></div>
+          <PromptCollapsible prompt={bundle.anchor_prompt} />
+          <span className="bundle-image-count">{bundleImages.length} / {imagesPerBundle} image{imagesPerBundle === 1 ? "" : "s"}</span>
+        </div>
+        <div className="bundle-image-assets">
+          {bundleImages.map((image) => (
+            <div className="bundle-image-item" key={image.filename}>
+              <a className="bundle-image-link" href={api.bundleImageUrl(channelId, episodeId, image.filename)} target="_blank" rel="noreferrer" download={image.filename}>
+                <img src={api.bundleImageUrl(channelId, episodeId, image.filename)} alt={`${bundle.bundle_id} anchor`} />
+              </a>
+              {typeof image.price_vnd === "number" ? (
+                <div className="bundle-image-cost-tag" title={image.price_breakdown ? Object.entries(image.price_breakdown).map(([k, v]) => `${k}: ${v}đ`).join(", ") : `${image.price_vnd}đ`}>
+                  <span className="cost-badge">💰 {image.price_vnd}đ</span>
+                  {image.aspect_ratio ? <span className="aspect-badge">{image.aspect_ratio}</span> : null}
+                  {image.model ? <span className="cost-model">{image.model}</span> : null}
+                </div>
+              ) : null}
+            </div>
+          ))}
+          <button className="quiet-button compact" disabled={disabled || taskActive || busy === `bundle-image-${bundle.bundle_number}`} onClick={() => onGenerate(bundle.bundle_number)}>{taskActive || busy === `bundle-image-${bundle.bundle_number}` ? <CircleNotch className="spin" size={14} /> : <Play size={14} />}{bundleImages.length ? "Regenerate" : "Generate anchor"}</button>
+        </div>
+        {task ? <TaskProgressPanel task={task} title={bundle.bundle_id} activeLabel="Generating anchor image" completionLabel="Anchor image ready" now={now} compact /> : null}
+      </article>;
     })}</div>}
   </section>;
 }

@@ -1,4 +1,4 @@
-import { Broadcast, CaretDown, Gear, GitBranch, House, ListChecks, MoonStars, Power, Sun, TerminalWindow, X, CheckCircle, Sparkle, WarningCircle } from "@phosphor-icons/react";
+import { Broadcast, CaretDown, Gear, GitBranch, House, Image, ListChecks, MoonStars, Power, Sun, TerminalWindow, X, CheckCircle, Sparkle, WarningCircle } from "@phosphor-icons/react";
 import type { Channel, CodexSettingsResponse } from "@studio/shared";
 import type { GitInfo, Notice, Page, Theme } from "./types";
 
@@ -20,10 +20,12 @@ export function Topbar({
   models,
   loadingModels = false,
   modelsError = null,
+  currentImageModel = "gpt-image-2",
   theme,
   onEngineToggle,
   onThemeToggle,
   onModelChange,
+  onImageModelChange,
   onReconnect,
   onShutdown,
 }: {
@@ -35,10 +37,12 @@ export function Topbar({
   models: Array<{ id: string; label: string }>;
   loadingModels?: boolean;
   modelsError?: string | null;
+  currentImageModel?: string;
   theme: Theme;
   onEngineToggle: (engine: "codex" | "antigravity") => Promise<void> | void;
   onThemeToggle: () => void;
   onModelChange: (model: string) => Promise<void>;
+  onImageModelChange: (model: string) => Promise<void>;
   onReconnect: () => void;
   onShutdown: () => void;
 }) {
@@ -73,6 +77,20 @@ export function Topbar({
             <span>Antigravity</span>
           </button>
         </div>
+
+        <label className="model-select image-model-select" title="Image Generation Model (gpti2.store)">
+          <Image size={13} style={{ marginRight: 2 }} />
+          <span>Image</span>
+          <CaretDown size={13} />
+          <select
+            aria-label="Image generation model"
+            value={currentImageModel || "gpt-image-2"}
+            onChange={(event) => void onImageModelChange(event.target.value)}
+          >
+            <option value="gpt-image-2">gpt-image-2 (50đ)</option>
+            <option value="nano-banana-2">nano-banana-2 (100đ - 2K)</option>
+          </select>
+        </label>
 
         <label className="model-select">
           <span>Model</span>

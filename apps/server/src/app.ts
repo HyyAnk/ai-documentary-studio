@@ -174,6 +174,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     ...config,
     codex: { ...config.codex, api_key: "" },
     antigravity: { ...config.antigravity, api_key: "" },
+    image_generation: { ...config.image_generation, api_key: "", has_api_key: Boolean(config.image_generation.api_key) },
   }));
   server.get("/api/storage", async () => getStorageInfo());
   server.post("/api/storage", async (request) => {
@@ -328,12 +329,34 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     tasks.updateVideoConfig(config.video_generation);
     return { video_generation: config.video_generation };
   });
+  server.get("/api/image/settings", async () => ({
+    settings: {
+      ...config.image_generation,
+      api_key: "",
+      has_api_key: Boolean(config.image_generation.api_key),
+    },
+    models: [
+      { id: "gpt-image-2", label: "GPT Image 2 (50đ / ảnh)" },
+      { id: "nano-banana-2", label: "Nano Banana 2 (100đ / ảnh - 2K)" },
+    ],
+  }));
   server.post("/api/image/settings", async (request) => {
     const input = ImageSettingsInputSchema.parse(request.body);
     if (tasks.hasActiveWork()) throw new RepositoryError("Finish active tasks before changing image settings", "IMAGE_SETTINGS_BUSY");
     config = await saveImageSettings(rootDirectory, input);
     tasks.updateImageConfig(config.image_generation);
-    return { image_generation: config.image_generation };
+    return {
+      image_generation: {
+        ...config.image_generation,
+        api_key: "",
+        has_api_key: Boolean(config.image_generation.api_key),
+      },
+      settings: {
+        ...config.image_generation,
+        api_key: "",
+        has_api_key: Boolean(config.image_generation.api_key),
+      },
+    };
   });
   server.get("/api/voices", async () => ({ voices: await repository.listVoices() }));
   server.get("/api/voices/:voiceId/sample", async (request, reply) => {

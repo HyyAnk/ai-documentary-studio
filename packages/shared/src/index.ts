@@ -267,7 +267,10 @@ export type DirectorPlan = z.infer<typeof DirectorPlanSchema>;
 
 export const QuizAssetPurposeSchema = z.enum(["answer_option", "question_illustration", "hero_question_image", "answer_reveal", "background", "mascot"]);
 export const QuizAssetStyleSchema = z.enum(["cute_illustration", "bold_icon", "photo_reference", "abstract_shape", "mascot_pose"]);
-export const QuizAssetAspectRatioSchema = z.enum(["1:1", "4:3", "16:9", "9:16"]);
+export const ImageAspectRatioSchema = z.enum(["1:1", "16:9", "9:16", "4:3", "3:4", "2:3", "3:2"]);
+export type ImageAspectRatio = z.infer<typeof ImageAspectRatioSchema>;
+export const QuizAssetAspectRatioSchema = ImageAspectRatioSchema;
+export type QuizAssetAspectRatio = z.infer<typeof QuizAssetAspectRatioSchema>;
 export const AssetConsistencyGroupSchema = z.object({
   group_id: z.string().min(1).max(120),
   question_id: z.string().min(1),
@@ -608,6 +611,11 @@ export const AppConfigSchema = z.object({
   image_generation: z.object({
     enabled: z.boolean().default(true),
     images_per_bundle: z.number().int().min(1).max(2).default(1),
+    provider: z.string().default("gpti2"),
+    model: z.string().default("gpt-image-2"),
+    api_key: z.string().default(""),
+    quality: z.string().default("low"),
+    max_concurrent_tasks: z.number().int().positive().default(3),
   }),
   codex: z.object({
     max_concurrent_tasks: z.number().int().positive().default(3),
@@ -666,9 +674,17 @@ export type GenerateAllAudioInput = z.infer<typeof GenerateAllAudioInputSchema>;
 export const GenerateAllBundleImagesInputSchema = z.object({ force: z.boolean().default(false) });
 export type GenerateAllBundleImagesInput = z.infer<typeof GenerateAllBundleImagesInputSchema>;
 
+export const ImageModelIdSchema = z.enum(["gpt-image-2", "nano-banana-2"]);
+export type ImageModelId = z.infer<typeof ImageModelIdSchema>;
+
 export const ImageSettingsInputSchema = z.object({
   enabled: z.boolean().optional(),
   images_per_bundle: z.number().int().min(1).max(2).optional(),
+  provider: z.string().trim().max(80).optional(),
+  model: z.string().trim().max(80).optional(),
+  api_key: z.string().max(4000).optional(),
+  quality: z.enum(["low", "medium", "high"]).optional(),
+  max_concurrent_tasks: z.number().int().positive().max(16).optional(),
 });
 export type ImageSettingsInput = z.infer<typeof ImageSettingsInputSchema>;
 

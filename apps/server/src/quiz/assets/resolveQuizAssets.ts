@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import type { QuizAssetPlan, QuizAssetResolution, QuizIssue } from "@studio/shared";
 import { StudioLogger } from "../../logger.js";
 import type { RepositoryService } from "../../repository.js";
+import { Gpti2QuizImageProvider } from "../../providers/gpti2Image.js";
 import { ShopAiKeyQuizImageProvider } from "../../providers/shopAiKeyImage.js";
 import { AntigravityImageChainProvider } from "../../providers/antigravityImageChain.js";
 import { assetFingerprint } from "./assetFingerprint.js";
@@ -13,6 +14,7 @@ export async function resolveQuizAssets(input: {
   episodeId: string;
   plan: QuizAssetPlan;
   activeEngine?: "codex" | "antigravity";
+  imageConfig?: { api_key?: string; model?: string };
   onProgress?: (progress: { completed: number; total: number; reused: boolean }) => Promise<void> | void;
 }): Promise<{ resolution: QuizAssetResolution; issues: QuizIssue[] }> {
   const existing = await input.repository.readQuizAssetResolution(input.channelId, input.episodeId);
@@ -27,7 +29,13 @@ export async function resolveQuizAssets(input: {
     let reused = false;
     const compiled = compileQuizAssetPrompt(request, request.consistency_group_id ? consistencyGroups.get(request.consistency_group_id) : undefined);
     logger.info(`Compiled prompt for ${request.asset_id}: ${JSON.stringify(compiled.prompt)}`, { profileId: input.channelId, workerId: input.episodeId, step: "compile_asset_prompt" });
-    const providerName = activeEngine === "antigravity" ? "antigravity-chain" : ShopAiKeyQuizImageProvider.isConfigured() ? "shopaikey" : "inline-fallback";
+    const providerName = Gpti2QuizImageProvider.isConfigured(input.imageConfig?.api_key)
+      ? "gpti2"
+      : activeEngine === "antigravity"
+      ? "antigravity-chain"
+      : ShopAiKeyQuizImageProvider.isConfigured()
+      ? "shopaikey"
+      : "inline-fallback";
     const fingerprint = assetFingerprint(request, providerName, compiled.cacheVersion);
     const cached = byFingerprint.get(fingerprint);
     try {
@@ -44,6 +52,19 @@ export async function resolveQuizAssets(input: {
           issues.push(issue(request, "asset_fallback_degraded", "warning", `Asset ${request.asset_id} used Tier 3 deterministic fallback. Visual review recommended.`, "Inspect the generated fallback card or replace with a dedicated image."));
         }
         reused = true;
+      } else if (Gpti2QuizImageProvider.isConfigured(input.imageConfig?.api_key)) {
+        const provider = new Gpti2QuizImageProvider(
+          input.repository,
+          { channelId: input.channelId, episodeId: input.episodeId },
+          { apiKey: input.imageConfig?.api_key, model: input.imageConfig?.model },
+        );
+        const generated = await provider.generateAsset({
+          assetId: request.asset_id,
+          fingerprint,
+          prompt: compiled.prompt,
+          aspect_ratio: request.aspect_ratio,
+        });
+        assets.push({ ...request, fingerprint, path: generated.path, source: "provider" });
       } else if (activeEngine === "antigravity") {
         const episode = await input.repository.getEpisode(input.channelId, input.episodeId);
         const chainProvider = new AntigravityImageChainProvider(input.repository, {
@@ -67,7 +88,7 @@ export async function resolveQuizAssets(input: {
         }
       } else if (!ShopAiKeyQuizImageProvider.isConfigured()) {
         if (request.required) {
-          issues.push(issue(request, "asset_provider_unavailable", "blocker", "A semantically critical visual asset needs image generation, but ShopAIKey is not configured.", "Configure the existing image provider or switch to Antigravity engine before rendering."));
+          issues.push(issue(request, "asset_provider_unavailable", "blocker", "A semantically critical visual asset needs image generation, but no image provider is configured.", "Configure gpti2.store in Settings or switch to Antigravity engine before rendering."));
         }
       } else {
         const provider = new ShopAiKeyQuizImageProvider(input.repository, { channelId: input.channelId, episodeId: input.episodeId });
@@ -110,8 +131,7 @@ export async function isQuizAssetResolutionComplete(input: {
   activeEngine?: "codex" | "antigravity";
 }): Promise<boolean> {
   if (!input.resolution || input.resolution.episode_id !== input.episodeId) return false;
-  const activeEngine = input.activeEngine ?? "codex";
-  const providerName = activeEngine === "antigravity" ? "antigravity-chain" : ShopAiKeyQuizImageProvider.isConfigured() ? "shopaikey" : "inline-fallback";
+  const providerName = "gpti2";
   const consistencyGroups = new Map(input.plan.consistency_groups.map((group) => [group.group_id, group]));
   const byId = new Map(input.resolution.assets.map((asset) => [asset.asset_id, asset]));
   for (const request of input.plan.assets) {

@@ -21,7 +21,19 @@ import type {
   VoicePlan,
 } from "@studio/shared";
 
-export type BundleImage = { bundle_id: string; bundle_number: number; variant: number; filename: string; path: string; size: number; modified_at: string };
+export type BundleImage = {
+  bundle_id: string;
+  bundle_number: number;
+  variant: number;
+  filename: string;
+  path: string;
+  size: number;
+  modified_at: string;
+  price_vnd?: number;
+  price_breakdown?: Record<string, number>;
+  model?: string;
+  aspect_ratio?: string;
+};
 export type QuizV2Stages = Record<"research" | "questions" | "director" | "assets" | "voice" | "timeline" | "qa" | "render", "not_started" | "ready" | "stale" | "running" | "failed">;
 export type QuizV2State = { quiz: QuizV2 | null; director_plan: DirectorPlan | null; asset_plan: QuizAssetPlan | null; asset_resolution?: { assets: Array<{ asset_id: string; path: string; source: string }> } | null; voice_plan: VoicePlan | null; timeline: QuizTimeline | null; assessment: QuizAssessment | null; stages: QuizV2Stages };
 
@@ -105,7 +117,8 @@ export const api = {
   antigravityModels: () => request<{ models: AntigravitySettingsResponse["models"] }>("/api/antigravity/models"),
   saveAudioSettings: (body: AppConfig["audio_generation"]) => request<{ audio_generation: AppConfig["audio_generation"] }>("/api/audio/settings", { method: "POST", body: JSON.stringify(body) }),
   saveVideoSettings: (body: Pick<AppConfig["video_generation"], "max_scene_duration_seconds" | "narration_words_per_second">) => request<{ video_generation: AppConfig["video_generation"] }>("/api/video/settings", { method: "POST", body: JSON.stringify(body) }),
-  saveImageSettings: (body: AppConfig["image_generation"]) => request<{ image_generation: AppConfig["image_generation"] }>("/api/image/settings", { method: "POST", body: JSON.stringify(body) }),
+  imageSettings: () => request<{ settings: AppConfig["image_generation"] & { has_api_key?: boolean }; models: Array<{ id: string; label: string }> }>("/api/image/settings"),
+  saveImageSettings: (body: Partial<AppConfig["image_generation"]>) => request<{ image_generation: AppConfig["image_generation"] }>("/api/image/settings", { method: "POST", body: JSON.stringify(body) }),
   codexModels: () => request<{ models: CodexSettingsResponse["models"] }>("/api/codex/models"),
   storage: () => request<StorageInfo>("/api/storage"),
   setStorage: (path: string) => request<StorageInfo>("/api/storage", { method: "POST", body: JSON.stringify({ path }) }),

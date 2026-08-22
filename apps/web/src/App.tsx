@@ -19,6 +19,7 @@ export function App() {
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
   const [activeEngine, setActiveEngine] = useState<"codex" | "antigravity">("codex");
   const [currentModel, setCurrentModel] = useState<string>("");
+  const [currentImageModel, setCurrentImageModel] = useState<string>("gpt-image-2");
   const [models, setModels] = useState<Array<{ id: string; label: string }>>([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
@@ -88,6 +89,9 @@ export function App() {
     const [configResponse, storageResponse] = await Promise.all([api.config(), api.storage()]);
     await Promise.all([refreshChannels(), refreshTasks()]);
     setAppConfig(configResponse);
+    if (configResponse.image_generation?.model) {
+      setCurrentImageModel(configResponse.image_generation.model);
+    }
     setStorage(storageResponse);
     setLoading(false);
   }, [refreshChannels, refreshPeripheralState, refreshTasks]);
@@ -153,6 +157,17 @@ export function App() {
     }
   };
 
+  const handleImageModelChange = async (model: string) => {
+    try {
+      const next = await api.saveImageSettings({ model });
+      setCurrentImageModel(model);
+      setAppConfig((current) => current ? { ...current, image_generation: next.image_generation } : current);
+      showGood(`Image Model: ${model}`);
+    } catch (error) {
+      showError(error);
+    }
+  };
+
   const stopDashboard = async () => {
     if (!window.confirm("Stop the dashboard and its local services? Your channel files will remain untouched.")) return;
     try {
@@ -181,10 +196,12 @@ export function App() {
           models={models}
           loadingModels={loadingModels}
           modelsError={modelsError}
+          currentImageModel={currentImageModel}
           theme={theme}
           onEngineToggle={handleEngineToggle}
           onThemeToggle={() => setTheme((current) => current === "dark" ? "light" : "dark")}
           onModelChange={handleModelChange}
+          onImageModelChange={handleImageModelChange}
           onReconnect={async () => {
             try {
               if (activeEngine === "antigravity") {

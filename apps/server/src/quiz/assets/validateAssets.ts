@@ -31,6 +31,15 @@ function pngDimensions(data: Uint8Array): { width: number; height: number } | nu
 }
 
 function matchesAspectRatio(ratio: number, requested: QuizAssetRequirement["aspect_ratio"]): boolean {
-  const expected = { "1:1": 1, "4:3": 4 / 3, "16:9": 16 / 9, "9:16": 9 / 16 }[requested];
-  return Math.abs(ratio - expected) / expected <= .18;
+  const expected: Record<QuizAssetRequirement["aspect_ratio"], number> = {
+    "1:1": 1,
+    "4:3": 4 / 3,
+    "3:4": 3 / 4,
+    "16:9": 16 / 9,
+    "9:16": 9 / 16,
+    "2:3": 2 / 3,
+    "3:2": 3 / 2,
+  };
+  const target = expected[requested] ?? 1;
+  return Math.abs(ratio - target) / target <= 0.18;
 }
