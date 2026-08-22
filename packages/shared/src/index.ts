@@ -333,6 +333,8 @@ export const QuizResolvedAssetSchema = QuizAssetRequirementSchema.extend({
   fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   path: z.string().min(1),
   source: z.enum(["explicit_episode", "channel_reusable", "cache", "provider", "fallback", "demo"]),
+  fallback_tier: z.number().int().positive().optional(),
+  degraded: z.boolean().optional(),
 });
 export type QuizResolvedAsset = z.infer<typeof QuizResolvedAssetSchema>;
 
@@ -583,10 +585,15 @@ export const TaskSchema = z.object({
   progress_message: z.string().default(""),
   progress_percent: z.number().min(0).max(100).nullable().default(null),
   scene_number: z.number().int().positive().nullable().default(null),
+  accumulated_duration_seconds: z.number().nonnegative().default(0),
 });
 export type Task = z.infer<typeof TaskSchema>;
 
+export const EngineIdSchema = z.enum(["codex", "antigravity"]);
+export type EngineId = z.infer<typeof EngineIdSchema>;
+
 export const AppConfigSchema = z.object({
+  active_engine: EngineIdSchema.default("codex"),
   video_generation: z.object({
     provider: z.string().default("hyperframes"),
     model: z.string().default(""),
@@ -609,6 +616,15 @@ export const AppConfigSchema = z.object({
     command: z.string().default("codex"),
     model: z.string().default(""),
     experimental_api: z.boolean().default(false),
+    api_base_url: z.string().default(""),
+    api_key: z.string().default(""),
+    auto_delete_threads: z.boolean().default(true),
+    failed_thread_retention_days: z.number().int().nonnegative().default(7),
+  }),
+  antigravity: z.object({
+    max_concurrent_tasks: z.number().int().positive().default(3),
+    command: z.string().default("agy"),
+    model: z.string().default("gemini-2.5-pro"),
     api_base_url: z.string().default(""),
     api_key: z.string().default(""),
     auto_delete_threads: z.boolean().default(true),
@@ -720,6 +736,51 @@ export const CodexSettingsResponseSchema = z.object({
 });
 export type CodexSettingsResponse = z.infer<typeof CodexSettingsResponseSchema>;
 
+export const AntigravitySettingsInputSchema = z.object({
+  model: z.string().trim().max(160).optional(),
+  command: z.string().trim().max(500).optional(),
+  api_base_url: z.string().trim().max(2000).optional(),
+  api_key: z.string().max(4000).optional(),
+  auto_delete_threads: z.boolean().optional(),
+  failed_thread_retention_days: z.number().int().nonnegative().max(3650).optional(),
+});
+export type AntigravitySettingsInput = z.infer<typeof AntigravitySettingsInputSchema>;
+
+export const AntigravityModelSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+});
+export type AntigravityModel = z.infer<typeof AntigravityModelSchema>;
+
+export const AntigravitySettingsSchema = z.object({
+  model: z.string(),
+  command: z.string(),
+  api_base_url: z.string(),
+  has_api_key: z.boolean(),
+  auto_delete_threads: z.boolean().default(true),
+  failed_thread_retention_days: z.number().int().nonnegative().default(7),
+});
+export type AntigravitySettings = z.infer<typeof AntigravitySettingsSchema>;
+
+export const AntigravitySettingsResponseSchema = z.object({
+  settings: AntigravitySettingsSchema,
+  models: AntigravityModelSchema.array(),
+  installation: z.object({
+    installed: z.boolean(),
+    command: z.string(),
+    version: z.string().nullable(),
+    authenticated: z.boolean().default(false),
+    error: z.string().optional(),
+  }),
+});
+export type AntigravitySettingsResponse = z.infer<typeof AntigravitySettingsResponseSchema>;
+
+export const EngineSettingsInputSchema = z.object({
+  active_engine: EngineIdSchema,
+  model: z.string().trim().max(160).optional(),
+});
+export type EngineSettingsInput = z.infer<typeof EngineSettingsInputSchema>;
+
 export const StorageInfoSchema = z.object({
   path: z.string().min(1),
   default_path: z.string().min(1),
@@ -785,8 +846,9 @@ export const ApprovalDecisionSchema = z.object({
 
 export type ApiError = { error: string; detail?: string };
 export type TaskEvent = {
-  type: "task.updated" | "codex.status" | "approval.requested" | "system";
+  type: "task.updated" | "codex.status" | "antigravity.status" | "engine.status" | "approval.requested" | "system";
   task?: Task;
+  engine?: EngineId;
   status?: "connected" | "disconnected" | "unavailable" | "connecting";
   message?: string;
   request_id?: number;

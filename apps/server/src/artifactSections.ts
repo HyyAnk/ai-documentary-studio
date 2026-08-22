@@ -8,7 +8,7 @@ export type ArtifactSectionKind = "sequence" | "question" | "continuity_bundle";
  */
 export function extractArtifactSectionNumbers(markdown: string, kind: ArtifactSectionKind): number[] {
   const numbers: number[] = [];
-  const headingPattern = /^##\s+([^\r\n]+)$/gim;
+  const headingPattern = /^#{2,3}\s+([^\r\n]+)$/gim;
   for (const match of markdown.matchAll(headingPattern)) {
     const title = match[1]?.trim() ?? "";
     const number = parseArtifactSectionNumber(title, kind);

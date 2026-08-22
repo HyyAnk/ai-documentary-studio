@@ -117,6 +117,62 @@ describe("bundle image tasks", () => {
     expect(fakeCodex.turnsStarted).toBe(0);
     expect((await repository.listBundleImages(channel.channel_id, episode.episode_id))).toMatchObject([{ filename: "CB-01.png", bundle_id: "CB-01" }]);
   });
+
+  it("serializes multiple bundle image generation tasks strictly to 1 concurrent task", async () => {
+    delete process.env.SHOPAIKEY_API_KEY;
+    const root = await mkdtemp(path.join(os.tmpdir(), "documentary-image-concurrency-"));
+    roots.push(root);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
+    const repository = new RepositoryService(root);
+    const channel = await repository.createChannel({ name: "Sequential Image Channel", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });
+    const topics = Array.from({ length: 5 }, (_, index) => ({ topic_id: `seq_image_topic_${index}`, channel_id: channel.channel_id, title: `Seq Topic ${index}`, premise: "P", why_it_fits: "W", hook: "H", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false }));
+    await repository.saveTopicRun(channel.channel_id, topics);
+    const episode = await repository.confirmTopic(channel.channel_id, topics[0].topic_id);
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "visual_bible.md", "# Visual Bible\n\n## Continuity bundle CB-01 — First\n- Anchor-frame prompt: First image\n\n## Continuity bundle CB-02 — Second\n- Anchor-frame prompt: Second image\n");
+    await repository.saveScenes(channel.channel_id, episode.episode_id, [
+      scene(episode.episode_id, 1, "First"),
+      scene(episode.episode_id, 2, "Second"),
+    ]);
+
+    const logger = new StudioLogger(root);
+    await logger.init();
+
+    let concurrentTurns = 0;
+    let maxConcurrentTurns = 0;
+
+    class SlowImageCodex extends EventEmitter {
+      async connect(): Promise<void> { this.emit("status", "connected"); }
+      async startThread(): Promise<string> { return "seq-thread"; }
+      async startTurn(threadId: string): Promise<string> {
+        concurrentTurns += 1;
+        maxConcurrentTurns = Math.max(maxConcurrentTurns, concurrentTurns);
+        const turnId = `seq-turn-${Date.now()}`;
+        setTimeout(() => {
+          this.emit("notification", { method: "item/agentMessage/delta", params: { threadId, turnId, delta: PNG_DATA_URL } });
+          this.emit("notification", { method: "turn/completed", params: { threadId, turnId, turn: { id: turnId, status: "completed" } } });
+          concurrentTurns -= 1;
+        }, 50);
+        return turnId;
+      }
+      async deleteThread(): Promise<boolean> { return true; }
+      async interruptTurn(): Promise<void> { return undefined; }
+    }
+
+    // maxConcurrent = 4 (for standard tasks), but image tasks should still run with concurrency = 1
+    const manager = new TaskManager(repository, new ContextEngine(repository, logger), new SlowImageCodex() as never, 4, 8, logger, undefined, undefined, undefined, { enabled: true, images_per_bundle: 1 });
+    await manager.load();
+
+    const task1 = manager.submit("GENERATE_BUNDLE_IMAGE", channel.channel_id, episode.episode_id, 1);
+    const task2 = manager.submit("GENERATE_BUNDLE_IMAGE", channel.channel_id, episode.episode_id, 2);
+
+    await waitFor(() => manager.get(task1.task_id).status === "COMPLETED" && manager.get(task2.task_id).status === "COMPLETED");
+
+    expect(maxConcurrentTurns).toBe(1);
+    const images = await repository.listBundleImages(channel.channel_id, episode.episode_id);
+    expect(images.length).toBe(2);
+  });
 });
 
 function scene(episodeId: string, sceneNumber: number, dialogue: string) {

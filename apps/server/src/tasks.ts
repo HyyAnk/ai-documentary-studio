@@ -21,11 +21,14 @@ import {
 } from "@studio/shared";
 import { ContextEngine } from "./context.js";
 import { CodexAppServerClient, type CodexServerRequest } from "./codex.js";
+import { AntigravityClient } from "./antigravity.js";
+import { DEFAULT_CONFIG } from "./config.js";
 import { StudioLogger } from "./logger.js";
 import { RepositoryError, RepositoryService } from "./repository.js";
 import { ChatterboxProvider, synthesizeWav, type ChatterboxTarget } from "./providers/chatterbox.js";
 import { CodexImageProvider } from "./providers/codexImage.js";
 import { ShopAiKeyImageProvider } from "./providers/shopAiKeyImage.js";
+import { AntigravityImageChainProvider } from "./providers/antigravityImageChain.js";
 import type { AudioProvider } from "./providers/index.js";
 import { optimizeShortScenes, packBeatsIntoScenes, rebalanceEditorialOverlays, type Beat } from "./sceneTiming.js";
 import { calibratedScriptTargetWords, countWords, extractNarration, extractNarrationChunks, extractNarrationSections, hasHumorPolicyMarker, scriptWordBounds } from "./production.js";
@@ -62,6 +65,7 @@ type RenderCheckpoint = {
 
 const channelTaskTypes = new Set<TaskType>(["GENERATE_DNA", "SUGGEST_TOPICS"]);
 const audioTaskTypes = new Set<TaskType>(["GENERATE_AUDIO", "GENERATE_NARRATION"]);
+const imageTaskTypes = new Set<TaskType>(["GENERATE_BUNDLE_IMAGE"]);
 const execFileAsync = promisify(execFile);
 const npxCommand = process.platform === "win32" ? process.execPath : "npx";
 const quizRenderer = new HyperframesRenderer();
@@ -78,14 +82,18 @@ export class TaskManager extends EventEmitter {
   private readonly imageVariants = new Map<string, number>();
   private runningCount = 0;
   private runningAudioCount = 0;
+  private runningImageCount = 0;
   private readonly activeAudio = new Set<string>();
   private audioConfig: AppConfig["audio_generation"];
   private imageConfig: AppConfig["image_generation"];
   private videoConfig: AppConfig["video_generation"];
   private readonly audioProviderFactory: (target: ChatterboxTarget, config: AppConfig["audio_generation"]) => AudioProvider;
   private codexCleanupConfig: CodexCleanupConfig;
+  private antigravityCleanupConfig: CodexCleanupConfig;
   private cleanupTimer: NodeJS.Timeout | null = null;
   private connectionStatus: "connected" | "disconnected" | "unavailable" | "connecting" = "disconnected";
+  private antigravityStatus: "connected" | "disconnected" | "unavailable" | "connecting" = "disconnected";
+  private activeEngine: "codex" | "antigravity" = "codex";
 
   constructor(
     private readonly repository: RepositoryService,
@@ -106,8 +114,11 @@ export class TaskManager extends EventEmitter {
     audioProviderFactory?: (target: ChatterboxTarget, config: AppConfig["audio_generation"]) => AudioProvider,
     codexConfig: CodexCleanupConfig = { auto_delete_threads: true, failed_thread_retention_days: 7 },
     imageConfig: AppConfig["image_generation"] = { enabled: true, images_per_bundle: 1 },
+    private readonly antigravity?: AntigravityClient,
+    activeEngine: "codex" | "antigravity" = "codex",
   ) {
     super();
+    this.activeEngine = activeEngine;
     this.videoConfig = typeof videoConfigOrMaxSceneDuration === "number"
       ? { provider: "hyperframes", model: "", hyperframes_command: "npx hyperframes", render_quality: "draft", fps: 30, max_scene_duration_seconds: videoConfigOrMaxSceneDuration, default_scene_duration_seconds: 6, narration_words_per_second: 2.3, aspect_ratio: "16:9" }
       : videoConfigOrMaxSceneDuration;
@@ -115,6 +126,7 @@ export class TaskManager extends EventEmitter {
     this.imageConfig = imageConfig;
     this.audioProviderFactory = audioProviderFactory ?? ((target, config) => new ChatterboxProvider(repository, config, target));
     this.codexCleanupConfig = { auto_delete_threads: codexConfig.auto_delete_threads, failed_thread_retention_days: codexConfig.failed_thread_retention_days };
+    this.antigravityCleanupConfig = { auto_delete_threads: true, failed_thread_retention_days: 0 };
     codex.on("status", (status: typeof this.connectionStatus) => {
       this.connectionStatus = status;
       this.emitEvent({ type: "codex.status", status });
@@ -125,6 +137,13 @@ export class TaskManager extends EventEmitter {
       this.connectionStatus = "unavailable";
       this.emitEvent({ type: "codex.status", status: "unavailable", message: "Codex App Server unavailable" });
     });
+    if (antigravity) {
+      antigravity.on("status", (status: typeof this.antigravityStatus) => {
+        this.antigravityStatus = status;
+        this.emitEvent({ type: "antigravity.status", status });
+      });
+      antigravity.on("notification", (event: { method: string; params: Record<string, unknown> }) => this.handleNotification(event.method, event.params));
+    }
   }
 
   async load(): Promise<void> {
@@ -146,6 +165,7 @@ export class TaskManager extends EventEmitter {
     }
     this.startCleanupTimer();
     void this.cleanupCodexThreads();
+    void this.cleanupAntigravityThreads();
   }
 
   async reload(): Promise<void> {
@@ -155,6 +175,7 @@ export class TaskManager extends EventEmitter {
     this.activeImageControllers.clear();
     this.approvalRequests.clear();
     this.locks.clear();
+    this.runningImageCount = 0;
     this.connectionStatus = this.codex.isConnected ? "connected" : "disconnected";
     await this.load();
   }
@@ -175,6 +196,34 @@ export class TaskManager extends EventEmitter {
     this.codexCleanupConfig = { auto_delete_threads: config.auto_delete_threads, failed_thread_retention_days: config.failed_thread_retention_days };
   }
 
+  updateAntigravityConfig(config: AppConfig["antigravity"]): void {
+    this.antigravityCleanupConfig = { auto_delete_threads: config.auto_delete_threads, failed_thread_retention_days: config.failed_thread_retention_days };
+    if (this.antigravity) {
+      this.antigravity.updateConfig({ ...DEFAULT_CONFIG, antigravity: config });
+    }
+  }
+
+  setActiveEngine(engine: "codex" | "antigravity"): void {
+    this.activeEngine = engine;
+    this.emitEvent({ type: "engine.status", engine, status: this.getStatus() });
+  }
+
+  getActiveEngine(): "codex" | "antigravity" {
+    return this.activeEngine;
+  }
+
+  getStatus(): typeof this.connectionStatus {
+    return this.activeEngine === "antigravity" ? this.antigravityStatus : this.connectionStatus;
+  }
+
+  getCodexStatus(): typeof this.connectionStatus {
+    return this.connectionStatus;
+  }
+
+  getAntigravityStatus(): typeof this.antigravityStatus {
+    return this.antigravityStatus;
+  }
+
   list(): Task[] {
     return [...this.tasks.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
@@ -185,12 +234,8 @@ export class TaskManager extends EventEmitter {
     return task;
   }
 
-  getStatus(): typeof this.connectionStatus {
-    return this.connectionStatus;
-  }
-
   hasActiveWork(): boolean {
-    return this.active.size > 0 || this.activeAudio.size > 0 || this.pipelineRuns.size > 0 || this.runningCount > 0 || this.runningAudioCount > 0 || this.list().some((task) => ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(task.status));
+    return this.active.size > 0 || this.activeAudio.size > 0 || this.activeImageControllers.size > 0 || this.pipelineRuns.size > 0 || this.runningCount > 0 || this.runningAudioCount > 0 || this.runningImageCount > 0 || this.list().some((task) => ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(task.status));
   }
 
   submit(taskType: TaskType, channelId: string, episodeId: string | null, sceneNumber?: number, requestedImageVariant?: number): Task {
@@ -210,6 +255,26 @@ export class TaskManager extends EventEmitter {
       throw new RepositoryError("Production pipeline is already running for this episode", "PIPELINE_ACTIVE");
     }
     const existingQueue = this.list().filter((task) => task.lock_key === lockKey && task.status === "QUEUED").length;
+
+    // When retrying or restarting a pipeline or task, accumulate duration from previous attempts
+    const previousMatchingTasks = this.list().filter((item) =>
+      item.lock_key === lockKey &&
+      item.channel_id === channelId &&
+      item.episode_id === episodeId &&
+      item.task_type === taskType &&
+      item.scene_number === (sceneNumber ?? null) &&
+      ["FAILED", "CANCELLED", "COMPLETED"].includes(item.status)
+    );
+
+    const latestPreviousTask = previousMatchingTasks.sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+    let accumulatedDuration = 0;
+    if (latestPreviousTask) {
+      const start = latestPreviousTask.started_at || latestPreviousTask.created_at;
+      const end = latestPreviousTask.completed_at || nowIso();
+      const elapsed = Math.max(0, Math.floor((new Date(end).getTime() - new Date(start).getTime()) / 1000));
+      accumulatedDuration = (latestPreviousTask.accumulated_duration_seconds || 0) + elapsed;
+    }
+
     const task = TaskSchema.parse({
       task_id: makeId("task"),
       task_type: taskType,
@@ -227,6 +292,7 @@ export class TaskManager extends EventEmitter {
       queue_position: existingQueue,
       progress_message: "Queued",
       scene_number: sceneNumber ?? null,
+      accumulated_duration_seconds: accumulatedDuration,
     });
     if (taskType === "GENERATE_BUNDLE_IMAGE") this.imageVariants.set(task.task_id, imageVariant);
     this.tasks.set(task.task_id, task);
@@ -277,7 +343,7 @@ export class TaskManager extends EventEmitter {
 
   private async pump(): Promise<void> {
     while (this.runningCount < this.maxConcurrent) {
-      const next = this.list().reverse().find((task) => task.status === "QUEUED" && !audioTaskTypes.has(task.task_type) && !this.locks.has(task.lock_key));
+      const next = this.list().reverse().find((task) => task.status === "QUEUED" && !audioTaskTypes.has(task.task_type) && !imageTaskTypes.has(task.task_type) && !this.locks.has(task.lock_key));
       if (!next) break;
       this.locks.add(next.lock_key);
       const isPipeline = next.task_type === "GENERATE_PIPELINE";
@@ -285,6 +351,17 @@ export class TaskManager extends EventEmitter {
       void this.run(next).finally(() => {
         this.locks.delete(next.lock_key);
         if (!isPipeline) this.runningCount -= 1;
+        void this.pump();
+      });
+    }
+    while (this.runningImageCount < 1) {
+      const next = this.list().reverse().find((task) => task.status === "QUEUED" && imageTaskTypes.has(task.task_type) && !this.locks.has(task.lock_key));
+      if (!next) break;
+      this.locks.add(next.lock_key);
+      this.runningImageCount += 1;
+      void this.run(next).finally(() => {
+        this.locks.delete(next.lock_key);
+        this.runningImageCount -= 1;
         void this.pump();
       });
     }
@@ -310,26 +387,81 @@ export class TaskManager extends EventEmitter {
       await this.runVideoTask(task);
       return;
     }
-    if (task.task_type === "GENERATE_BUNDLE_IMAGE" && ShopAiKeyImageProvider.isConfigured()) {
-      await this.runShopAiKeyImageTask(task);
-      return;
+    if (task.task_type === "GENERATE_BUNDLE_IMAGE") {
+      if (this.activeEngine === "antigravity") {
+        await this.runAntigravityBundleImageTask(task);
+        return;
+      }
+      if (ShopAiKeyImageProvider.isConfigured()) {
+        await this.runShopAiKeyImageTask(task);
+        return;
+      }
     }
     const context = { profileId: task.channel_id, workerId: task.task_id, step: `run_task:${task.task_type}` };
     try {
       await this.update(task.task_id, { status: "RUNNING", started_at: nowIso(), queue_position: null, progress_message: "Preparing scoped context" });
       const manifest = await this.contextEngine.build(task.task_type, task.channel_id, task.episode_id, this.findSceneNumber(task.task_id), this.imageVariants.get(task.task_id) ?? 0);
-      await this.update(task.task_id, { progress_message: "Connecting to Codex" });
-      await this.codex.connect();
-      const threadId = task.codex_thread_id ? await this.codex.resumeThread(task.codex_thread_id) : await this.codex.startThread();
-      await this.update(task.task_id, { codex_thread_id: threadId, progress_message: "Generating" });
-      const turnId = await this.codex.startTurn(threadId, manifest.prompt);
-      await this.update(task.task_id, { codex_turn_id: turnId });
-      this.active.set(task.task_id, { task: this.get(task.task_id), threadId, turnId, output: "", manifest, researchAttempts: 0, scriptAttempts: 0, visualBibleAttempts: 0, sequenceAttempts: 0 });
-      await new Promise<void>((resolve) => this.completionWaiters.set(task.task_id, resolve));
-      this.logger.step("Codex turn started", context);
+      const isAntigravity = this.activeEngine === "antigravity" && Boolean(this.antigravity);
+      const client = isAntigravity ? this.antigravity! : this.codex;
+      const engineName = isAntigravity ? "Antigravity" : "Codex";
+      await this.update(task.task_id, { progress_message: `Connecting to ${engineName}` });
+      await client.connect();
+      const threadId = task.codex_thread_id ? await client.resumeThread(task.codex_thread_id) : await client.startThread();
+      const completionPromise = new Promise<void>((resolve) => this.completionWaiters.set(task.task_id, resolve));
+      const activeRecord: ActiveRun = { task: this.get(task.task_id), threadId, turnId: "", output: "", manifest, researchAttempts: 0, scriptAttempts: 0, visualBibleAttempts: 0, sequenceAttempts: 0 };
+      this.active.set(task.task_id, activeRecord);
+      const turnId = await client.startTurn(threadId, manifest.prompt);
+      activeRecord.turnId = turnId;
+      if (this.get(task.task_id).status === "RUNNING") {
+        void this.update(task.task_id, { codex_thread_id: threadId, codex_turn_id: turnId, progress_message: "Generating" });
+      }
+      this.logger.step(`${engineName} turn started`, context);
+      await completionPromise;
     } catch (error) {
       await this.finish(task.task_id, "FAILED", error instanceof Error ? error.message : "Task failed");
-      this.logger.error("Codex task failed", context);
+      this.logger.error(`${this.activeEngine === "antigravity" ? "Antigravity" : "Codex"} task failed`, context);
+    }
+  }
+
+  private async runAntigravityBundleImageTask(task: Task): Promise<void> {
+    const context = { profileId: task.channel_id, workerId: task.task_id, step: "run_antigravity_image" };
+    const controller = new AbortController();
+    this.activeImageControllers.set(task.task_id, controller);
+    try {
+      await this.update(task.task_id, { status: "RUNNING", started_at: nowIso(), queue_position: null, progress_message: "Preparing continuity context", progress_percent: 10 });
+      if (!task.episode_id) throw new RepositoryError("Episode is required", "EPISODE_REQUIRED");
+      const bundleNumber = this.findSceneNumber(task.task_id);
+      if (!bundleNumber) throw new RepositoryError("Bundle number is required", "BUNDLE_REQUIRED");
+      const episode = await this.repository.getEpisode(task.channel_id, task.episode_id);
+      const manifest = await this.contextEngine.build(task.task_type, task.channel_id, task.episode_id, bundleNumber, this.imageVariants.get(task.task_id) ?? 0);
+      await this.update(task.task_id, { progress_message: "Generating continuity image (3-tier chain)", progress_percent: 35 });
+      const visualBible = await this.repository.getEpisodeFile(task.channel_id, task.episode_id, "visual_bible.md").catch(() => null);
+      let promptToUse = manifest.prompt;
+      if (visualBible?.content) {
+        const bundles = parseContinuityBundles(visualBible.content);
+        const bundle = bundles.find((b) => b.bundle_number === bundleNumber);
+        if (bundle?.anchor_prompt) {
+          promptToUse = bundle.anchor_prompt;
+        }
+      }
+      const image = await new AntigravityImageChainProvider(this.repository, {
+        channelId: task.channel_id,
+        episodeId: task.episode_id,
+        bundleNumber,
+        variant: this.imageVariants.get(task.task_id) ?? 0,
+        theme: episode.quiz_config?.visual_theme,
+      }, this.antigravity, { allowTier3Fallback: false }).generateReference(promptToUse, controller.signal);
+      const bundleId = `CB-${String(bundleNumber).padStart(2, "0")}`;
+      await this.repository.attachBundleReference(task.channel_id, task.episode_id, bundleId, image.asset_path);
+      await this.update(task.task_id, { progress_message: "Saving continuity image", progress_percent: 90 });
+      await this.finish(task.task_id, "COMPLETED", null, [image.asset_path]);
+    } catch (error) {
+      if (this.get(task.task_id).status === "CANCELLED") return;
+      const message = error instanceof Error ? error.message : "Image generation failed";
+      await this.finish(task.task_id, "FAILED", message);
+      this.logger.error(message, { ...context, step: "run_antigravity_image" });
+    } finally {
+      this.activeImageControllers.delete(task.task_id);
     }
   }
 
@@ -504,7 +636,13 @@ export class TaskManager extends EventEmitter {
       let assetResolution = await this.repository.readQuizAssetResolution(task.channel_id, task.episode_id);
       if (completeQuizV2 && !assetResolution) {
         await this.update(task.task_id, { progress_message: "Quiz · preparing visual assets", progress_percent: 10 });
-        assetResolution = (await resolveQuizAssets({ repository: this.repository, channelId: task.channel_id, episodeId: task.episode_id, plan: completeQuizV2.assetPlan })).resolution;
+        assetResolution = (await resolveQuizAssets({
+          repository: this.repository,
+          channelId: task.channel_id,
+          episodeId: task.episode_id,
+          plan: completeQuizV2.assetPlan,
+          activeEngine: this.activeEngine,
+        })).resolution;
       }
       // HyperFrames only discovers local media inside the composition directory.
       // Copy resolved assets into this ephemeral render root instead of exposing
@@ -574,6 +712,8 @@ export class TaskManager extends EventEmitter {
       await writeRenderCheckpoint(checkpointPath, { schema_version: 2, source_fingerprint: sourceFingerprint, check: { status: "passed" }, render: { status: "passed" } });
       const duration = Number.parseFloat(probe.probe.format?.duration ?? "");
       if (!Number.isFinite(duration) || duration <= 0) throw new Error("Rendered MP4 has no readable duration");
+      const degradedAssets = (assetResolution?.assets ?? []).filter((a) => a.degraded || a.fallback_tier === 3 || a.source === "fallback");
+      const hasDegradedFallback = degradedAssets.length > 0;
       const manifestPath = await this.repository.writeRenderManifest(task.channel_id, task.episode_id, JSON.stringify({
         engine: "hyperframes",
         quiz_engine_version: completeQuizV2 ? 2 : 1,
@@ -585,6 +725,9 @@ export class TaskManager extends EventEmitter {
         duration_seconds: Number(duration.toFixed(3)),
         resolution: { width: 1920, height: 1080 },
         fps: this.videoConfig.fps,
+        degraded: hasDegradedFallback,
+        fallback_tier: hasDegradedFallback ? 3 : undefined,
+        degraded_assets: hasDegradedFallback ? degradedAssets.map((a) => a.asset_id) : undefined,
         preflight: preflightAssessment ? { status: "passed", score: preflightAssessment.score, blockers: preflightAssessment.issues.filter((issue) => issue.severity === "blocker").length } : { status: "legacy_skipped" },
         check: { status: "passed" },
         render: { status: "passed", output: "quiz-video.mp4" },
@@ -663,6 +806,7 @@ export class TaskManager extends EventEmitter {
       config: { audio_generation: this.audioConfig },
       channelId: task.channel_id,
       episodeId: task.episode_id!,
+      activeEngine: this.activeEngine,
       onAssetProgress: async ({ completed, total, reused }: { completed: number; total: number; reused: boolean }) => {
         await this.update(task.task_id, { progress_message: `Quiz · resolving assets ${completed}/${total}${reused ? " · reused" : ""}`, progress_percent: 76 + Math.round((completed / Math.max(1, total)) * 4) });
       },
@@ -690,7 +834,7 @@ export class TaskManager extends EventEmitter {
       await planAssets(input);
       artifacts = await readQuizArtifacts(input);
     }
-    if (!artifacts.asset_resolution || !artifacts.asset_plan || !(await isQuizAssetResolutionComplete({ repository: this.repository, channelId: task.channel_id, episodeId: task.episode_id!, plan: artifacts.asset_plan, resolution: artifacts.asset_resolution }))) {
+    if (!artifacts.asset_resolution || !artifacts.asset_plan || !(await isQuizAssetResolutionComplete({ repository: this.repository, channelId: task.channel_id, episodeId: task.episode_id!, plan: artifacts.asset_plan, resolution: artifacts.asset_resolution, activeEngine: this.activeEngine }))) {
       await this.update(task.task_id, { progress_message: "Quiz · resolving semantic assets", progress_percent: 79 });
       await resolveAssets(input);
       artifacts = await readQuizArtifacts(input);
@@ -760,7 +904,7 @@ export class TaskManager extends EventEmitter {
       if (run.cancelled) throw new Error("Pipeline cancelled");
       const task = this.get(taskId);
       if (["COMPLETED", "FAILED", "CANCELLED"].includes(task.status)) return task;
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 30));
     }
   }
 
@@ -878,8 +1022,9 @@ export class TaskManager extends EventEmitter {
   private handleNotification(method: string, params: Record<string, unknown>): void {
     const threadId = typeof params.threadId === "string" ? params.threadId : typeof (params.turn as { threadId?: unknown } | undefined)?.threadId === "string" ? (params.turn as { threadId: string }).threadId : null;
     const turnId = typeof params.turnId === "string" ? params.turnId : typeof (params.turn as { id?: unknown } | undefined)?.id === "string" ? (params.turn as { id: string }).id : null;
-    const active = [...this.active.values()].find((run) => (threadId ? run.threadId === threadId : true) && (turnId ? run.turnId === turnId : true));
+    const active = [...this.active.values()].find((run) => (threadId ? run.threadId === threadId : true) && (!run.turnId || !turnId || run.turnId === turnId));
     if (!active) return;
+    if (turnId && !active.turnId) active.turnId = turnId;
     if (method === "item/agentMessage/delta") {
       const delta = typeof params.delta === "string" ? params.delta : params.delta && typeof params.delta === "object" ? JSON.stringify(params.delta) : "";
       active.output += delta;
@@ -970,14 +1115,27 @@ export class TaskManager extends EventEmitter {
         if (!this.imageConfig.enabled) throw new Error("Image generation is disabled in Settings");
         const bundleNumber = this.findSceneNumber(task.task_id);
         if (!bundleNumber) throw new Error("Bundle number is required");
+        const episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
         const imageTarget = {
           channelId: task.channel_id,
           episodeId: task.episode_id!,
           bundleNumber,
           variant: this.imageVariants.get(task.task_id) ?? 0,
+          theme: episode.quiz_config?.visual_theme,
         };
-        const image = ShopAiKeyImageProvider.isConfigured()
-          ? await new ShopAiKeyImageProvider(this.repository, imageTarget).generateReference(active.manifest.prompt)
+        const visualBible = await this.repository.getEpisodeFile(task.channel_id, task.episode_id!, "visual_bible.md").catch(() => null);
+        let promptToUse = active.manifest.prompt;
+        if (visualBible?.content) {
+          const bundles = parseContinuityBundles(visualBible.content);
+          const bundle = bundles.find((b) => b.bundle_number === bundleNumber);
+          if (bundle?.anchor_prompt) {
+            promptToUse = bundle.anchor_prompt;
+          }
+        }
+        const image = this.activeEngine === "antigravity"
+          ? await new AntigravityImageChainProvider(this.repository, imageTarget, this.antigravity, { allowTier3Fallback: false }).generateReference(promptToUse)
+          : ShopAiKeyImageProvider.isConfigured()
+          ? await new ShopAiKeyImageProvider(this.repository, imageTarget).generateReference(promptToUse)
           : await new CodexImageProvider(this.repository, imageTarget, output).generateReference(active.manifest.prompt);
         const bundleId = `CB-${String(bundleNumber).padStart(2, "0")}`;
         await this.repository.attachBundleReference(task.channel_id, task.episode_id!, bundleId, image.asset_path);
@@ -1044,6 +1202,9 @@ export class TaskManager extends EventEmitter {
         outputFiles = [`channels/${channel.slug}/episodes/${episode.slug}/scene_plan.md`];
       }
       await this.finish(task.task_id, "COMPLETED", null, outputFiles);
+      const isAgy = this.activeEngine === "antigravity";
+      const cleanupCfg = isAgy ? this.antigravityCleanupConfig : this.codexCleanupConfig;
+      if (cleanupCfg.auto_delete_threads) void this.tryDeleteThread(active.threadId, isAgy ? "antigravity" : "codex");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not persist Codex output";
       if (active.task.task_type === "GENERATE_RESEARCH" && active.researchAttempts < 1 && message.startsWith("Quiz research quality gate failed")) {
@@ -1092,14 +1253,15 @@ export class TaskManager extends EventEmitter {
     const lastClaimId = `C${String(questionCount).padStart(2, "0")}`;
     const sourceMinimum = Math.max(3, Math.ceil(questionCount / 2));
     const previousThreadId = active.threadId;
-    const threadId = await this.codex.startThread();
-    const turnId = await this.codex.startTurn(threadId, `${active.manifest.prompt}\n\nSTRICT RETRY: The previous Quiz Research response failed validation (${reason}). Start over in a fresh response. The episode has exactly ${questionCount} questions. Return a complete Markdown quiz research dossier with exactly one ledger entry per question and exactly one unique claim ID for each question: C01, C02, ... ${lastClaimId}. Include every ID in order; do not stop at an earlier ID, reuse an ID, or count a source URL as a claim. Every entry must include the question number, canonical answer, child-friendly explanation, direct authoritative URL(s), and ambiguity or safety note. Include at least ${sourceMinimum} distinct direct authoritative URLs. Silently verify the full C01–${lastClaimId} sequence and all ${questionCount} question entries before returning. Return only the dossier, with no planning notes, reasoning, JSON, or explanation outside the Markdown document.`);
+    const client = this.activeEngine === "antigravity" && this.antigravity ? this.antigravity : this.codex;
+    const threadId = await client.startThread();
+    const turnId = await client.startTurn(threadId, `${active.manifest.prompt}\n\nSTRICT RETRY: The previous Quiz Research response failed validation (${reason}). Start over in a fresh response. The episode has exactly ${questionCount} questions. Return a complete Markdown quiz research dossier with exactly one ledger entry per question and exactly one unique claim ID for each question: C01, C02, ... ${lastClaimId}. Include every ID in order; do not stop at an earlier ID, reuse an ID, or count a source URL as a claim. Every entry must include the question number, canonical answer, child-friendly explanation, direct authoritative URL(s), and ambiguity or safety note. Include at least ${sourceMinimum} distinct direct authoritative URLs. Silently verify the full C01–${lastClaimId} sequence and all ${questionCount} question entries before returning. Return only the dossier, with no planning notes, reasoning, JSON, or explanation outside the Markdown document.`);
     active.threadId = threadId;
     active.turnId = turnId;
     active.output = "";
     active.researchAttempts += 1;
     await this.update(active.task.task_id, { codex_thread_id: threadId, codex_turn_id: turnId, progress_message: "Retrying research with complete claim ledger" });
-    if (previousThreadId !== threadId) void this.codex.deleteThread(previousThreadId).catch(() => undefined);
+    if (previousThreadId !== threadId) void client.deleteThread(previousThreadId).catch(() => undefined);
   }
 
   private async retryScript(active: ActiveRun, reason: string): Promise<void> {
@@ -1107,14 +1269,15 @@ export class TaskManager extends EventEmitter {
     const targetWords = calibratedScriptTargetWords(episode, this.videoConfig.narration_words_per_second);
     const bounds = scriptWordBounds(targetWords);
     const previousThreadId = active.threadId;
-    const threadId = await this.codex.startThread();
-    const turnId = await this.codex.startTurn(threadId, `${active.manifest.prompt}\n\nSTRICT RETRY: The previous response failed validation (${reason}). Start over in a fresh response. Return only one Markdown narration script, with no planning, reasoning, research dossier, treatment, tool output, JSON, or explanation. Keep spoken narration between ${bounds.lower} and ${bounds.upper} words for the ${episode.target_duration_minutes}-minute target; aim for approximately ${targetWords} words. Do not echo any scoped files. Preserve the HUMOR_POLICY marker and restrained AUDIO_CUE comments.`);
+    const client = this.activeEngine === "antigravity" && this.antigravity ? this.antigravity : this.codex;
+    const threadId = await client.startThread();
+    const turnId = await client.startTurn(threadId, `${active.manifest.prompt}\n\nSTRICT RETRY: The previous response failed validation (${reason}). Start over in a fresh response. Return only one Markdown narration script, with no planning, reasoning, research dossier, treatment, tool output, JSON, or explanation. Keep spoken narration between ${bounds.lower} and ${bounds.upper} words for the ${episode.target_duration_minutes}-minute target; aim for approximately ${targetWords} words. Do not echo any scoped files. Preserve the HUMOR_POLICY marker and restrained AUDIO_CUE comments.`);
     active.threadId = threadId;
     active.turnId = turnId;
     active.output = "";
     active.scriptAttempts += 1;
     await this.update(active.task.task_id, { codex_thread_id: threadId, codex_turn_id: turnId, progress_message: active.task.task_type === "GENERATE_SCRIPT" && reason.startsWith("Quiz script quality gate failed") ? "Retrying quiz script with strict question format" : "Retrying script with strict word budget" });
-    if (previousThreadId !== threadId) void this.codex.deleteThread(previousThreadId).catch(() => undefined);
+    if (previousThreadId !== threadId) void client.deleteThread(previousThreadId).catch(() => undefined);
   }
 
   private async retryVisualBible(active: ActiveRun, reason: string): Promise<void> {
@@ -1134,14 +1297,15 @@ export class TaskManager extends EventEmitter {
       ? "Include an explicit second-level section named exactly `## Safe motion` with labeled Allowed motion, Prohibited motion, and Reduced-motion fallback rules. The exact phrase `safe motion` must appear in the returned Markdown."
       : "";
     const previousThreadId = active.threadId;
-    const threadId = await this.codex.startThread();
-    const turnId = await this.codex.startTurn(threadId, `${active.manifest.prompt}\n\nSTRICT RETRY: The previous ${isQuiz ? "Quiz " : ""}Visual Bible failed validation (${reason}). Start over in a fresh response. Return only the Markdown ${isQuiz ? "Quiz " : ""}Visual Bible, with no reasoning, research, treatment, tool output, JSON, or explanation. ${bundleRequirement} Every bundle must include Era, Location, Subjects, Palette, Lighting, Anchor-frame prompt, and Reference asset slots. ${quizMotionRequirement} Do not use alternative heading names. Do not omit bundle IDs.`);
+    const client = this.activeEngine === "antigravity" && this.antigravity ? this.antigravity : this.codex;
+    const threadId = await client.startThread();
+    const turnId = await client.startTurn(threadId, `${active.manifest.prompt}\n\nSTRICT RETRY: The previous ${isQuiz ? "Quiz " : ""}Visual Bible failed validation (${reason}). Start over in a fresh response. Return only the Markdown ${isQuiz ? "Quiz " : ""}Visual Bible, with no reasoning, research, treatment, tool output, JSON, or explanation. ${bundleRequirement} Every bundle must include Era, Location, Subjects, Palette, Lighting, Anchor-frame prompt, and Reference asset slots. ${quizMotionRequirement} Do not use alternative heading names. Do not omit bundle IDs.`);
     active.threadId = threadId;
     active.turnId = turnId;
     active.output = "";
     active.visualBibleAttempts += 1;
     await this.update(active.task.task_id, { codex_thread_id: threadId, codex_turn_id: turnId, progress_message: isQuiz ? "Retrying Quiz visual bible with safe motion rules" : "Retrying visual bible with strict continuity schema" });
-    if (previousThreadId !== threadId) void this.codex.deleteThread(previousThreadId).catch(() => undefined);
+    if (previousThreadId !== threadId) void client.deleteThread(previousThreadId).catch(() => undefined);
   }
 
   private async retrySequenceScenes(active: ActiveRun, reason: string): Promise<void> {
@@ -1156,14 +1320,15 @@ export class TaskManager extends EventEmitter {
       : "Return only a JSON array. Copy every word from the exact narration below verbatim and in order into one or more dialogue fields. Split only at natural boundaries; never paraphrase, shorten, add, or omit words. The final narration coverage must be at least 97.5%. Every beat must use a non-empty continuity_bundle_id, a non-empty continuity_note, and a distinct visual_prompt with the exact uppercase sections CAMERA, ACTION, LIGHTING, ATMOSPHERE, and CONTINUITY.";
     const narrationBlock = exactNarration ? `\n\nEXACT NARRATION TO COVER VERBATIM:\n<NARRATION>\n${exactNarration}\n</NARRATION>` : "";
     const previousThreadId = active.threadId;
-    const threadId = await this.codex.startThread();
-    const turnId = await this.codex.startTurn(threadId, `${active.manifest.prompt}\n\nSTRICT RETRY: The previous ${isQuiz ? "Quiz " : ""}shot-plan response failed validation (${reason}). Start over in a fresh response. ${strictContract}${narrationBlock}\n\nDo not omit metadata, use empty strings, repeat prompts, add Markdown fences, add commentary, or return anything except the JSON array.`);
+    const client = this.activeEngine === "antigravity" && this.antigravity ? this.antigravity : this.codex;
+    const threadId = await client.startThread();
+    const turnId = await client.startTurn(threadId, `${active.manifest.prompt}\n\nSTRICT RETRY: The previous ${isQuiz ? "Quiz " : ""}shot-plan response failed validation (${reason}). Start over in a fresh response. ${strictContract}${narrationBlock}\n\nDo not omit metadata, use empty strings, repeat prompts, add Markdown fences, add commentary, or return anything except the JSON array.`);
     active.threadId = threadId;
     active.turnId = turnId;
     active.output = "";
     active.sequenceAttempts += 1;
     await this.update(active.task.task_id, { codex_thread_id: threadId, codex_turn_id: turnId, progress_message: isQuiz ? "Retrying Quiz shot plan with strict continuity metadata" : "Retrying shot plan with strict structure metadata" });
-    if (previousThreadId !== threadId) void this.codex.deleteThread(previousThreadId).catch(() => undefined);
+    if (previousThreadId !== threadId) void client.deleteThread(previousThreadId).catch(() => undefined);
   }
 
   private findSceneNumber(taskId: string): number | undefined {
@@ -1177,8 +1342,10 @@ export class TaskManager extends EventEmitter {
     this.completionWaiters.delete(taskId);
     await this.update(taskId, { status, error, completed_at: nowIso(), output_files: outputFiles.length ? outputFiles : this.get(taskId).output_files, progress_message: status === "COMPLETED" ? "Completed" : error ?? status, progress_percent: status === "COMPLETED" ? 100 : this.get(taskId).progress_percent });
     this.imageVariants.delete(taskId);
-    const shouldDelete = Boolean(threadId && this.codexCleanupConfig.auto_delete_threads && (status === "COMPLETED" || ((status === "FAILED" || status === "CANCELLED") && this.codexCleanupConfig.failed_thread_retention_days === 0)));
-    if (shouldDelete && threadId && await this.tryDeleteThread(threadId)) await this.update(taskId, { codex_thread_id: null });
+    const isAntigravity = this.activeEngine === "antigravity";
+    const cleanupConfig = isAntigravity ? this.antigravityCleanupConfig : this.codexCleanupConfig;
+    const shouldDelete = Boolean(threadId && cleanupConfig.auto_delete_threads && (status === "COMPLETED" || ((status === "FAILED" || status === "CANCELLED") && cleanupConfig.failed_thread_retention_days === 0)));
+    if (shouldDelete && threadId && await this.tryDeleteThread(threadId, isAntigravity ? "antigravity" : "codex")) await this.update(taskId, { codex_thread_id: null });
   }
 
   async cleanupCodexThreads(force = false): Promise<{ removed: number }> {
@@ -1193,20 +1360,41 @@ export class TaskManager extends EventEmitter {
     });
     let removed = 0;
     for (const task of candidates) {
-      if (!task.codex_thread_id || !(await this.tryDeleteThread(task.codex_thread_id))) continue;
+      if (!task.codex_thread_id || !(await this.tryDeleteThread(task.codex_thread_id, "codex"))) continue;
       await this.update(task.task_id, { codex_thread_id: null });
       removed += 1;
     }
     return { removed };
   }
 
+  async cleanupAntigravityThreads(force = false): Promise<{ removed: number }> {
+    if (!force && !this.antigravityCleanupConfig.auto_delete_threads) return { removed: 0 };
+    if (this.antigravity) {
+      return await this.antigravity.cleanupOldSessions(force ? 0 : this.antigravityCleanupConfig.failed_thread_retention_days);
+    }
+    return { removed: 0 };
+  }
+
   private startCleanupTimer(): void {
     if (this.cleanupTimer) return;
-    this.cleanupTimer = setInterval(() => void this.cleanupCodexThreads(), 3 * 60 * 60 * 1000);
+    this.cleanupTimer = setInterval(() => {
+      void this.cleanupCodexThreads();
+      void this.cleanupAntigravityThreads();
+    }, 3 * 60 * 60 * 1000);
     this.cleanupTimer.unref?.();
   }
 
-  private async tryDeleteThread(threadId: string): Promise<boolean> {
+  private async tryDeleteThread(threadId: string, engine?: "codex" | "antigravity"): Promise<boolean> {
+    const targetEngine = engine ?? this.activeEngine;
+    if (targetEngine === "antigravity") {
+      if (!this.antigravity) return false;
+      try {
+        return await this.antigravity.deleteThread(threadId);
+      } catch (error) {
+        this.logger.debug(`Antigravity session cleanup skipped: ${error instanceof Error ? error.message : "unknown error"}`, { step: "antigravity_thread_cleanup" });
+        return false;
+      }
+    }
     const client = this.codex as unknown as { deleteThread?: (id: string) => Promise<boolean> };
     if (!client.deleteThread) return false;
     try {
@@ -1219,7 +1407,19 @@ export class TaskManager extends EventEmitter {
 
   private async update(taskId: string, patch: Partial<Task>): Promise<void> {
     const current = this.get(taskId);
-    const next = TaskSchema.parse({ ...current, ...patch });
+    let effectivePatch = patch;
+    if (["COMPLETED", "FAILED", "CANCELLED"].includes(current.status) && patch.status === undefined) {
+      const { progress_message, progress_percent, ...rest } = patch;
+      if (progress_message !== undefined || progress_percent !== undefined) {
+        if (Object.keys(rest).length === 0) return;
+        effectivePatch = rest;
+      }
+    }
+    if (current.started_at && patch.started_at && patch.status === "RUNNING") {
+      const { started_at, ...rest } = effectivePatch;
+      effectivePatch = rest;
+    }
+    const next = TaskSchema.parse({ ...current, ...effectivePatch });
     this.tasks.set(taskId, next);
     await this.persist(next);
     this.emitTask(next);
@@ -1331,9 +1531,12 @@ async function isValidPngFile(filePath: string): Promise<boolean> {
   }
 }
 
-function extractMarkdown(output: string, fallbackHeading: string): string {
-  const fenced = output.match(/```(?:markdown|md)?\s*([\s\S]*?)```/i)?.[1]?.trim();
-  let value = fenced || output.trim();
+export function extractMarkdown(output: string, fallbackHeading: string): string {
+  let value = output.trim();
+  const outerFenced = value.match(/^(?:[^\r\n]*\r?\n)?```(?:markdown|md)?\r?\n([\s\S]*?)\r?\n```\s*$/i);
+  if (outerFenced) {
+    value = outerFenced[1].trim();
+  }
   const topLevelHeadings = [...value.matchAll(/^#\s+.+$/gm)];
   if (topLevelHeadings.length > 1) {
     const firstTitle = topLevelHeadings[0][0].replace(/^#\s+/, "").trim().toLowerCase();
@@ -1544,14 +1747,14 @@ function validateQuizResearch(markdown: string, questionCount: number): void {
 }
 
 function validateQuizTreatment(markdown: string, questionCount: number): void {
-  const headings = new Set(markdown.match(/^##\s+Question\s+\d+/gim) ?? []).size;
+  const headings = new Set(markdown.match(/^#{2,3}\s+Question\s+\d+/gim) ?? []).size;
   if (headings < questionCount) throw new Error(`Quiz treatment quality gate failed: found ${headings} question blocks for ${questionCount} questions`);
   if (!/time budget/i.test(markdown) || !/correct answer/i.test(markdown)) throw new Error("Quiz treatment quality gate failed: each question needs time budget and correct answer");
 }
 
 export function validateQuizScript(markdown: string, questionCount: number): void {
   if (!hasHumorPolicyMarker(markdown)) throw new Error("Quiz script quality gate failed: HUMOR_POLICY v1 marker is missing");
-  const headingNumbers = [...markdown.matchAll(/^##\s+Question\s+(\d+)\b/gim)].map((match) => Number(match[1]));
+  const headingNumbers = [...markdown.matchAll(/^#{2,3}\s+Question\s+(\d+)\b/gim)].map((match) => Number(match[1]));
   const listNumbers = [...markdown.matchAll(/(?:^|\n)\s*(?:Question\s*)?(\d+)[.)—:-]\s*/gi)].map((match) => Number(match[1]));
   const questionNumbers = new Set(headingNumbers.length > 0 ? headingNumbers : listNumbers);
   const numbered = questionNumbers.size;

@@ -1,8 +1,24 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
-import { AppConfigSchema, AudioSettingsInputSchema, CodexSettingsInputSchema, ImageSettingsInputSchema, VideoSettingsInputSchema, type AppConfig, type AudioSettingsInput, type CodexSettingsInput, type ImageSettingsInput, type VideoSettingsInput } from "@studio/shared";
+import {
+  AppConfigSchema,
+  AudioSettingsInputSchema,
+  CodexSettingsInputSchema,
+  ImageSettingsInputSchema,
+  VideoSettingsInputSchema,
+  AntigravitySettingsInputSchema,
+  EngineSettingsInputSchema,
+  type AppConfig,
+  type AudioSettingsInput,
+  type CodexSettingsInput,
+  type ImageSettingsInput,
+  type VideoSettingsInput,
+  type AntigravitySettingsInput,
+  type EngineSettingsInput,
+} from "@studio/shared";
 
 export const DEFAULT_CONFIG: AppConfig = {
+  active_engine: "codex",
   video_generation: {
     provider: "hyperframes",
     model: "",
@@ -30,6 +46,15 @@ export const DEFAULT_CONFIG: AppConfig = {
     auto_delete_threads: true,
     failed_thread_retention_days: 7,
   },
+  antigravity: {
+    max_concurrent_tasks: 3,
+    command: "agy",
+    model: "pro",
+    api_base_url: "",
+    api_key: "",
+    auto_delete_threads: true,
+    failed_thread_retention_days: 7,
+  },
   audio_generation: {
     provider: "chatterbox",
     service_url: "http://127.0.0.1:8890",
@@ -47,6 +72,7 @@ export type StorageSettings = {
 
 const storageSettingsFilename = "storage.local.json";
 const codexSettingsFilename = "codex.local.json";
+const antigravitySettingsFilename = "antigravity.local.json";
 const audioSettingsFilename = "audio.local.json";
 const imageSettingsFilename = "image.local.json";
 
@@ -62,13 +88,17 @@ async function readJsonFile(filePath: string): Promise<Record<string, unknown>> 
 export async function loadConfig(rootDirectory: string): Promise<AppConfig> {
   const configPath = path.join(rootDirectory, ".documentary-studio", "config.json");
   const localConfigPath = path.join(rootDirectory, ".documentary-studio", codexSettingsFilename);
+  const localAgyConfigPath = path.join(rootDirectory, ".documentary-studio", antigravitySettingsFilename);
   try {
     const raw = await readJsonFile(configPath);
     const local = await readJsonFile(localConfigPath);
+    const localAgy = await readJsonFile(localAgyConfigPath);
     const localAudio = await readJsonFile(path.join(rootDirectory, ".documentary-studio", audioSettingsFilename));
     const localImage = await readJsonFile(path.join(rootDirectory, ".documentary-studio", imageSettingsFilename));
     const trackedCodex = raw.codex && typeof raw.codex === "object" ? raw.codex as Record<string, unknown> : {};
     const localCodex = local.codex && typeof local.codex === "object" ? local.codex as Record<string, unknown> : {};
+    const trackedAgy = raw.antigravity && typeof raw.antigravity === "object" ? raw.antigravity as Record<string, unknown> : {};
+    const localAgySettings = localAgy.antigravity && typeof localAgy.antigravity === "object" ? localAgy.antigravity as Record<string, unknown> : {};
     const trackedAudio = raw.audio_generation && typeof raw.audio_generation === "object" ? raw.audio_generation as Record<string, unknown> : {};
     const localAudioSettings = localAudio.audio_generation && typeof localAudio.audio_generation === "object" ? localAudio.audio_generation as Record<string, unknown> : {};
     const trackedImages = raw.image_generation && typeof raw.image_generation === "object" ? raw.image_generation as Record<string, unknown> : {};
@@ -78,6 +108,7 @@ export async function loadConfig(rootDirectory: string): Promise<AppConfig> {
       ...raw,
       video_generation: { ...DEFAULT_CONFIG.video_generation, ...(raw.video_generation as object | undefined) },
       codex: { ...DEFAULT_CONFIG.codex, ...trackedCodex, api_key: "", ...localCodex },
+      antigravity: { ...DEFAULT_CONFIG.antigravity, ...trackedAgy, api_key: "", ...localAgySettings },
       audio_generation: { ...DEFAULT_CONFIG.audio_generation, ...trackedAudio, ...localAudioSettings },
       image_generation: { ...DEFAULT_CONFIG.image_generation, ...trackedImages, ...localImageSettings },
     });
@@ -86,11 +117,19 @@ export async function loadConfig(rootDirectory: string): Promise<AppConfig> {
     await writeFile(configPath, `${JSON.stringify(DEFAULT_CONFIG, null, 2)}\n`, "utf8");
     const local = await readJsonFile(localConfigPath);
     const localCodex = local.codex && typeof local.codex === "object" ? local.codex as Record<string, unknown> : {};
+    const localAgy = await readJsonFile(localAgyConfigPath);
+    const localAgySettings = localAgy.antigravity && typeof localAgy.antigravity === "object" ? localAgy.antigravity as Record<string, unknown> : {};
     const localAudio = await readJsonFile(path.join(rootDirectory, ".documentary-studio", audioSettingsFilename));
     const localAudioSettings = localAudio.audio_generation && typeof localAudio.audio_generation === "object" ? localAudio.audio_generation as Record<string, unknown> : {};
     const localImage = await readJsonFile(path.join(rootDirectory, ".documentary-studio", imageSettingsFilename));
     const localImageSettings = localImage.image_generation && typeof localImage.image_generation === "object" ? localImage.image_generation as Record<string, unknown> : {};
-    return AppConfigSchema.parse({ ...DEFAULT_CONFIG, codex: { ...DEFAULT_CONFIG.codex, ...localCodex }, audio_generation: { ...DEFAULT_CONFIG.audio_generation, ...localAudioSettings }, image_generation: { ...DEFAULT_CONFIG.image_generation, ...localImageSettings } });
+    return AppConfigSchema.parse({
+      ...DEFAULT_CONFIG,
+      codex: { ...DEFAULT_CONFIG.codex, ...localCodex },
+      antigravity: { ...DEFAULT_CONFIG.antigravity, ...localAgySettings },
+      audio_generation: { ...DEFAULT_CONFIG.audio_generation, ...localAudioSettings },
+      image_generation: { ...DEFAULT_CONFIG.image_generation, ...localImageSettings },
+    });
   }
 }
 
@@ -107,6 +146,41 @@ export async function saveCodexSettings(rootDirectory: string, input: CodexSetti
   }
   await mkdir(settingsDirectory, { recursive: true });
   await writeFile(localPath, `${JSON.stringify({ codex: nextCodex }, null, 2)}\n`, "utf8");
+  return loadConfig(rootDirectory);
+}
+
+export async function saveAntigravitySettings(rootDirectory: string, input: AntigravitySettingsInput): Promise<AppConfig> {
+  const parsed = AntigravitySettingsInputSchema.parse(input);
+  const settingsDirectory = path.join(rootDirectory, ".documentary-studio");
+  const localPath = path.join(settingsDirectory, antigravitySettingsFilename);
+  const currentLocal = await readJsonFile(localPath);
+  const currentAgy = currentLocal.antigravity && typeof currentLocal.antigravity === "object" ? currentLocal.antigravity as Record<string, unknown> : {};
+  const nextAgy = { ...currentAgy } as Record<string, unknown>;
+  for (const key of ["model", "api_base_url", "api_key", "command", "auto_delete_threads", "failed_thread_retention_days"] as const) {
+    const value = parsed[key];
+    if (value !== undefined) nextAgy[key] = value;
+  }
+  await mkdir(settingsDirectory, { recursive: true });
+  await writeFile(localPath, `${JSON.stringify({ antigravity: nextAgy }, null, 2)}\n`, "utf8");
+  return loadConfig(rootDirectory);
+}
+
+export async function saveEngineSettings(rootDirectory: string, input: EngineSettingsInput): Promise<AppConfig> {
+  const parsed = EngineSettingsInputSchema.parse(input);
+  const configPath = path.join(rootDirectory, ".documentary-studio", "config.json");
+  await mkdir(path.dirname(configPath), { recursive: true });
+  const raw = await readJsonFile(configPath);
+  raw.active_engine = parsed.active_engine;
+  await writeFile(configPath, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+
+  if (parsed.model) {
+    if (parsed.active_engine === "antigravity") {
+      await saveAntigravitySettings(rootDirectory, { model: parsed.model });
+    } else {
+      await saveCodexSettings(rootDirectory, { model: parsed.model });
+    }
+  }
+
   return loadConfig(rootDirectory);
 }
 

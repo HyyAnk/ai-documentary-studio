@@ -36,6 +36,7 @@ async function main() {
     await Promise.all(["example_channel_dna.md", "quiz_channel_dna.md", "example_style_guide.md"].map((file) => copyFile(path.join(workspace, "templates", file), path.join(root, "templates", file))));
   }
   const app = await buildApp(root, { environmentRoot: workspace });
+  await app.server.inject({ method: "POST", url: "/api/engine", payload: { active_engine: "antigravity" } });
   try {
     let channel: Channel;
     let episode: Episode;
@@ -60,6 +61,7 @@ async function main() {
       const director = createGoldenDirector(quiz);
       await app.repository.writeDirectorPlan(channel.channel_id, episode.episode_id, director);
       await call(app, `${base}/assets/plan`, "asset-plan");
+      await call(app, `${base}/assets/resolve`, "asset-resolve");
     }
     await call(app, `${base}/voice/generate`, "voice");
     await call(app, `${base}/timeline/compile`, "timeline");

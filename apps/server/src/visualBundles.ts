@@ -6,7 +6,7 @@ export type ContinuityBundle = {
   anchor_prompt: string;
 };
 
-const bundleHeading = /^##\s+Continuity bundle\s+(CB-(\d{2,}))(?:\s*[—-]\s*(.*))?\s*$/gim;
+const bundleHeading = /^#{2,3}\s+Continuity bundle\s+(CB[-_ ]?0*(\d+))(?:\s*[:.—-]\s*(.*))?\s*$/gim;
 
 export function parseContinuityBundles(markdown: string): ContinuityBundle[] {
   const matches = [...markdown.matchAll(bundleHeading)];
@@ -14,11 +14,12 @@ export function parseContinuityBundles(markdown: string): ContinuityBundle[] {
     const start = match.index ?? 0;
     const end = matches[index + 1]?.index ?? markdown.length;
     const section = markdown.slice(start, end).trim();
-    const bundleId = match[1].toUpperCase();
+    const bundleNumber = Number(match[2]);
+    const bundleId = continuityBundleId(bundleNumber);
     const prompt = extractLabeledField(section, "Anchor-frame prompt");
     return {
       bundle_id: bundleId,
-      bundle_number: Number(match[2]),
+      bundle_number: bundleNumber,
       title: match[3]?.trim() || bundleId,
       section,
       anchor_prompt: prompt,
@@ -27,9 +28,14 @@ export function parseContinuityBundles(markdown: string): ContinuityBundle[] {
 }
 
 function extractLabeledField(section: string, label: string): string {
-  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = section.match(new RegExp(`(?:^|\\n)\\s*(?:[-*]\\s*)?(?:\\*\\*)?${escapedLabel}(?:\\*\\*)?\\s*:\\s*([\\s\\S]*?)(?=\\n\\s*(?:[-*]\\s*)?(?:\\*\\*)?[A-Z][^\\n:]{1,80}(?:\\*\\*)?\\s*:|\\n##\\s|$)`, "i"));
-  return match?.[1]?.trim().replace(/\s+/g, " ") ?? "";
+  const variations = [label, label.replace(/-/g, " "), label.replace(/-frame/i, "")];
+  const pattern = variations.map((v) => v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const nextFieldPattern = "\\n\\s*(?:[-*]\\s*)?(?:\\*\\*)?(?:Reference asset slots|Allowed (?:shot|camera)?\\s*variation|Era|Setting|Location|Subjects|Objects|Wardrobe|Palette|Lighting|Texture|Atmosphere|Continuity bundle)(?:\\*\\*)?\\s*:";
+  const match = section.match(new RegExp(`(?:^|\\n)\\s*(?:[-*]\\s*)?(?:\\*\\*)?(?:${pattern})(?:\\*\\*)?\\s*:\\s*([\\s\\S]*?)(?=${nextFieldPattern}|\\n#{2,3}\\s|$)`, "i"));
+  let text = match?.[1]?.trim() ?? "";
+  const codeBlock = text.match(/^```(?:[a-z0-9_-]+)?\r?\n([\s\S]*?)\r?\n```$/i);
+  if (codeBlock) text = codeBlock[1].trim();
+  return text.replace(/\s+/g, " ");
 }
 
 export function continuityBundleId(bundleNumber: number): string {

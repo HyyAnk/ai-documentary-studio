@@ -141,4 +141,50 @@ describe("ContextEngine", () => {
     expect(context.prompt).toContain("CB-05");
     expect(context.prompt).toContain('continuity_bundle_id \\"CB-06\\"');
   });
+
+  it("scopes research dossier to only the requested sequence claim in long dossiers", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "documentary-scoped-research-"));
+    roots.push(root);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await mkdir(path.join(root, "shared"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
+    const repository = new RepositoryService(root);
+    const channel = await repository.createChannel({ name: "Lean Scoping", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });
+    const topic = { topic_id: "scoped_topic", channel_id: channel.channel_id, title: "Scoped Topic", premise: "A premise", why_it_fits: "A fit", hook: "A hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false };
+    await repository.saveTopicRun(channel.channel_id, [topic, ...Array.from({ length: 4 }, (_, index) => ({ ...topic, topic_id: `scoped_topic_${index + 2}`, title: `Other ${index + 2}` }))]);
+    const episode = await repository.confirmTopic(channel.channel_id, topic.topic_id);
+
+    // Create a large 10-claim research dossier (> 5000 chars)
+    const longResearch = [
+      "# Research Dossier: Mega Vehicles\n",
+      "## 1. Answer Ledger\n",
+      "| Question | Claim ID | Canonical Answer | Explanation | Direct URL |",
+      "| :--- | :--- | :--- | :--- | :--- |",
+      "| **Q1** | C01 | Crawler Transporter | Giant rocket carrier | https://nasa.gov |",
+      "| **Q2** | C02 | Mining Truck | Open pit hauler | https://cat.com |",
+      "| **Q5** | C05 | Polar Icebreaker | Smashes thick polar pack ice | https://uscg.mil |",
+      "\n## 2. Chronology of Events\n" + "History entry line.\n".repeat(40),
+      "\n## 3. Deep-Dive\n",
+      "### C01: Crawler Transporter\n" + "Crawler detail paragraph.\n".repeat(30),
+      "### C02: Mining Truck\n" + "Mining truck paragraph.\n".repeat(30),
+      "### C05: Polar Icebreaker Ship\n" + "Icebreaker crushing physics and bow specifications.\n".repeat(20),
+    ].join("\n");
+
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "research.md", longResearch);
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "treatment.md", "## Question 5 — Polar Icebreaker\nPurpose: Ice crushing test");
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "script.md", "## Question 5 — Polar Icebreaker\nLook at this red bow!");
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "visual_bible.md", "## Continuity bundle CB-05 — Polar Icebreaker\n- Anchor-frame prompt: Red icebreaker prow.");
+
+    const logger = new StudioLogger(root, true);
+    await logger.init();
+    const context = await new ContextEngine(repository, logger).build("GENERATE_SEQUENCE_SCENES", channel.channel_id, episode.episode_id, 5);
+
+    expect(context.prompt).toContain("Polar Icebreaker");
+    expect(context.prompt).toContain("Icebreaker crushing physics");
+    expect(context.prompt).toContain("C05");
+    // Verify that unrelated large deep-dive paragraphs (C01, C02) are excluded from this sequence's context
+    expect(context.prompt).not.toContain("Crawler detail paragraph.");
+    expect(context.prompt).not.toContain("Mining truck paragraph.");
+  });
 });

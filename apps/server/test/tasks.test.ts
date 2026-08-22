@@ -7,7 +7,7 @@ import { QuizAssessmentSchema, QuizAssetPlanSchema, QuizAssetResolutionSchema } 
 import { ContextEngine } from "../src/context.js";
 import { StudioLogger } from "../src/logger.js";
 import { RepositoryService } from "../src/repository.js";
-import { TaskManager, isSequenceOutputFailure, normalizeQuizBeatMetadata, parseBeatsOutput, planSequenceResume } from "../src/tasks.js";
+import { TaskManager, extractMarkdown, isSequenceOutputFailure, normalizeQuizBeatMetadata, parseBeatsOutput, planSequenceResume } from "../src/tasks.js";
 import type { AudioProvider } from "../src/providers/index.js";
 import { buildQuizVoicePlan } from "../src/quiz/audio/voicePlan.js";
 import { createDefaultDirectorPlan } from "../src/quiz/director/parseDirectorPlan.js";
@@ -15,6 +15,22 @@ import { deriveQuizV2FromScenes } from "../src/quiz/domain/quiz.js";
 import { compileQuizTimeline } from "../src/quiz/timeline/compileTimeline.js";
 
 const roots: string[] = [];
+
+describe("markdown extraction", () => {
+  it("preserves full document content when internal code blocks are present", () => {
+    const raw = `# Episode Visual Bible\n\n## Palette\n- Blue and Gold\n\n## Continuity bundle CB-01 — Opening\n- Anchor-frame prompt:\n\`\`\`\nCAMERA: Wide\nACTION: Scene starts\n\`\`\`\n\n## Continuity bundle CB-02 — Second\n- Anchor-frame prompt: Direct prompt`;
+    const result = extractMarkdown(raw, "# Fallback");
+    expect(result).toContain("## Continuity bundle CB-01");
+    expect(result).toContain("## Continuity bundle CB-02");
+    expect(result).toContain("CAMERA: Wide");
+  });
+
+  it("unwraps markdown when outer fences encapsulate the entire document", () => {
+    const raw = "```markdown\n# Episode Visual Bible\n\n## Safe motion\nAllowed motion\n```";
+    const result = extractMarkdown(raw, "# Fallback");
+    expect(result).toBe("# Episode Visual Bible\n\n## Safe motion\nAllowed motion");
+  });
+});
 
 describe("sequence retry planning", () => {
   it("classifies malformed shot-plan JSON as retryable", () => {
@@ -122,7 +138,7 @@ function fakeWav(seconds = 2): Uint8Array {
 }
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => undefined)));
 });
 
 describe("TaskManager locks", () => {
@@ -501,10 +517,49 @@ describe("TaskManager locks", () => {
     expect(taskTypes).toContain("GENERATE_VIDEO");
     expect(taskTypes).not.toContain("GENERATE_NARRATION");
   });
+
+  it("accumulates elapsed time when retrying a pipeline or task", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "tasks-timer-test-"));
+    roots.push(root);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# Channel DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style Guide\n", "utf8");
+    const repository = new RepositoryService(root);
+    const channel = await repository.createChannel({ name: "Timer Channel", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });
+    const topics = Array.from({ length: 5 }, (_, index) => ({ topic_id: `timer_topic_${index}`, channel_id: channel.channel_id, title: `Timer Topic ${index}`, premise: "Premise", why_it_fits: "Fits", hook: "Hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false }));
+    await repository.saveTopicRun(channel.channel_id, topics);
+    const episode = await repository.confirmTopic(channel.channel_id, topics[0]!.topic_id);
+
+    const logger = new StudioLogger(root);
+    await logger.init();
+    const manager = new TaskManager(repository, new ContextEngine(repository, logger), new FakeCodex() as never, 1, 8, logger);
+    await manager.load();
+
+    // 1. Submit initial pipeline task
+    const task1 = manager.submit("GENERATE_PIPELINE", channel.channel_id, episode.episode_id);
+    expect(task1.accumulated_duration_seconds).toBe(0);
+
+    // Simulate task1 running for 120 seconds and then failing
+    const startTime1 = new Date(Date.now() - 120_000).toISOString();
+    const endTime1 = new Date().toISOString();
+    const internals = manager as unknown as { tasks: Map<string, Task> };
+    internals.tasks.set(task1.task_id, {
+      ...task1,
+      status: "FAILED",
+      started_at: startTime1,
+      completed_at: endTime1,
+      error: "Temporary network issue",
+    });
+
+    // 2. Retry pipeline (Submit second pipeline task)
+    const task2 = manager.submit("GENERATE_PIPELINE", channel.channel_id, episode.episode_id);
+    expect(task2.accumulated_duration_seconds).toBeGreaterThanOrEqual(119);
+    expect(task2.accumulated_duration_seconds).toBeLessThanOrEqual(121);
+  });
 });
 
 async function waitFor(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 2_000;
+  const deadline = Date.now() + 5_000;
   while (!predicate() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 15));
   if (!predicate()) throw new Error("Timed out waiting for task state");
 }

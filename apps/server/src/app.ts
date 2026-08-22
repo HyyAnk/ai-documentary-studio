@@ -11,6 +11,8 @@ import {
   AssignVoiceInputSchema,
   AudioSettingsInputSchema,
   CodexSettingsInputSchema,
+  AntigravitySettingsInputSchema,
+  EngineSettingsInputSchema,
   CreateVoiceInputSchema,
   CreateChannelInputSchema,
   GenerateAllAudioInputSchema,
@@ -30,8 +32,19 @@ import {
   type Task,
   type TaskType,
 } from "@studio/shared";
-import { loadConfig, loadStorageRoot, saveAudioSettings, saveCodexSettings, saveImageSettings, saveStorageRoot, saveVideoSettings } from "./config.js";
+import {
+  loadConfig,
+  loadStorageRoot,
+  saveAudioSettings,
+  saveCodexSettings,
+  saveAntigravitySettings,
+  saveEngineSettings,
+  saveImageSettings,
+  saveStorageRoot,
+  saveVideoSettings,
+} from "./config.js";
 import { CodexAppServerClient } from "./codex.js";
+import { AntigravityClient } from "./antigravity.js";
 import { ContextEngine } from "./context.js";
 import { StudioLogger } from "./logger.js";
 import { RepositoryError, RepositoryService } from "./repository.js";
@@ -86,8 +99,22 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
   await repository.ensureBootstrap();
   let config = await loadConfig(rootDirectory);
   const codex = new CodexAppServerClient(rootDirectory, config, logger);
+  const antigravity = new AntigravityClient(rootDirectory, config, logger);
   const contextEngine = new ContextEngine(repository, logger);
-  const tasks = new TaskManager(repository, contextEngine, codex, config.codex.max_concurrent_tasks, config.video_generation, logger, config.audio_generation, undefined, config.codex, config.image_generation);
+  const tasks = new TaskManager(
+    repository,
+    contextEngine,
+    codex,
+    config.codex.max_concurrent_tasks,
+    config.video_generation,
+    logger,
+    config.audio_generation,
+    undefined,
+    config.codex,
+    config.image_generation,
+    antigravity,
+    config.active_engine,
+  );
   await tasks.load();
   const getStorageInfo = (): StorageInfo => ({
     path: repository.storageRoot,
@@ -116,7 +143,13 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     }
   });
 
-  server.get("/api/health", async () => ({ ok: true, service: "ai-documentary-studio", codex_status: tasks.getStatus() }));
+  server.get("/api/health", async () => ({
+    ok: true,
+    service: "ai-documentary-studio",
+    active_engine: tasks.getActiveEngine(),
+    codex_status: tasks.getCodexStatus(),
+    antigravity_status: tasks.getAntigravityStatus(),
+  }));
   server.post("/api/shutdown", async (_request, reply) => {
     if (process.platform === "win32") {
       const script = path.join(rootDirectory, "scripts", "stop-dashboard.ps1");
@@ -130,12 +163,18 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     await reply.code(202).send({ ok: true });
     setTimeout(() => {
       void codex.close().catch(() => undefined).finally(() => {
-        void server.close().finally(() => process.exit(0));
+        void antigravity.close().catch(() => undefined).finally(() => {
+          void server.close().finally(() => process.exit(0));
+        });
       });
     }, 500);
   });
   server.get("/api/git", async () => repository.getGitInfo());
-  server.get("/api/config", async () => ({ ...config, codex: { ...config.codex, api_key: "" } }));
+  server.get("/api/config", async () => ({
+    ...config,
+    codex: { ...config.codex, api_key: "" },
+    antigravity: { ...config.antigravity, api_key: "" },
+  }));
   server.get("/api/storage", async () => getStorageInfo());
   server.post("/api/storage", async (request) => {
     const { path: requestedPath } = StoragePathInputSchema.parse(request.body);
@@ -155,6 +194,40 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     logger.ok("Content storage folder updated", { step: "storage" });
     return getStorageInfo();
   });
+
+  server.get("/api/engine", async () => {
+    const activeEngine = tasks.getActiveEngine();
+    return {
+      active_engine: activeEngine,
+      status: tasks.getStatus(),
+      model: activeEngine === "antigravity" ? config.antigravity.model : config.codex.model,
+      codex: {
+        status: tasks.getCodexStatus(),
+        model: config.codex.model,
+        models: await codex.getModels().catch(() => []),
+      },
+      antigravity: {
+        status: tasks.getAntigravityStatus(),
+        model: config.antigravity.model,
+        models: await antigravity.getModels().catch(() => []),
+      },
+    };
+  });
+
+  server.post("/api/engine", async (request) => {
+    const input = EngineSettingsInputSchema.parse(request.body);
+    if (tasks.hasActiveWork()) throw new RepositoryError("Finish active tasks before changing engine", "ENGINE_BUSY");
+    config = await saveEngineSettings(rootDirectory, input);
+    tasks.setActiveEngine(config.active_engine);
+    codex.updateConfig(config);
+    antigravity.updateConfig(config);
+    return {
+      active_engine: config.active_engine,
+      status: tasks.getStatus(),
+      model: config.active_engine === "antigravity" ? config.antigravity.model : config.codex.model,
+    };
+  });
+
   server.get("/api/codex/info", async () => codex.detectInstallation());
   server.get("/api/codex/settings", async () => ({
     settings: {
@@ -196,6 +269,51 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     };
   });
   server.post("/api/codex/cleanup", async () => tasks.cleanupCodexThreads(true));
+  server.post("/api/antigravity/cleanup", async () => tasks.cleanupAntigravityThreads(true));
+
+  server.get("/api/antigravity/info", async () => antigravity.detectInstallation());
+  server.get("/api/antigravity/settings", async () => ({
+    settings: {
+      model: config.antigravity.model,
+      command: config.antigravity.command,
+      api_base_url: config.antigravity.api_base_url,
+      has_api_key: Boolean(config.antigravity.api_key),
+      auto_delete_threads: config.antigravity.auto_delete_threads,
+      failed_thread_retention_days: config.antigravity.failed_thread_retention_days,
+    },
+    models: await antigravity.getModels().catch(() => []),
+    installation: await antigravity.detectInstallation(),
+  }));
+  server.get("/api/antigravity/models", async () => {
+    try {
+      const models = await antigravity.getModels();
+      return { models };
+    } catch (error) {
+      throw new RepositoryError(error instanceof Error ? error.message : "Failed to load Antigravity models", "ANTIGRAVITY_MODELS_FAILED");
+    }
+  });
+  server.post("/api/antigravity/settings", async (request) => {
+    const input = AntigravitySettingsInputSchema.parse(request.body);
+    if (tasks.hasActiveWork()) throw new RepositoryError("Finish active tasks before changing Antigravity settings", "ANTIGRAVITY_SETTINGS_BUSY");
+    const wasConnected = antigravity.isConnected;
+    if (wasConnected) await antigravity.close();
+    config = await saveAntigravitySettings(rootDirectory, input);
+    antigravity.updateConfig(config);
+    tasks.updateAntigravityConfig(config.antigravity);
+    if (wasConnected) await antigravity.connect().catch(() => undefined);
+    return {
+      settings: {
+        model: config.antigravity.model,
+        command: config.antigravity.command,
+        api_base_url: config.antigravity.api_base_url,
+        has_api_key: Boolean(config.antigravity.api_key),
+        auto_delete_threads: config.antigravity.auto_delete_threads,
+        failed_thread_retention_days: config.antigravity.failed_thread_retention_days,
+      },
+      models: await antigravity.getModels().catch(() => []),
+      installation: await antigravity.detectInstallation(),
+    };
+  });
   server.post("/api/audio/settings", async (request) => {
     const input = AudioSettingsInputSchema.parse(request.body);
     if (tasks.hasActiveWork()) throw new RepositoryError("Finish active tasks before changing audio settings", "AUDIO_SETTINGS_BUSY");
@@ -353,7 +471,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
   });
   server.post("/api/channels/:channelId/episodes/:episodeId/quiz-v2/assets/resolve", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };
-    return resolveAssets({ repository, config, channelId: params.channelId, episodeId: params.episodeId });
+    return resolveAssets({ repository, config, channelId: params.channelId, episodeId: params.episodeId, activeEngine: tasks.getActiveEngine() });
   });
   server.post("/api/channels/:channelId/episodes/:episodeId/quiz-v2/voice/plan", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };

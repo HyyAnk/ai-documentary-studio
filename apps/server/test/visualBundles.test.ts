@@ -20,6 +20,24 @@ describe("continuity bundles", () => {
     ]);
   });
 
+  it("handles level 3 headings, colon separators, single digits, and nested prompt blocks", () => {
+    const markdown = `# Quiz Visual Bible\n\n### Continuity bundle CB-1: Saturn and Moons\n- Era: Contemporary\n- **Anchor-frame prompt**:\n\`\`\`\nCAMERA: Wide shot\nACTION: Saturn rotates\n\`\`\`\n\n## Continuity bundle CB-02 — Neptune Storms\n- Anchor frame prompt: Blue planet with white streaks`;
+    const bundles = parseContinuityBundles(markdown);
+    expect(bundles).toHaveLength(2);
+    expect(bundles[0]).toMatchObject({
+      bundle_id: "CB-01",
+      bundle_number: 1,
+      title: "Saturn and Moons",
+    });
+    expect(bundles[0].anchor_prompt).toContain("CAMERA: Wide shot");
+    expect(bundles[1]).toMatchObject({
+      bundle_id: "CB-02",
+      bundle_number: 2,
+      title: "Neptune Storms",
+      anchor_prompt: "Blue planet with white streaks",
+    });
+  });
+
   it("writes one image and propagates its reference to every matching scene", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "documentary-bundles-"));
     roots.push(root);

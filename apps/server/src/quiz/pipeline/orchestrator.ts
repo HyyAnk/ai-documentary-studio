@@ -28,6 +28,7 @@ export type QuizOrchestratorInput = {
   config: Pick<AppConfig, "audio_generation">;
   channelId: string;
   episodeId: string;
+  activeEngine?: "codex" | "antigravity";
   onAssetProgress?: (progress: { completed: number; total: number; reused: boolean }) => Promise<void> | void;
   onVoiceProgress?: (progress: { completed: number; total: number; reused: boolean }) => Promise<void> | void;
   onVoicePacingClamp?: (details: QuizVoicePacingClamp) => Promise<void> | void;
@@ -96,7 +97,14 @@ export async function planAssets(input: QuizOrchestratorInput): Promise<{ asset_
 export async function resolveAssets(input: QuizOrchestratorInput): Promise<{ asset_resolution: QuizAssetResolution; issues: QuizIssue[]; invalidated: string[] }> {
   const asset_plan = await input.repository.readAssetPlan(input.channelId, input.episodeId);
   if (!asset_plan) throw new RepositoryError("Plan Quiz assets before resolving them", "ASSET_PLAN_REQUIRED");
-  const result = await resolveQuizAssets({ repository: input.repository, channelId: input.channelId, episodeId: input.episodeId, plan: asset_plan, onProgress: input.onAssetProgress });
+  const result = await resolveQuizAssets({
+    repository: input.repository,
+    channelId: input.channelId,
+    episodeId: input.episodeId,
+    plan: asset_plan,
+    activeEngine: input.activeEngine,
+    onProgress: input.onAssetProgress,
+  });
   const invalidated = await input.repository.invalidateQuizArtifacts(input.channelId, input.episodeId, invalidateQuizArtifacts("asset_resolution"));
   return { asset_resolution: result.resolution, issues: result.issues, invalidated };
 }

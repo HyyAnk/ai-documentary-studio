@@ -53,6 +53,20 @@ export function assessQuiz(input: QuizAssessmentInput): QuizAssessment {
       if (asset.required && !resolved.has(asset.asset_id)) add({ code: "asset_required_unresolved", severity: "blocker", message: "Required asset " + asset.asset_id + " is unresolved.", next_action: "Resolve the exact semantic asset before rendering.", question_ids: asset.question_id ? [asset.question_id] : [], stage: "assets" });
     }
   }
+  if (input.resolvedAssets) {
+    for (const asset of input.resolvedAssets as Array<{ asset_id: string; path: string; source: string; degraded?: boolean; fallback_tier?: number; question_id?: string }>) {
+      if (asset.degraded || asset.fallback_tier === 3 || asset.source === "fallback") {
+        add({
+          code: "asset_fallback_degraded",
+          severity: "warning",
+          message: `Asset ${asset.asset_id} used Tier 3 deterministic fallback.`,
+          next_action: "Operator review recommended: check placeholder visual readability or regenerate image with an AI provider.",
+          question_ids: asset.question_id ? [asset.question_id] : [],
+          stage: "assets",
+        });
+      }
+    }
+  }
   if (input.voicePlan && input.measuredAudio === false) add({ code: "voice_measurement_missing", severity: "blocker", message: "Voice segments exist but measured narration durations are missing.", next_action: "Synthesize narration through Chatterbox and persist measured WAV durations.", question_ids: [], stage: "voice" });
   if (input.voicePlan && input.measuredAudio && input.voicePlan.segments.every((segment) => segment.duration_seconds !== null)) {
     const wordsPerSecond = quizVoiceWordsPerSecond(input.voicePlan);

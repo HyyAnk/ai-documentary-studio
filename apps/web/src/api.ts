@@ -1,8 +1,37 @@
-import type { AppConfig, Channel, CodexSettingsInput, CodexSettingsResponse, DirectorPlan, Episode, ProductionAssessment, QuizAssessment, QuizAssetPlan, QuizTimeline, QuizV2, Scene, StorageInfo, Task, TaskEvent, TopicCandidate, VoiceProfile, VoicePlan } from "@studio/shared";
+import type {
+  AppConfig,
+  Channel,
+  CodexSettingsInput,
+  CodexSettingsResponse,
+  AntigravitySettingsInput,
+  AntigravitySettingsResponse,
+  DirectorPlan,
+  Episode,
+  ProductionAssessment,
+  QuizAssessment,
+  QuizAssetPlan,
+  QuizTimeline,
+  QuizV2,
+  Scene,
+  StorageInfo,
+  Task,
+  TaskEvent,
+  TopicCandidate,
+  VoiceProfile,
+  VoicePlan,
+} from "@studio/shared";
 
 export type BundleImage = { bundle_id: string; bundle_number: number; variant: number; filename: string; path: string; size: number; modified_at: string };
 export type QuizV2Stages = Record<"research" | "questions" | "director" | "assets" | "voice" | "timeline" | "qa" | "render", "not_started" | "ready" | "stale" | "running" | "failed">;
 export type QuizV2State = { quiz: QuizV2 | null; director_plan: DirectorPlan | null; asset_plan: QuizAssetPlan | null; asset_resolution?: { assets: Array<{ asset_id: string; path: string; source: string }> } | null; voice_plan: VoicePlan | null; timeline: QuizTimeline | null; assessment: QuizAssessment | null; stages: QuizV2Stages };
+
+export type EngineInfoResponse = {
+  active_engine: "codex" | "antigravity";
+  status: string;
+  model: string;
+  codex: { status: string; model: string; models: Array<{ id: string; label: string }> };
+  antigravity: { status: string; model: string; models: Array<{ id: string; label: string }> };
+};
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
@@ -65,9 +94,15 @@ export const api = {
   approve: (id: string, requestId: number, decision: string) => request<Task>(`/api/tasks/${id}/approval`, { method: "POST", body: JSON.stringify({ request_id: requestId, decision }) }),
   git: () => request<{ branch: string | null; dirty: boolean; changed_files: number }>("/api/git"),
   config: () => request<AppConfig>("/api/config"),
+  engine: () => request<EngineInfoResponse>("/api/engine"),
+  setEngine: (active_engine: "codex" | "antigravity", model?: string) => request<{ active_engine: "codex" | "antigravity"; status: string; model: string }>("/api/engine", { method: "POST", body: JSON.stringify({ active_engine, model }) }),
   codexSettings: () => request<CodexSettingsResponse>("/api/codex/settings"),
   saveCodexSettings: (body: CodexSettingsInput) => request<CodexSettingsResponse>("/api/codex/settings", { method: "POST", body: JSON.stringify(body) }),
   cleanupCodex: () => request<{ removed: number }>("/api/codex/cleanup", { method: "POST", body: "{}" }),
+  cleanupAntigravity: () => request<{ removed: number }>("/api/antigravity/cleanup", { method: "POST", body: "{}" }),
+  antigravitySettings: () => request<AntigravitySettingsResponse>("/api/antigravity/settings"),
+  saveAntigravitySettings: (body: AntigravitySettingsInput) => request<AntigravitySettingsResponse>("/api/antigravity/settings", { method: "POST", body: JSON.stringify(body) }),
+  antigravityModels: () => request<{ models: AntigravitySettingsResponse["models"] }>("/api/antigravity/models"),
   saveAudioSettings: (body: AppConfig["audio_generation"]) => request<{ audio_generation: AppConfig["audio_generation"] }>("/api/audio/settings", { method: "POST", body: JSON.stringify(body) }),
   saveVideoSettings: (body: Pick<AppConfig["video_generation"], "max_scene_duration_seconds" | "narration_words_per_second">) => request<{ video_generation: AppConfig["video_generation"] }>("/api/video/settings", { method: "POST", body: JSON.stringify(body) }),
   saveImageSettings: (body: AppConfig["image_generation"]) => request<{ image_generation: AppConfig["image_generation"] }>("/api/image/settings", { method: "POST", body: JSON.stringify(body) }),

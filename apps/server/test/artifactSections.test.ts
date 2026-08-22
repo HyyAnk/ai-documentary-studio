@@ -14,4 +14,11 @@ describe("artifact section numbering", () => {
 
     expect(missingArtifactSectionNumbers(markdown, [1, 2, 3, 4, 5, 6], "continuity_bundle")).toEqual([2, 3, 4, 6]);
   });
+
+  it("recognizes level 3 headings and alternate bundle number shapes", () => {
+    const markdown = "### Continuity bundle CB-1: First\n\n### Continuity bundle CB_03 — Third\n\n### Question 4 — Fourth";
+
+    expect(extractArtifactSectionNumbers(markdown, "continuity_bundle")).toEqual([1, 3]);
+    expect(extractArtifactSectionNumbers(markdown, "question")).toEqual([4]);
+  });
 });

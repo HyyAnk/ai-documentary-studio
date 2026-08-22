@@ -55,7 +55,7 @@ export class ContextEngine {
     const dna = await read(dnaPath, "active channel DNA");
     if (taskType === "SUGGEST_TOPICS") {
       await read(stylePath, "channel style guide");
-      await this.readSharedRules(["production_rules.md", "research_rules.md", "script_rules.md"], sharedFiles);
+      await this.readSharedRules(["research_rules.md"], sharedFiles);
       const topics = await this.repository.listTopics(channelId);
       const episodes = await this.repository.listEpisodes(channelId);
       add({
@@ -103,22 +103,22 @@ export class ContextEngine {
 
     if (taskType === "GENERATE_RESEARCH") {
       await read(stylePath, "channel style guide");
-      await this.readSharedRules(["production_rules.md", "research_rules.md"], sharedFiles);
+      await this.readSharedRules(["research_rules.md"], sharedFiles);
     } else if (taskType === "GENERATE_TREATMENT") {
       await read(stylePath, "channel style guide");
       await artifact("research.md", "verified research dossier", true);
-      await this.readSharedRules(["research_rules.md", "treatment_rules.md", "script_rules.md"], sharedFiles);
+      await this.readSharedRules(["treatment_rules.md"], sharedFiles);
     } else if (taskType === "GENERATE_SCRIPT") {
       await read(stylePath, "channel style guide");
       await artifact("research.md", "verified research dossier", true);
       await artifact("treatment.md", "approved documentary treatment", true);
-      await this.readSharedRules(["research_rules.md", "script_rules.md"], sharedFiles);
+      await this.readSharedRules(["script_rules.md"], sharedFiles);
     } else if (taskType === "GENERATE_VISUAL_BIBLE") {
       await read(stylePath, "channel style guide");
       await artifact("research.md", "verified research dossier", true);
       await artifact("treatment.md", "approved documentary treatment", true);
       await artifact("script.md", "confirmed episode script", true);
-      await this.readSharedRules(["visual_bible_rules.md", "visual_rules.md", "prompt_rules.md", "cinematic_prompt_reference.md"], sharedFiles);
+      await this.readSharedRules(["visual_bible_rules.md", "prompt_rules.md"], sharedFiles);
     } else if (taskType === "GENERATE_BUNDLE_IMAGE") {
       const bundleNumber = sceneNumber ?? 0;
       if (bundleNumber < 1) throw new Error("Bundle number is required for anchor image generation");
@@ -126,7 +126,7 @@ export class ContextEngine {
       const bundleId = continuityBundleId(bundleNumber);
       add({ path: `${visualBible.path}#${bundleId}`, reason: `continuity bundle ${bundleId}`, content: selectMarkdownSection(visualBible.content, bundleNumber, /^##\s+Continuity bundle/i) });
       add({ path: dnaPath, reason: "visual style and language locks", content: selectSections(dna, ["Visual Style", "Visual Language"]) });
-      await this.readSharedRules(["visual_bible_rules.md", "visual_rules.md"], sharedFiles);
+      await this.readSharedRules(["visual_bible_rules.md"], sharedFiles);
       const target = await this.repository.getBundleImagePath(channelId, episodeKey, bundleNumber, imageVariant);
       // The Codex turn runs with the project as its working directory, while
       // channel storage may be configured elsewhere. Give the image-capable
@@ -140,11 +140,12 @@ export class ContextEngine {
       const treatment = await loadArtifact("treatment.md", true);
       const script = await loadArtifact("script.md", true);
       const visualBible = await loadArtifact("visual_bible.md", true);
-      add({ path: research.path, reason: "research claim and source ledger", content: research.content });
+      add({ path: `${research.path}#sequence-${sequenceNumber}`, reason: `research claim for sequence ${sequenceNumber}`, content: selectResearchForSequence(research.content, sequenceNumber, isQuiz) });
       add({ path: `${treatment.path}#sequence-${sequenceNumber}`, reason: `treatment sequence ${sequenceNumber}`, content: selectMarkdownSectionOrFallback(treatment.content, sequenceNumber, isQuiz ? /^##\s+Question\s+\d+/i : /^##\s+Sequence\s+\d+/i, isQuiz ? "question" : "sequence", "treatment") });
       add({ path: `${script.path}#sequence-${sequenceNumber}`, reason: `script sequence ${sequenceNumber}`, content: selectMarkdownSectionOrFallback(script.content, sequenceNumber, /^##\s+/i, isQuiz ? "question" : "sequence", "script") });
       add({ path: `${visualBible.path}#CB-${String(sequenceNumber).padStart(2, "0")}`, reason: `continuity bundle ${sequenceNumber}`, content: selectMarkdownSectionOrFallback(visualBible.content, sequenceNumber, /^##\s+Continuity bundle/i, "continuity_bundle", "visual bible") });
-      await this.readSharedRules(["visual_rules.md", "prompt_rules.md", "cinematic_prompt_reference.md"], sharedFiles);
+      const sequenceRules = isQuiz ? ["prompt_rules.md"] : ["visual_rules.md", "prompt_rules.md", "cinematic_prompt_reference.md"];
+      await this.readSharedRules(sequenceRules, sharedFiles);
       add({ path: ".documentary-studio/config.json", reason: "shot duration and narration pace", content: JSON.stringify(runtimeConfig) });
     } else if (taskType === "GENERATE_SCENES") {
       await artifact("research.md", "research claim and source ledger", true);
@@ -152,10 +153,12 @@ export class ContextEngine {
       await artifact("script.md", "confirmed episode script", true);
       await artifact("visual_bible.md", "episode identity and continuity bundles", true);
       add({ path: dnaPath, reason: "visual language and reconstruction rules", content: selectSections(dna, ["Visual Style", "Visual Language", "Scene Rules", "AI Reconstruction Rules"]) });
-      await this.readSharedRules(["visual_rules.md", "prompt_rules.md", "cinematic_prompt_reference.md"], sharedFiles);
+      const sceneRules = isQuiz ? ["prompt_rules.md"] : ["visual_rules.md", "prompt_rules.md", "cinematic_prompt_reference.md"];
+      await this.readSharedRules(sceneRules, sharedFiles);
       add({ path: ".documentary-studio/config.json", reason: "shot duration, narration pace, and aspect ratio", content: JSON.stringify(runtimeConfig) });
     } else {
-      await this.readSharedRules(["visual_rules.md", "prompt_rules.md", "cinematic_prompt_reference.md"], sharedFiles);
+      const regenRules = isQuiz ? ["prompt_rules.md"] : ["visual_rules.md", "prompt_rules.md", "cinematic_prompt_reference.md"];
+      await this.readSharedRules(regenRules, sharedFiles);
       const scenes = await this.repository.readScenes(channelId, episodeKey);
       const current = scenes.find((scene) => scene.scene_number === sceneNumber);
       if (!current) throw new Error("Scene is required for regeneration");
@@ -317,6 +320,43 @@ function selectMarkdownSectionOrFallback(markdown: string, sectionNumber: number
       content,
     ].join("\n\n");
   }
+}
+
+function selectResearchForSequence(researchMarkdown: string, sequenceNumber: number, isQuiz: boolean): string {
+  const claimId = `C${String(sequenceNumber).padStart(2, "0")}`;
+  const shortClaimId = `C${sequenceNumber}`;
+  const lines = researchMarkdown.split(/\r?\n/);
+
+  // 1. Find the specific claim section in the research deep-dive
+  const claimHeaderIndex = lines.findIndex((line) =>
+    new RegExp(`^###?\\s+(?:${claimId}|${shortClaimId}|Question\\s+${sequenceNumber}\\b)`, "i").test(line)
+  );
+
+  if (claimHeaderIndex !== -1) {
+    const nextHeaderIndex = lines.findIndex((line, idx) =>
+      idx > claimHeaderIndex && /^###?\s+/i.test(line)
+    );
+    const claimSection = lines.slice(claimHeaderIndex, nextHeaderIndex === -1 ? lines.length : nextHeaderIndex).join("\n").trim();
+
+    // Also include the answer ledger table if present (for quick cross-reference)
+    const tableStartIndex = lines.findIndex((line) => line.includes("| Question |") || line.includes("| Claim ID |"));
+    let ledgerRow = "";
+    if (tableStartIndex !== -1) {
+      const headerLine = lines[tableStartIndex] || "";
+      const separatorLine = lines[tableStartIndex + 1] || "";
+      const rowLine = lines.slice(tableStartIndex + 2).find((line) =>
+        line.includes(`Q${sequenceNumber}`) || line.includes(`Q0${sequenceNumber}`) || line.includes(`| ${claimId}`) || line.includes(`| ${shortClaimId}`)
+      ) || "";
+      if (rowLine) {
+        ledgerRow = `### Answer Ledger Summary\n${headerLine}\n${separatorLine}\n${rowLine}\n\n`;
+      }
+    }
+
+    return `${ledgerRow}### Scoped Research Evidence for Sequence ${sequenceNumber} (${claimId})\n\n${claimSection}`;
+  }
+
+  // Fallback to full research if sectioning pattern didn't match
+  return researchMarkdown;
 }
 
 function escapeRegExp(value: string): string {

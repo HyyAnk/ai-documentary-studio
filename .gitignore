@@ -40,6 +40,9 @@ channels/*
 
 # Generated validation, preview, and render output.
 tmp/
+output/
+.context/
 
 # Machine-local Documentary Studio configuration.
 .documentary-studio/config.json
+.documentary-studio/*.json

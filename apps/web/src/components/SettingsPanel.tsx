@@ -1,6 +1,6 @@
-import { CircleNotch, FileText, FloppyDisk, GitBranch, Play, Plus, SpeakerHigh, TerminalWindow, Trash, VideoCamera } from "@phosphor-icons/react";
+import { CircleNotch, FileText, FloppyDisk, GitBranch, Play, Plus, SpeakerHigh, Sparkle, TerminalWindow, Trash, VideoCamera } from "@phosphor-icons/react";
 import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
-import type { AppConfig, Channel, CodexSettingsResponse, StorageInfo, VoiceProfile } from "@studio/shared";
+import type { AppConfig, Channel, CodexSettingsResponse, AntigravitySettingsResponse, StorageInfo, VoiceProfile } from "@studio/shared";
 import { api } from "../api";
 import { PageTitle, StatusLine } from "./AppChrome";
 import type { Notice } from "./types";
@@ -10,10 +10,13 @@ type SettingsViewProps = {
   appConfig: AppConfig | null;
   codex: CodexSettingsResponse | null;
   codexStatus: string;
+  antigravity?: AntigravitySettingsResponse | null;
+  antigravityStatus?: string;
   git: { branch: string | null; dirty: boolean; changed_files: number };
   storage: StorageInfo | null;
   onStorageSaved: (storage: StorageInfo) => void | Promise<void>;
   onCodexSaved: (response: CodexSettingsResponse) => void;
+  onAntigravitySaved?: (response: AntigravitySettingsResponse) => void;
   onAudioSaved: (audio: AppConfig["audio_generation"]) => void | Promise<void>;
   onVideoSaved: (video: AppConfig["video_generation"]) => void | Promise<void>;
   onImageSaved: (image: AppConfig["image_generation"]) => void | Promise<void>;
@@ -21,13 +24,18 @@ type SettingsViewProps = {
   onNotice: (notice: NonNullable<Notice>) => void;
 };
 
-export function SettingsView({ channels, appConfig, codex, codexStatus, git, storage, onStorageSaved, onCodexSaved, onAudioSaved, onVideoSaved, onImageSaved, onChannelUpdated, onNotice }: SettingsViewProps) {
+export function SettingsView({ channels, appConfig, codex, codexStatus, antigravity, antigravityStatus, git, storage, onStorageSaved, onCodexSaved, onAntigravitySaved, onAudioSaved, onVideoSaved, onImageSaved, onChannelUpdated, onNotice }: SettingsViewProps) {
   const [storagePath, setStoragePath] = useState(storage?.path ?? "");
   const [transport, setTransport] = useState(codex?.settings.transport ?? "app_server");
   const [baseUrl, setBaseUrl] = useState(codex?.settings.api_base_url ?? "");
   const [apiKey, setApiKey] = useState("");
+  const [agyApiKey, setAgyApiKey] = useState("");
+  const [agyCommand, setAgyCommand] = useState(appConfig?.antigravity.command ?? "agy");
+  const [agyBaseUrl, setAgyBaseUrl] = useState(appConfig?.antigravity.api_base_url ?? "");
   const [autoDeleteThreads, setAutoDeleteThreads] = useState(appConfig?.codex.auto_delete_threads ?? true);
   const [failedThreadRetentionDays, setFailedThreadRetentionDays] = useState(appConfig?.codex.failed_thread_retention_days ?? 7);
+  const [agyAutoDeleteThreads, setAgyAutoDeleteThreads] = useState(appConfig?.antigravity.auto_delete_threads ?? true);
+  const [agyFailedThreadRetentionDays, setAgyFailedThreadRetentionDays] = useState(appConfig?.antigravity.failed_thread_retention_days ?? 7);
   const [audioUrl, setAudioUrl] = useState(appConfig?.audio_generation.service_url ?? "http://127.0.0.1:8890");
   const [exaggeration, setExaggeration] = useState(appConfig?.audio_generation.exaggeration ?? 0.5);
   const [cfgWeight, setCfgWeight] = useState(appConfig?.audio_generation.cfg_weight ?? 0.5);
@@ -43,10 +51,12 @@ export function SettingsView({ channels, appConfig, codex, codexStatus, git, sto
   const [voiceFile, setVoiceFile] = useState<File | null>(null);
   const [savingStorage, setSavingStorage] = useState(false);
   const [savingCodex, setSavingCodex] = useState(false);
+  const [savingAntigravity, setSavingAntigravity] = useState(false);
   const [savingAudio, setSavingAudio] = useState(false);
   const [savingVideo, setSavingVideo] = useState(false);
   const [savingImage, setSavingImage] = useState(false);
   const [cleaningThreads, setCleaningThreads] = useState(false);
+  const [cleaningAgyThreads, setCleaningAgyThreads] = useState(false);
   const [voiceBusy, setVoiceBusy] = useState(false);
   const selectedChannel = channels.find((channel) => channel.channel_id === selectedChannelId) ?? null;
   const selectedVoice = voices.find((voice) => voice.reference_path === selectedChannel?.voice_reference_path) ?? null;
@@ -58,6 +68,12 @@ export function SettingsView({ channels, appConfig, codex, codexStatus, git, sto
     setAutoDeleteThreads(codex?.settings.auto_delete_threads ?? appConfig?.codex.auto_delete_threads ?? true);
     setFailedThreadRetentionDays(codex?.settings.failed_thread_retention_days ?? appConfig?.codex.failed_thread_retention_days ?? 7);
   }, [codex, appConfig?.codex.auto_delete_threads, appConfig?.codex.failed_thread_retention_days]);
+  useEffect(() => {
+    setAgyCommand(antigravity?.settings.command ?? appConfig?.antigravity.command ?? "agy");
+    setAgyBaseUrl(antigravity?.settings.api_base_url ?? appConfig?.antigravity.api_base_url ?? "");
+    setAgyAutoDeleteThreads(antigravity?.settings.auto_delete_threads ?? appConfig?.antigravity.auto_delete_threads ?? true);
+    setAgyFailedThreadRetentionDays(antigravity?.settings.failed_thread_retention_days ?? appConfig?.antigravity.failed_thread_retention_days ?? 7);
+  }, [antigravity, appConfig?.antigravity]);
   useEffect(() => { if (!selectedChannelId && channels[0]) setSelectedChannelId(channels[0].channel_id); }, [channels, selectedChannelId]);
   useEffect(() => { void api.voices().then((response) => setVoices(response.voices)).catch((error: Error) => onNotice({ tone: "bad", message: error.message })); }, [onNotice]);
   useEffect(() => {
@@ -87,11 +103,44 @@ export function SettingsView({ channels, appConfig, codex, codexStatus, git, sto
     finally { setSavingCodex(false); }
   };
 
+  const saveAntigravity = async (event: FormEvent) => {
+    event.preventDefault();
+    setSavingAntigravity(true);
+    try {
+      const next = await api.saveAntigravitySettings({
+        command: agyCommand,
+        api_base_url: agyBaseUrl,
+        auto_delete_threads: agyAutoDeleteThreads,
+        failed_thread_retention_days: agyFailedThreadRetentionDays,
+        ...(agyApiKey ? { api_key: agyApiKey } : {}),
+      });
+      onAntigravitySaved?.(next);
+      setAgyApiKey("");
+      onNotice({ tone: "good", message: "Antigravity settings saved locally" });
+    } catch (error) {
+      onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Could not save Antigravity settings" });
+    } finally {
+      setSavingAntigravity(false);
+    }
+  };
+
   const cleanupCodex = async () => {
     setCleaningThreads(true);
     try { const result = await api.cleanupCodex(); onNotice({ tone: "good", message: result.removed ? `${result.removed} old Codex session${result.removed === 1 ? "" : "s"} cleaned up` : "No old Codex sessions needed cleanup" }); }
     catch (error) { onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Could not clean up Codex sessions" }); }
     finally { setCleaningThreads(false); }
+  };
+
+  const cleanupAntigravity = async () => {
+    setCleaningAgyThreads(true);
+    try {
+      const result = await api.cleanupAntigravity();
+      onNotice({ tone: "good", message: result.removed ? `${result.removed} old Antigravity session${result.removed === 1 ? "" : "s"} cleaned up` : "No old Antigravity sessions needed cleanup" });
+    } catch (error) {
+      onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Could not clean up Antigravity sessions" });
+    } finally {
+      setCleaningAgyThreads(false);
+    }
   };
 
   const saveAudio = async (event: FormEvent) => {
@@ -160,7 +209,8 @@ export function SettingsView({ channels, appConfig, codex, codexStatus, git, sto
 
   const maxDuration = appConfig?.video_generation.max_scene_duration_seconds ?? 8;
   return <section className="page-wrap"><PageTitle eyebrow="Workspace" title="Settings" /><div className="settings-grid">
-    <section className="panel codex-settings-panel"><div className="panel-heading"><div><p className="eyebrow">Connection</p><h2>Codex</h2></div><TerminalWindow size={22} /></div><StatusLine label="Status" value={codexStatus} /><StatusLine label="Transport" value={codex?.settings.transport === "openai_compatible" ? "Cockpit API" : "App Server"} /><StatusLine label="Selected model" value={codex?.settings.model || "Codex default"} /><form className="codex-form" onSubmit={(event) => void saveCodex(event)}><label>Transport<select value={transport} onChange={(event) => setTransport(event.target.value as "app_server" | "openai_compatible")}><option value="app_server">Local Codex App Server</option><option value="openai_compatible">Cockpit API Service</option></select></label>{transport === "openai_compatible" ? <><label>Base URL<input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="http://127.0.0.1:PORT/v1" /></label><label>API key<input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={codex?.settings.has_api_key ? "Saved locally - leave blank to keep" : "Paste Cockpit API key"} autoComplete="off" /></label></> : null}<label className="toggle-field"><input type="checkbox" checked={autoDeleteThreads} onChange={(event) => setAutoDeleteThreads(event.target.checked)} />Auto-delete completed Codex sessions</label><label>Failed/cancelled retention (days)<input type="number" min="0" max="3650" step="1" value={failedThreadRetentionDays} onChange={(event) => setFailedThreadRetentionDays(Number(event.target.value))} /></label><button className="primary-button" disabled={savingCodex}>{savingCodex ? <CircleNotch className="spin" size={16} /> : <FloppyDisk size={16} />}Save Codex</button></form><div className="codex-cleanup-action"><button className="quiet-button" disabled={cleaningThreads} onClick={() => void cleanupCodex()}>{cleaningThreads ? <CircleNotch className="spin" size={15} /> : <Trash size={15} />}{cleaningThreads ? "Cleaning…" : "Clean up old Codex sessions"}</button></div></section>
+    <section className="panel codex-settings-panel"><div className="panel-heading"><div><p className="eyebrow">Connection</p><h2>Codex (OpenAI)</h2></div><TerminalWindow size={22} /></div><StatusLine label="Status" value={codexStatus} /><StatusLine label="Transport" value={codex?.settings.transport === "openai_compatible" ? "Cockpit API" : "App Server"} /><StatusLine label="Selected model" value={codex?.settings.model || "Codex default"} /><form className="codex-form" onSubmit={(event) => void saveCodex(event)}><label>Transport<select value={transport} onChange={(event) => setTransport(event.target.value as "app_server" | "openai_compatible")}><option value="app_server">Local Codex App Server</option><option value="openai_compatible">Cockpit API Service</option></select></label>{transport === "openai_compatible" ? <><label>Base URL<input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="http://127.0.0.1:PORT/v1" /></label><label>API key<input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={codex?.settings.has_api_key ? "Saved locally - leave blank to keep" : "Paste Cockpit API key"} autoComplete="off" /></label></> : null}<label className="toggle-field"><input type="checkbox" checked={autoDeleteThreads} onChange={(event) => setAutoDeleteThreads(event.target.checked)} />Auto-delete completed Codex sessions</label><label>Failed/cancelled retention (days)<input type="number" min="0" max="3650" step="1" value={failedThreadRetentionDays} onChange={(event) => setFailedThreadRetentionDays(Number(event.target.value))} /></label><button className="primary-button" disabled={savingCodex}>{savingCodex ? <CircleNotch className="spin" size={16} /> : <FloppyDisk size={16} />}Save Codex</button></form><div className="codex-cleanup-action"><button className="quiet-button" disabled={cleaningThreads} onClick={() => void cleanupCodex()}>{cleaningThreads ? <CircleNotch className="spin" size={15} /> : <Trash size={15} />}{cleaningThreads ? "Cleaning…" : "Clean up old Codex sessions"}</button></div></section>
+    <section className="panel codex-settings-panel"><div className="panel-heading"><div><p className="eyebrow">Connection</p><h2>Antigravity (Google)</h2></div><Sparkle size={22} /></div><StatusLine label="Status" value={antigravityStatus ?? "Ready"} /><StatusLine label="Mode" value={antigravity?.settings.has_api_key ? "Google AI API (Custom Key)" : "Native AgentAPI (Zero API Key)"} /><StatusLine label="CLI Command" value={agyCommand} /><StatusLine label="Selected model" value={antigravity?.settings.model || appConfig?.antigravity.model || "gemini-3.7-flash-high"} /><form className="codex-form" onSubmit={(event) => void saveAntigravity(event)}><label>CLI Command<input value={agyCommand} onChange={(event) => setAgyCommand(event.target.value)} placeholder="agy" /><small className="field-help">Google Antigravity CLI binary name or absolute executable path. Uses active IDE session with zero API key.</small></label><label>Gemini API key (Optional)<input type="password" value={agyApiKey} onChange={(event) => setAgyApiKey(event.target.value)} placeholder={antigravity?.settings.has_api_key ? "Saved locally - leave blank to keep" : "Paste Google Gemini API key"} autoComplete="off" /><small className="field-help">Tuỳ chọn: Dùng quota API Key riêng để tạo ảnh trực tiếp qua Google Generative AI (gemini-3.1-flash-image / gemini-3.1-flash-lite-image).</small></label><label className="toggle-field"><input type="checkbox" checked={agyAutoDeleteThreads} onChange={(event) => setAgyAutoDeleteThreads(event.target.checked)} />Auto-delete completed Antigravity sessions</label><label>Failed/cancelled retention (days)<input type="number" min="0" max="3650" step="1" value={agyFailedThreadRetentionDays} onChange={(event) => setAgyFailedThreadRetentionDays(Number(event.target.value))} /></label><button className="primary-button" disabled={savingAntigravity}>{savingAntigravity ? <CircleNotch className="spin" size={16} /> : <FloppyDisk size={16} />}Save Antigravity</button></form><div className="codex-cleanup-action"><button className="quiet-button" disabled={cleaningAgyThreads} onClick={() => void cleanupAntigravity()}>{cleaningAgyThreads ? <CircleNotch className="spin" size={15} /> : <Trash size={15} />}{cleaningAgyThreads ? "Cleaning…" : "Clean up old Antigravity sessions"}</button></div></section>
     <section className="panel video-settings-panel"><div className="panel-heading"><div><p className="eyebrow">Video generation</p><h2>Scene packing</h2></div><VideoCamera size={22} /></div><StatusLine label="Current limit" value={`${maxDuration}s`} /><form className="codex-form" onSubmit={(event) => void saveVideo(event)}><label>Scene duration (seconds)<input type="number" min="1" max="120" step="0.5" value={maxSceneDuration} onChange={(event) => setMaxSceneDuration(Number(event.target.value))} /><small className="field-help">The maximum length your video generation tool can produce per call. Scene breakdown packs narration beats to fill this duration automatically.</small></label><label>Narration pace (words/sec)<input type="number" min="0.1" max="20" step="0.1" value={narrationWordsPerSecond} onChange={(event) => setNarrationWordsPerSecond(Number(event.target.value))} /><small className="field-help">Used to estimate spoken length when packing beats into scenes.</small></label><button className="primary-button" disabled={savingVideo}>{savingVideo ? <CircleNotch className="spin" size={16} /> : <FloppyDisk size={16} />}Save video</button></form></section>
     <section className="panel image-settings-panel"><div className="panel-heading"><div><p className="eyebrow">Reference assets</p><h2>Images</h2></div><FileText size={22} /></div><form className="codex-form" onSubmit={(event) => void saveImage(event)}><label className="toggle-field"><input type="checkbox" checked={imageEnabled} onChange={(event) => setImageEnabled(event.target.checked)} />Enable continuity anchor images</label><label>Images per bundle<select value={imagesPerBundle} disabled={!imageEnabled} onChange={(event) => setImagesPerBundle(Number(event.target.value))}><option value="1">1 anchor</option><option value="2">2 anchors</option></select></label><small className="field-help">Runs automatically after the Visual Bible. Requires an image-capable Codex or Cockpit provider.</small><button className="primary-button" disabled={savingImage}>{savingImage ? <CircleNotch className="spin" size={16} /> : <FloppyDisk size={16} />}Save images</button></form></section>
     <section className="panel audio-settings-panel"><div className="panel-heading"><div><p className="eyebrow">Local speech</p><h2>Audio</h2></div><SpeakerHigh size={22} /></div><StatusLine label="Provider" value="Chatterbox" /><form className="codex-form" onSubmit={(event) => void saveAudio(event)}><label>Service URL<input value={audioUrl} onChange={(event) => setAudioUrl(event.target.value)} placeholder="http://127.0.0.1:8890" /></label><label>Exaggeration<input type="number" min="0" max="1" step="0.05" value={exaggeration} onChange={(event) => setExaggeration(Number(event.target.value))} /></label><label>CFG weight<input type="number" min="0" max="1" step="0.05" value={cfgWeight} onChange={(event) => setCfgWeight(Number(event.target.value))} /></label><label>Merge gap (ms)<input type="number" min="0" max="10000" step="50" value={mergeGapMs} onChange={(event) => setMergeGapMs(Number(event.target.value))} /></label><label className="toggle-field"><input type="checkbox" checked={matchTargetDuration} onChange={(event) => setMatchTargetDuration(event.target.checked)} />Match episode target duration</label><button className="primary-button" disabled={savingAudio}>{savingAudio ? <CircleNotch className="spin" size={16} /> : <FloppyDisk size={16} />}Save audio</button></form></section>

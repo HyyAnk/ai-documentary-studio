@@ -102,13 +102,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .context-kicker { padding-right: 12px; border-right: 1px solid var(--line-dark); }
 .context-title { font-size: 12px; font-weight: 700; }
 .topbar-meta { gap: 15px; color: var(--muted); font-size: 11px; }
+.engine-toggle-group { display: inline-flex; align-items: center; padding: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; gap: 2px; }
+.engine-toggle-btn { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); font: 700 10px "DM Mono", monospace; cursor: pointer; transition: all .15s ease; }
+.engine-toggle-btn:hover { color: var(--ink); background: color-mix(in srgb, var(--surface-strong) 60%, transparent); }
+.engine-toggle-btn.is-active { background: var(--accent); color: var(--on-accent); border-color: var(--accent-deep); box-shadow: 0 1px 3px color-mix(in srgb, var(--accent-deep) 30%, transparent); }
+.model-error-tooltip { color: var(--accent); cursor: help; display: inline-flex; align-items: center; }
 .codex-pill { gap: 7px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: 10px; font-weight: 700; }
 .codex-pill:not(.is-connected) .status-dot { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
 .codex-pill.is-idle .status-dot { background: var(--muted); box-shadow: none; }
 .git-readout { gap: 6px; font: 400 10px "DM Mono", monospace; }
 .dirty-dot { width: 5px; height: 5px; display: inline-block; border-radius: 50%; background: var(--yellow); }
 .model-select { position: relative; display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font: 500 9px "DM Mono", monospace; text-transform: uppercase; letter-spacing: .06em; }
-.model-select select { max-width: 165px; padding: 6px 20px 6px 8px; border: 1px solid var(--line); border-radius: 6px; outline: none; appearance: none; background: var(--surface); color: var(--ink); font: 500 10px "DM Mono", monospace; cursor: pointer; }
+.model-select select { max-width: 195px; padding: 6px 20px 6px 8px; border: 1px solid var(--line); border-radius: 6px; outline: none; appearance: none; background: var(--surface); color: var(--ink); font: 500 10px "DM Mono", monospace; cursor: pointer; }
 .model-select > svg { position: absolute; right: 5px; pointer-events: none; color: var(--muted); }
 .link-button, .text-button { display: inline-flex; align-items: center; gap: 5px; padding: 0; border: 0; background: transparent; color: var(--accent-deep); font-size: 11px; font-weight: 700; }
 .link-button:hover, .text-button:hover { color: var(--ink); }

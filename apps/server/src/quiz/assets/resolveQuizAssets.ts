@@ -3,30 +3,74 @@ import type { QuizAssetPlan, QuizAssetResolution, QuizIssue } from "@studio/shar
 import { StudioLogger } from "../../logger.js";
 import type { RepositoryService } from "../../repository.js";
 import { ShopAiKeyQuizImageProvider } from "../../providers/shopAiKeyImage.js";
+import { AntigravityImageChainProvider } from "../../providers/antigravityImageChain.js";
 import { assetFingerprint } from "./assetFingerprint.js";
 import { compileQuizAssetPrompt } from "./promptCompiler.js";
 
-export async function resolveQuizAssets(input: { repository: RepositoryService; channelId: string; episodeId: string; plan: QuizAssetPlan; onProgress?: (progress: { completed: number; total: number; reused: boolean }) => Promise<void> | void }): Promise<{ resolution: QuizAssetResolution; issues: QuizIssue[] }> {
+export async function resolveQuizAssets(input: {
+  repository: RepositoryService;
+  channelId: string;
+  episodeId: string;
+  plan: QuizAssetPlan;
+  activeEngine?: "codex" | "antigravity";
+  onProgress?: (progress: { completed: number; total: number; reused: boolean }) => Promise<void> | void;
+}): Promise<{ resolution: QuizAssetResolution; issues: QuizIssue[] }> {
   const existing = await input.repository.readQuizAssetResolution(input.channelId, input.episodeId);
   const byFingerprint = new Map(existing?.assets.map((asset) => [asset.fingerprint, asset]) ?? []);
   const assets: QuizAssetResolution["assets"] = [];
   const issues: QuizIssue[] = [];
   const logger = new StudioLogger(input.repository.rootDirectory);
   const consistencyGroups = new Map(input.plan.consistency_groups.map((group) => [group.group_id, group]));
-  const provider = ShopAiKeyQuizImageProvider.isConfigured() ? new ShopAiKeyQuizImageProvider(input.repository, { channelId: input.channelId, episodeId: input.episodeId }) : null;
+  const activeEngine = input.activeEngine ?? "codex";
+
   for (const [index, request] of input.plan.assets.entries()) {
     let reused = false;
     const compiled = compileQuizAssetPrompt(request, request.consistency_group_id ? consistencyGroups.get(request.consistency_group_id) : undefined);
     logger.info(`Compiled prompt for ${request.asset_id}: ${JSON.stringify(compiled.prompt)}`, { profileId: input.channelId, workerId: input.episodeId, step: "compile_asset_prompt" });
-    const fingerprint = assetFingerprint(request, provider ? "shopaikey" : "inline-fallback", compiled.cacheVersion);
+    const providerName = activeEngine === "antigravity" ? "antigravity-chain" : ShopAiKeyQuizImageProvider.isConfigured() ? "shopaikey" : "inline-fallback";
+    const fingerprint = assetFingerprint(request, providerName, compiled.cacheVersion);
     const cached = byFingerprint.get(fingerprint);
     try {
       if (cached && await isValidQuizAsset(input.repository, input.channelId, input.episodeId, cached.path)) {
-        assets.push({ ...request, fingerprint, path: cached.path, source: "cache" });
+        assets.push({
+          ...request,
+          fingerprint,
+          path: cached.path,
+          source: "cache",
+          fallback_tier: cached.fallback_tier,
+          degraded: cached.degraded,
+        });
+        if (cached.degraded || cached.fallback_tier === 3) {
+          issues.push(issue(request, "asset_fallback_degraded", "warning", `Asset ${request.asset_id} used Tier 3 deterministic fallback. Visual review recommended.`, "Inspect the generated fallback card or replace with a dedicated image."));
+        }
         reused = true;
-      } else if (!provider) {
-        if (request.required) issues.push(issue(request, "asset_provider_unavailable", "blocker", "A semantically critical visual asset needs image generation, but ShopAIKey is not configured.", "Configure the existing image provider or attach an exact episode asset before rendering."));
+      } else if (activeEngine === "antigravity") {
+        const episode = await input.repository.getEpisode(input.channelId, input.episodeId);
+        const chainProvider = new AntigravityImageChainProvider(input.repository, {
+          channelId: input.channelId,
+          episodeId: input.episodeId,
+          assetId: request.asset_id,
+          fingerprint,
+          theme: episode.quiz_config.visual_theme,
+        }, undefined, { allowTier3Fallback: false });
+        const result = await chainProvider.generateReference(compiled.prompt);
+        assets.push({
+          ...request,
+          fingerprint,
+          path: result.asset_path,
+          source: result.fallback_tier === 3 ? "fallback" : "provider",
+          fallback_tier: result.fallback_tier,
+          degraded: result.degraded,
+        });
+        if (result.degraded || result.fallback_tier === 3) {
+          issues.push(issue(request, "asset_fallback_degraded", "warning", `Asset ${request.asset_id} used Tier 3 deterministic fallback. Visual review recommended.`, "Inspect the generated fallback card or replace with a dedicated image."));
+        }
+      } else if (!ShopAiKeyQuizImageProvider.isConfigured()) {
+        if (request.required) {
+          issues.push(issue(request, "asset_provider_unavailable", "blocker", "A semantically critical visual asset needs image generation, but ShopAIKey is not configured.", "Configure the existing image provider or switch to Antigravity engine before rendering."));
+        }
       } else {
+        const provider = new ShopAiKeyQuizImageProvider(input.repository, { channelId: input.channelId, episodeId: input.episodeId });
         const generated = await provider.generateAsset({ assetId: request.asset_id, fingerprint, prompt: compiled.prompt });
         assets.push({ ...request, fingerprint, path: generated.path, source: "provider" });
       }
@@ -57,9 +101,17 @@ function issue(request: QuizAssetPlan["assets"][number], code: string, severity:
   return { code, severity, message, next_action: nextAction, question_ids: request.question_id ? [request.question_id] : [], stage: "assets" };
 }
 
-export async function isQuizAssetResolutionComplete(input: { repository: RepositoryService; channelId: string; episodeId: string; plan: QuizAssetPlan; resolution: QuizAssetResolution | null }): Promise<boolean> {
+export async function isQuizAssetResolutionComplete(input: {
+  repository: RepositoryService;
+  channelId: string;
+  episodeId: string;
+  plan: QuizAssetPlan;
+  resolution: QuizAssetResolution | null;
+  activeEngine?: "codex" | "antigravity";
+}): Promise<boolean> {
   if (!input.resolution || input.resolution.episode_id !== input.episodeId) return false;
-  const providerName = ShopAiKeyQuizImageProvider.isConfigured() ? "shopaikey" : "inline-fallback";
+  const activeEngine = input.activeEngine ?? "codex";
+  const providerName = activeEngine === "antigravity" ? "antigravity-chain" : ShopAiKeyQuizImageProvider.isConfigured() ? "shopaikey" : "inline-fallback";
   const consistencyGroups = new Map(input.plan.consistency_groups.map((group) => [group.group_id, group]));
   const byId = new Map(input.resolution.assets.map((asset) => [asset.asset_id, asset]));
   for (const request of input.plan.assets) {
@@ -70,7 +122,7 @@ export async function isQuizAssetResolutionComplete(input: { repository: Reposit
       if (request.required) return false;
       continue;
     }
-    if (resolved.fingerprint !== fingerprint || resolved.semantic_key !== request.semantic_key || !(await isValidQuizAsset(input.repository, input.channelId, input.episodeId, resolved.path))) return false;
+    if ((resolved.fingerprint !== fingerprint && !resolved.path) || resolved.semantic_key !== request.semantic_key || !(await isValidQuizAsset(input.repository, input.channelId, input.episodeId, resolved.path))) return false;
   }
   return true;
 }
