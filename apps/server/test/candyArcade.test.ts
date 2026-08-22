@@ -100,8 +100,8 @@ describe("Candy Arcade visual template", () => {
     expect(html).toContain("reveal-sparkles");
     expect(html).not.toContain("reveal-lockup");
     expect(html).toContain("timer-marker");
-    expect(html).toContain('<div class="timer-progress"></div><span class="timer-marker">?</span>');
-    expect(html).not.toContain('<div class="timer-progress"><span class="timer-marker">?</span></div>');
+    expect(html).toContain('<div class="timer-progress"></div><span class="timer-marker" data-layout-allow-occlusion>?</span>');
+    expect(html).not.toContain('<div class="timer-progress"><span class="timer-marker');
     expect(html).toContain("@keyframes quiz-timer-marker-slide");
     expect(html).toContain("layout-media_left_choices_right .game-stage");
     expect(html).toContain("layout-media_top_choices_bottom .game-stage");

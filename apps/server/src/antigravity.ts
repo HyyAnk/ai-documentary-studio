@@ -320,6 +320,60 @@ export class AntigravityClient extends EventEmitter {
     return path.join(homedir(), ".gemini", "antigravity");
   }
 
+  async callDeleteCascadeTrajectory(conversationId: string): Promise<boolean> {
+    try {
+      const session = await this.getActiveSession();
+      if (session.address && session.csrfToken) {
+        const port = session.address.replace(/^localhost:/, "").replace(/^127\.0\.0\.1:/, "");
+        const res = await fetch(`http://127.0.0.1:${port}/exa.language_server_pb.LanguageServerService/DeleteCascadeTrajectory`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-codeium-csrf-token": session.csrfToken,
+          },
+          body: JSON.stringify({ cascadeId: conversationId }),
+          signal: AbortSignal.timeout(4000),
+        });
+        return res.ok;
+      }
+    } catch (error) {
+      this.logger.debug(`DeleteCascadeTrajectory RPC failed for ${conversationId}: ${error instanceof Error ? error.message : "unknown error"}`, { step: "antigravity_rpc_delete" });
+    }
+    return false;
+  }
+
+  async isStudioTaskConversation(convId: string): Promise<boolean> {
+    const currentConvId = process.env.ANTIGRAVITY_CONVERSATION_ID?.trim();
+    if (currentConvId && convId === currentConvId) return false;
+    if (this.threadConversations.has(convId) || Array.from(this.threadConversations.values()).includes(convId)) {
+      return false;
+    }
+
+    if (this.managedConversations.has(convId)) return true;
+
+    const baseDir = this.getAntigravityBaseDir();
+    const dbPath = path.join(baseDir, "conversations", `${convId}.db`);
+    try {
+      const buf = await readFile(dbPath);
+      const str = buf.toString("latin1");
+
+      const studioSignatures = [
+        /Task type:\s*GENERATE_/i,
+        /Task type:\s*SUGGEST_TOPICS/i,
+        /You are an AI illustrator\.\s*Call the generate_image tool immediately/i,
+        /Please read the complete task instructions and context from file:[^ \n\r]+\.context[\\\/]task_prompt_/i,
+        /task_prompt_agy_thread_/i,
+        /# Documentary Treatment\b/i,
+        /# Episode Visual Bible\b/i,
+        /# Research Dossier\b/i,
+      ];
+
+      return studioSignatures.some((sig) => sig.test(str));
+    } catch {
+      return false;
+    }
+  }
+
   async deleteThread(threadId: string): Promise<boolean> {
     const conversationId = this.threadConversations.get(threadId) || (this.managedConversations.has(threadId) ? threadId : null);
     if (conversationId) {
@@ -327,9 +381,12 @@ export class AntigravityClient extends EventEmitter {
       this.managedConversations.delete(conversationId);
       void this.saveManagedSessions();
 
+      // 1. Send DeleteCascadeTrajectory RPC to active Language Server to remove from IDE memory, summaries and UI sidebar
+      await this.callDeleteCascadeTrajectory(conversationId);
+
       const baseDir = this.getAntigravityBaseDir();
 
-      // 1. Delete conversation SQLite database and WAL/SHM files (removes the session from Antigravity IDE UI)
+      // 2. Delete conversation SQLite database and WAL/SHM files
       const convDir = path.join(baseDir, "conversations");
       for (const ext of [".db", ".db-wal", ".db-shm"]) {
         try {
@@ -337,22 +394,22 @@ export class AntigravityClient extends EventEmitter {
         } catch {}
       }
 
-      // 2. Delete brain directory (logs, transcripts, scratch files)
+      // 3. Delete brain directory (logs, transcripts, scratch files)
       try {
         await rm(path.join(baseDir, "brain", conversationId), { recursive: true, force: true });
       } catch {}
 
-      // 3. Delete annotations directory
+      // 4. Delete annotations directory
       try {
         await rm(path.join(baseDir, "annotations", conversationId), { recursive: true, force: true });
       } catch {}
 
-      // 4. Delete context state file if any
+      // 5. Delete context state file if any
       try {
         await rm(path.join(baseDir, "context_state", `${conversationId}.pb`), { force: true });
       } catch {}
 
-      // 5. Delete temporary prompt markdown in .context
+      // 6. Delete temporary prompt markdown in .context
       try {
         const promptFile = path.join(this.rootDirectory, ".context", `task_prompt_${threadId}.md`);
         await rm(promptFile, { force: true });
@@ -373,27 +430,50 @@ export class AntigravityClient extends EventEmitter {
     const contextStateDir = path.join(baseDir, "context_state");
 
     const activeIds = new Set(this.threadConversations.values());
+    const candidates = new Set(this.managedConversations);
+
+    // Also discover any orphan studio-generated sessions in conversations folder
+    try {
+      const files = await readdir(convDir);
+      for (const file of files) {
+        if (file.endsWith(".db")) {
+          const convId = file.slice(0, -3);
+          if (!activeIds.has(convId) && (await this.isStudioTaskConversation(convId))) {
+            candidates.add(convId);
+          }
+        }
+      }
+    } catch {}
+
     let removed = 0;
 
-    // STRICT SAFETY GUARANTEE: ONLY delete sessions that were explicitly generated and tracked by this studio tool!
+    // STRICT SAFETY GUARANTEE: ONLY delete sessions that were explicitly generated by studio tasks!
     // Any conversation/window created manually by the user in Antigravity will NEVER be touched.
-    for (const convId of Array.from(this.managedConversations)) {
+    for (const convId of Array.from(candidates)) {
       if (activeIds.has(convId)) continue;
+      if (!(await this.isStudioTaskConversation(convId))) continue;
 
+      // 1. Notify language server via RPC
+      await this.callDeleteCascadeTrajectory(convId);
+
+      // 2. Delete database files
       for (const ext of [".db", ".db-wal", ".db-shm"]) {
         try {
           await rm(path.join(convDir, `${convId}${ext}`), { force: true });
         } catch {}
       }
 
+      // 3. Delete brain artifacts
       try {
         await rm(path.join(brainDir, convId), { recursive: true, force: true });
       } catch {}
 
+      // 4. Delete annotations
       try {
         await rm(path.join(annotationsDir, convId), { recursive: true, force: true });
       } catch {}
 
+      // 5. Delete context state
       try {
         await rm(path.join(contextStateDir, `${convId}.pb`), { force: true });
       } catch {}

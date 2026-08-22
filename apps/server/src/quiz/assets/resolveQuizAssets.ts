@@ -8,12 +8,15 @@ import { AntigravityImageChainProvider } from "../../providers/antigravityImageC
 import { assetFingerprint } from "./assetFingerprint.js";
 import { compileQuizAssetPrompt } from "./promptCompiler.js";
 
+import type { AntigravityClient } from "../../antigravity.js";
+
 export async function resolveQuizAssets(input: {
   repository: RepositoryService;
   channelId: string;
   episodeId: string;
   plan: QuizAssetPlan;
   activeEngine?: "codex" | "antigravity";
+  antigravityClient?: AntigravityClient;
   imageConfig?: { api_key?: string; model?: string };
   onProgress?: (progress: { completed: number; total: number; reused: boolean }) => Promise<void> | void;
 }): Promise<{ resolution: QuizAssetResolution; issues: QuizIssue[] }> {
@@ -73,7 +76,7 @@ export async function resolveQuizAssets(input: {
           assetId: request.asset_id,
           fingerprint,
           theme: episode.quiz_config.visual_theme,
-        }, undefined, { allowTier3Fallback: false });
+        }, input.antigravityClient, { allowTier3Fallback: false });
         const result = await chainProvider.generateReference(compiled.prompt);
         assets.push({
           ...request,

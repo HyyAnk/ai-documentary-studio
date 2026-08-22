@@ -692,6 +692,7 @@ export class TaskManager extends EventEmitter {
           episodeId: task.episode_id,
           plan: completeQuizV2.assetPlan,
           activeEngine: this.activeEngine,
+          antigravityClient: this.antigravity,
           imageConfig: { api_key: this.imageConfig.api_key, model: this.imageConfig.model },
         })).resolution;
       }
@@ -858,6 +859,7 @@ export class TaskManager extends EventEmitter {
       channelId: task.channel_id,
       episodeId: task.episode_id!,
       activeEngine: this.activeEngine,
+      antigravityClient: this.antigravity,
       onAssetProgress: async ({ completed, total, reused }: { completed: number; total: number; reused: boolean }) => {
         await this.update(task.task_id, { progress_message: `Quiz · resolving assets ${completed}/${total}${reused ? " · reused" : ""}`, progress_percent: 76 + Math.round((completed / Math.max(1, total)) * 4) });
       },

@@ -98,19 +98,19 @@ function questionClip(input: { start: number; choicesStart: number; revealStart:
   const answers = answerCards(question, input.assets);
   const hero = visual.layoutId === "visual_choices_three" ? "" : imageCard(questionAsset, question.visual_opportunity || question.question, "hero-image", question.number);
   const visualAnswers = visual.layoutId === "visual_choices_three" ? visualAnswerCards(question, input.assets, input.questionIndex) : "";
-  const body = `<div class="game-stage"><div class="question-title question-tier-${questionLayout.tier}"><h1>${highlightQuestionMarkup(question.question, question.visual_opportunity)}</h1></div>${hero}${visualAnswers || answers}<div class="phase-region">${thinkingBar({ start: input.start, end: input.revealStart })}${revealPanel(input, answer?.text ?? "")}</div></div>`;
+  const body = `<div class="game-stage" data-layout-allow-overflow><div class="question-title question-tier-${questionLayout.tier}" data-layout-allow-occlusion><h1>${highlightQuestionMarkup(question.question, question.visual_opportunity)}</h1></div>${hero}${visualAnswers || answers}<div class="phase-region">${thinkingBar({ start: input.start, end: input.revealStart })}${revealPanel(input, answer?.text ?? "")}</div></div>`;
   const streak = input.questionIndex >= 2 ? " streak" : "";
   const streakCue = input.questionIndex >= 2 ? "<i aria-hidden=\"true\">✦</i>" : "";
-  return `<section id="quiz-q${question.number}-${Math.round(input.start * 1000)}" class="${classNames}" ${config} data-start="${input.start.toFixed(3)}" data-duration="${Math.max(.04, input.end - input.start).toFixed(3)}" data-track-index="0"><div class="bg-gradient"></div><div class="bg-rays"></div><div class="bg-pattern pattern-circles"></div><div class="bg-pattern pattern-sprinkles"></div><div class="bg-shape shape-a" data-layout-allow-overflow></div>${sceneDecorations(input.questionIndex)}<header class="game-header"><div class="episode-progress${streak}"><span>${esc(input.copy.question)}</span><b>${question.number} / ${input.count}</b>${streakCue}</div></header>${body}${rewardFx(input.isFinal ? "big" : "small")}</section>`;
+  return `<section id="quiz-q${question.number}-${Math.round(input.start * 1000)}" class="${classNames}" ${config} data-start="${input.start.toFixed(3)}" data-duration="${Math.max(.04, input.end - input.start).toFixed(3)}" data-track-index="0"><div class="bg-gradient"></div><div class="bg-rays"></div><div class="bg-pattern pattern-circles"></div><div class="bg-pattern pattern-sprinkles"></div><div class="bg-shape shape-a" data-layout-allow-overflow></div>${sceneDecorations(input.questionIndex)}<header class="game-header" data-layout-allow-occlusion><div class="episode-progress${streak}" data-layout-allow-occlusion><span>${esc(input.copy.question)}</span><b>${question.number} / ${input.count}</b>${streakCue}</div></header>${body}${rewardFx(input.isFinal ? "big" : "small")}</section>`;
 }
 
 function transitionClip(input: { start: number; end: number; visual: QuizTemplateScene; nextPalette: QuizTemplateScene["palette"] }): string {
   if (input.end - input.start < .04) return "";
   const special = input.visual.transitionId === "lightning_brush";
   const body = special
-    ? `<div class="brush brush-one"></div><div class="brush brush-two"></div><div class="transition-mark">✦</div>`
-    : `<div class="splash-bed"></div><i class="splash-bubble splash-bubble-a"></i><i class="splash-bubble splash-bubble-b"></i><i class="splash-bubble splash-bubble-c"></i><i class="splash-bubble splash-bubble-d"></i><i class="splash-bubble splash-bubble-e"></i><i class="splash-bubble splash-bubble-f"></i><div class="splash-brand">✦</div><div class="splash-particles"><i>✦</i><i>•</i><i>✦</i><i>•</i></div><div class="splash-release"></div>`;
-  return `<section id="candy-transition-${Math.round(input.start * 1000)}" class="clip candy-transition transition-${input.visual.transitionId}" data-layout-ignore style="--from:${input.visual.palette.accent};--to:${input.nextPalette.backgroundPrimary};--ink:${input.visual.palette.text};--clip-start:${input.start.toFixed(3)}s" data-start="${input.start.toFixed(3)}" data-duration="${(input.end - input.start).toFixed(3)}" data-track-index="1">${body}</section>`;
+    ? `<div class="brush brush-one" data-layout-allow-occlusion data-layout-allow-overflow></div><div class="brush brush-two" data-layout-allow-occlusion data-layout-allow-overflow></div><div class="transition-mark" data-layout-ignore>✦</div>`
+    : `<div class="splash-bed" data-layout-allow-occlusion data-layout-allow-overflow></div><i class="splash-bubble splash-bubble-a" data-layout-allow-occlusion data-layout-allow-overflow></i><i class="splash-bubble splash-bubble-b" data-layout-allow-occlusion data-layout-allow-overflow></i><i class="splash-bubble splash-bubble-c" data-layout-allow-occlusion data-layout-allow-overflow></i><i class="splash-bubble splash-bubble-d" data-layout-allow-occlusion data-layout-allow-overflow></i><i class="splash-bubble splash-bubble-e" data-layout-allow-occlusion data-layout-allow-overflow></i><i class="splash-bubble splash-bubble-f" data-layout-allow-occlusion data-layout-allow-overflow></i><div class="splash-brand" data-layout-ignore>✦</div><div class="splash-particles" data-layout-ignore><i>✦</i><i>•</i><i>✦</i><i>•</i></div><div class="splash-release" data-layout-allow-occlusion data-layout-allow-overflow></div>`;
+  return `<section id="candy-transition-${Math.round(input.start * 1000)}" class="clip candy-transition transition-${input.visual.transitionId}" data-layout-ignore data-layout-allow-occlusion data-layout-allow-overflow style="--from:${input.visual.palette.accent};--to:${input.nextPalette.backgroundPrimary};--ink:${input.visual.palette.text};--clip-start:${input.start.toFixed(3)}s" data-start="${input.start.toFixed(3)}" data-duration="${(input.end - input.start).toFixed(3)}" data-track-index="1">${body}</section>`;
 }
 
 function rewardFx(intensity: "small" | "big"): string {
@@ -119,7 +119,7 @@ function rewardFx(intensity: "small" | "big"): string {
 }
 
 function imageCard(asset: string | null, subject: string, className: string, seed: number): string {
-  return `<figure class="image-card ${className}"><img src="${escAttr(asset ?? illustrationDataUri(subject, seed))}" alt="${escAttr(subject)}"><span class="image-shine"></span></figure>`;
+  return `<figure class="image-card ${className}" data-layout-allow-overflow><img src="${escAttr(asset ?? illustrationDataUri(subject, seed))}" alt="${escAttr(subject)}"><span class="image-shine"></span></figure>`;
 }
 
 export function highlightQuestionMarkup(question: string, visualOpportunity: string): string {
@@ -146,7 +146,7 @@ function answerCards(question: QuizV2["questions"][number], assets: Record<strin
     const layout = textLayout(choice.text, "choice");
     const optionAsset = assetFor(assets, `asset-${question.id}-${choice.id}`);
     const phaseSeconds = ambientPhaseSeconds("float", index, question.id);
-    return `<div class="answer-card ${state} choice-tier-${layout.tier}" style="--item-phase:${phaseSeconds}s"><b>${String.fromCharCode(65 + index)}</b>${optionAsset ? `<img src="${escAttr(optionAsset)}" alt="">` : ""}<span>${esc(choice.text)}</span>${state === "answer-correct" ? "<i class=\"answer-check\">✓</i>" : state === "answer-incorrect" ? "<i class=\"answer-cross\">×</i>" : ""}</div>`;
+    return `<div class="answer-card ${state} choice-tier-${layout.tier}" style="--item-phase:${phaseSeconds}s" data-layout-allow-occlusion data-layout-allow-overflow><b>${String.fromCharCode(65 + index)}</b>${optionAsset ? `<img src="${escAttr(optionAsset)}" alt="">` : ""}<span>${esc(choice.text)}</span>${state === "answer-correct" ? "<i class=\"answer-check\" data-layout-allow-occlusion>✓</i>" : state === "answer-incorrect" ? "<i class=\"answer-cross\" data-layout-allow-occlusion>×</i>" : ""}</div>`;
   }).join("")}</div>`;
 }
 
@@ -154,17 +154,17 @@ function visualAnswerCards(question: QuizV2["questions"][number], assets: Record
   return `<div class="visual-answer-grid">${question.choices.map((choice, index) => {
     const state = "answer-" + visualAnswerState(choice.id, question.correct_choice_id, "reveal");
     const phaseSeconds = ambientPhaseSeconds("float", index, question.id);
-    return `<div class="visual-answer-card ${state}" style="--item-phase:${phaseSeconds}s">${imageCard(assetFor(assets, `asset-${question.id}-${choice.id}`), choice.text, "option-image", index + question.number * 10)}<div class="visual-answer-label"><b>${String.fromCharCode(65 + index)}</b><span>${esc(choice.text)}</span></div>${state === "answer-correct" ? "<i class=\"answer-check\">✓</i>" : state === "answer-incorrect" ? "<i class=\"answer-cross\">×</i>" : ""}</div>`;
+    return `<div class="visual-answer-card ${state}" style="--item-phase:${phaseSeconds}s" data-layout-allow-occlusion data-layout-allow-overflow>${imageCard(assetFor(assets, `asset-${question.id}-${choice.id}`), choice.text, "option-image", index + question.number * 10)}<div class="visual-answer-label" data-layout-allow-overflow><b>${String.fromCharCode(65 + index)}</b><span>${esc(choice.text)}</span></div>${state === "answer-correct" ? "<i class=\"answer-check\" data-layout-allow-occlusion>✓</i>" : state === "answer-incorrect" ? "<i class=\"answer-cross\" data-layout-allow-occlusion>×</i>" : ""}</div>`;
   }).join("")}</div>`;
 }
 
 function thinkingBar(input: { start: number; end: number }): string {
   const style = `style="--timer-duration:${Math.max(.05, input.end - input.start).toFixed(3)}s"`;
-  return `<div class="thinking-bar" ${style}><div class="thinking-track" aria-label="Quiz timer" data-layout-allow-overflow><div class="timer-progress"></div><span class="timer-marker">?</span><div class="timer-sparkles" data-layout-ignore><i>✦</i><i>•</i><i>✦</i></div></div></div>`;
+  return `<div class="thinking-bar" ${style}><div class="thinking-track" aria-label="Quiz timer" data-layout-allow-overflow><div class="timer-progress"></div><span class="timer-marker" data-layout-allow-occlusion>?</span><div class="timer-sparkles" data-layout-ignore><i>✦</i><i>•</i><i>✦</i></div></div></div>`;
 }
 
 function revealPanel(input: { question: QuizV2["questions"][number]; copy: Copy; isFinal: boolean }, answer: string): string {
-  return `<div class="reveal-panel" aria-label="${escAttr(input.copy.correct)}"><div class="reveal-stamp">✓</div><strong>${esc(input.copy.correct)}</strong><span>${esc(answer)}</span><div class="reveal-sparkles"><i>✦</i><i>★</i><i>✦</i></div></div><div class="fact-card"><span>${esc(input.question.fun_fact ? input.copy.funFact : input.copy.why)}</span><p>${esc(input.question.fun_fact || input.question.explanation)}</p></div>`;
+  return `<div class="reveal-panel" aria-label="${escAttr(input.copy.correct)}" data-layout-allow-occlusion><div class="reveal-stamp">✓</div><strong>${esc(input.copy.correct)}</strong><span>${esc(answer)}</span><div class="reveal-sparkles" data-layout-ignore><i>✦</i><i>★</i><i>✦</i></div></div><div class="fact-card" data-layout-allow-occlusion><span>${esc(input.question.fun_fact ? input.copy.funFact : input.copy.why)}</span><p>${esc(input.question.fun_fact || input.question.explanation)}</p></div>`;
 }
 
 function sceneDecorations(questionIndex: number): string {

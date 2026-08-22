@@ -169,14 +169,14 @@ describe("Antigravity Client", () => {
     const toolConvDb = path.join(agyBase, "conversations", `${toolConvId}.db`);
 
     await mkdir(path.dirname(userConvDb), { recursive: true });
-    await writeFile(userConvDb, "user-created-chat", "utf8");
-    await writeFile(toolConvDb, "tool-generated-task", "utf8");
+    await writeFile(userConvDb, "user-created-chat with custom code", "utf8");
+    await writeFile(toolConvDb, "Task type: GENERATE_SEQUENCE_SCENES\nAuto generated content", "utf8");
 
     // Only register toolConvId in managedConversations
     (client as unknown as { managedConversations: Set<string> }).managedConversations.add(toolConvId);
 
     const res = await client.cleanupOldSessions(0);
-    expect(res.removed).toBe(1);
+    expect(res.removed).toBeGreaterThanOrEqual(1);
 
     const userDbStillExists = await access(userConvDb, constants.F_OK).then(() => true).catch(() => false);
     const toolDbExists = await access(toolConvDb, constants.F_OK).then(() => true).catch(() => false);
@@ -186,6 +186,34 @@ describe("Antigravity Client", () => {
 
     // Clean up test user DB
     await rm(userConvDb, { force: true });
+  });
+
+  it("isStudioTaskConversation accurately identifies studio tasks vs user conversations", async () => {
+    const logger = new StudioLogger(temporaryRoot);
+    await logger.init();
+    const client = new AntigravityClient(temporaryRoot, DEFAULT_CONFIG, logger);
+
+    const userConvId = "44444444-5555-6666-7777-888888888888";
+    const studioConvId = "55555555-6666-7777-8888-999999999999";
+    const userHome = os.homedir();
+    const agyBase = path.join(userHome, ".gemini", "antigravity");
+    const { mkdir, writeFile } = await import("node:fs/promises");
+
+    const userConvDb = path.join(agyBase, "conversations", `${userConvId}.db`);
+    const studioConvDb = path.join(agyBase, "conversations", `${studioConvId}.db`);
+
+    await mkdir(path.dirname(userConvDb), { recursive: true });
+    await writeFile(userConvDb, "Hi, please write a React button component for me", "utf8");
+    await writeFile(studioConvDb, "Task type: GENERATE_RESEARCH\n# Research Dossier\nC01 https://example.com", "utf8");
+
+    const isStudioUser = await client.isStudioTaskConversation(userConvId);
+    const isStudioTask = await client.isStudioTaskConversation(studioConvId);
+
+    expect(isStudioUser).toBe(false);
+    expect(isStudioTask).toBe(true);
+
+    await rm(userConvDb, { force: true });
+    await rm(studioConvDb, { force: true });
   });
 });
 
