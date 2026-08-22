@@ -22,14 +22,14 @@ export const candyArcadeTokens: QuizVisualTemplate["tokens"] = {
 };
 
 export const candyArcadePalettes = [
-  { id: "lime", backgroundPrimary: "#99D93E", backgroundSecondary: "#31B87A", accent: "#FF6C78", answerBadge: "#FF6C78", correct: "#27B96C", incorrect: "#64748B", surface: "#FFFDF7", text: "#152A57", muted: "#E8F5DF" },
-  { id: "aqua", backgroundPrimary: "#21C8CF", backgroundSecondary: "#1973CF", accent: "#FF7A63", answerBadge: "#F6517C", correct: "#26B96C", incorrect: "#64748B", surface: "#FFFDF7", text: "#102D5B", muted: "#DDF9F7" },
-  { id: "sunny", backgroundPrimary: "#FFD23F", backgroundSecondary: "#FF9D31", accent: "#E94F6D", answerBadge: "#EF5A5A", correct: "#25B56D", incorrect: "#64748B", surface: "#FFFDF8", text: "#19325B", muted: "#FFF2B4" },
-  { id: "purple", backgroundPrimary: "#9A66E6", backgroundSecondary: "#594DDC", accent: "#FFAA42", answerBadge: "#F35B86", correct: "#33C777", incorrect: "#64748B", surface: "#FFFEFF", text: "#1C2459", muted: "#E9E0FF" },
-  { id: "pink", backgroundPrimary: "#FF82AF", backgroundSecondary: "#E94F8A", accent: "#FFD44D", answerBadge: "#7D5BE6", correct: "#29B86C", incorrect: "#64748B", surface: "#FFFDFD", text: "#2A235A", muted: "#FFE4EF" },
-  { id: "orange", backgroundPrimary: "#FF964F", backgroundSecondary: "#EF5A62", accent: "#3BC7C9", answerBadge: "#2DADB7", correct: "#21B56A", incorrect: "#64748B", surface: "#FFFDF8", text: "#1A315D", muted: "#FFE5C9" },
-  { id: "red", backgroundPrimary: "#F15B68", backgroundSecondary: "#C93D78", accent: "#FFD047", answerBadge: "#F7A53D", correct: "#28B86D", incorrect: "#64748B", surface: "#FFFDFC", text: "#2A2150", muted: "#FFE0E4" },
-  { id: "blue", backgroundPrimary: "#438CE8", backgroundSecondary: "#2A55C8", accent: "#FFCE45", answerBadge: "#F06174", correct: "#2FC177", incorrect: "#64748B", surface: "#FCFEFF", text: "#132A58", muted: "#DCEBFF" },
+  { id: "lime", backgroundPrimary: "#99D93E", backgroundSecondary: "#31B87A", accent: "#FF6C78", surfaceAccent: "#C0394B", onAccent: "#0F172A", answerBadge: "#FF6C78", correct: "#27B96C", incorrect: "#7B8DA1", surface: "#FFFDF7", text: "#152A57", muted: "#E8F5DF" },
+  { id: "aqua", backgroundPrimary: "#21C8CF", backgroundSecondary: "#1973CF", accent: "#FF7A63", surfaceAccent: "#BE4B3A", onAccent: "#0F172A", answerBadge: "#F6517C", correct: "#26B96C", incorrect: "#7B8DA1", surface: "#FFFDF7", text: "#102D5B", muted: "#DDF9F7" },
+  { id: "sunny", backgroundPrimary: "#FFD23F", backgroundSecondary: "#FF9D31", accent: "#E94F6D", surfaceAccent: "#B63D54", onAccent: "#0F172A", answerBadge: "#EF5A5A", correct: "#25B56D", incorrect: "#7B8DA1", surface: "#FFFDF8", text: "#19325B", muted: "#FFF2B4" },
+  { id: "purple", backgroundPrimary: "#9A66E6", backgroundSecondary: "#594DDC", accent: "#FFAA42", surfaceAccent: "#A64C00", onAccent: "#0F172A", answerBadge: "#F35B86", correct: "#33C777", incorrect: "#7B8DA1", surface: "#FFFEFF", text: "#1C2459", muted: "#E9E0FF" },
+  { id: "pink", backgroundPrimary: "#FF82AF", backgroundSecondary: "#E94F8A", accent: "#FFD44D", surfaceAccent: "#8B6500", onAccent: "#0F172A", answerBadge: "#9075E6", correct: "#29B86C", incorrect: "#7B8DA1", surface: "#FFFDFD", text: "#2A235A", muted: "#FFE4EF" },
+  { id: "orange", backgroundPrimary: "#FF964F", backgroundSecondary: "#EF5A62", accent: "#3BC7C9", surfaceAccent: "#007C82", onAccent: "#0F172A", answerBadge: "#2DADB7", correct: "#21B56A", incorrect: "#7B8DA1", surface: "#FFFDF8", text: "#1A315D", muted: "#FFE5C9" },
+  { id: "red", backgroundPrimary: "#F15B68", backgroundSecondary: "#C93D78", accent: "#FFD047", surfaceAccent: "#9A6100", onAccent: "#0F172A", answerBadge: "#F7A53D", correct: "#28B86D", incorrect: "#7B8DA1", surface: "#FFFDFC", text: "#2A2150", muted: "#FFE0E4" },
+  { id: "blue", backgroundPrimary: "#438CE8", backgroundSecondary: "#2A55C8", accent: "#FFCE45", surfaceAccent: "#8C6600", onAccent: "#0F172A", answerBadge: "#F06174", correct: "#2FC177", incorrect: "#7B8DA1", surface: "#FCFEFF", text: "#132A58", muted: "#DCEBFF" },
 ] as const satisfies readonly QuizPalette[];
 
 export const candyArcadeStyleBible: QuizVisualTemplate["styleBible"] = {

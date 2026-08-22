@@ -134,7 +134,8 @@ export class CodexAppServerClient extends EventEmitter {
   }
 
   async deleteThread(threadId: string): Promise<boolean> {
-    if (!threadId || this.config.codex.transport === "openai_compatible") return true;
+    if (!threadId || !this.config.codex.auto_delete_threads) return false;
+    if (this.config.codex.transport === "openai_compatible") return true;
     try {
       await this.ensureConnected();
       await this.request("thread/delete", { threadId });

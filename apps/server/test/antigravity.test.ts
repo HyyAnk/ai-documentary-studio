@@ -1,9 +1,10 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { DEFAULT_CONFIG } from "../src/config.js";
+import { DEFAULT_CONFIG, loadConfig, saveAntigravitySettings, saveCodexSettings } from "../src/config.js";
 import { AntigravityClient } from "../src/antigravity.js";
+import { buildApp } from "../src/app.js";
 import { StudioLogger } from "../src/logger.js";
 
 describe("Antigravity Client", () => {
@@ -15,6 +16,18 @@ describe("Antigravity Client", () => {
 
   afterEach(async () => {
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
+  });
+
+  it("defaults cleanup settings to off and persists an explicit opt-in", async () => {
+    const initial = await loadConfig(temporaryRoot);
+    expect(initial.codex.auto_delete_threads).toBe(false);
+    expect(initial.antigravity.auto_delete_threads).toBe(false);
+
+    await saveCodexSettings(temporaryRoot, { auto_delete_threads: true });
+    await saveAntigravitySettings(temporaryRoot, { auto_delete_threads: true });
+    const enabled = await loadConfig(temporaryRoot);
+    expect(enabled.codex.auto_delete_threads).toBe(true);
+    expect(enabled.antigravity.auto_delete_threads).toBe(true);
   });
 
   it("handles mock CLI output parsing correctly", async () => {
@@ -112,7 +125,7 @@ describe("Antigravity Client", () => {
     expect(extracted).not.toContain("Tool search result");
   });
 
-  it("deleteThread removes database, brain, and annotation artifacts cleanly", async () => {
+  it("keeps Antigravity session artifacts until session cleanup is enabled", async () => {
     const logger = new StudioLogger(temporaryRoot);
     await logger.init();
     const client = new AntigravityClient(temporaryRoot, DEFAULT_CONFIG, logger);
@@ -140,20 +153,27 @@ describe("Antigravity Client", () => {
     (client as unknown as { threadConversations: Map<string, string> }).threadConversations.set("agy_thread_test", testConvId);
 
     const deleted = await client.deleteThread("agy_thread_test");
-    expect(deleted).toBe(true);
+    expect(deleted).toBe(false);
 
     const dbExists = await access(convDb, constants.F_OK).then(() => true).catch(() => false);
     const walExists = await access(convWal, constants.F_OK).then(() => true).catch(() => false);
     const brainExists = await access(brainDir, constants.F_OK).then(() => true).catch(() => false);
     const annotExists = await access(annotDir, constants.F_OK).then(() => true).catch(() => false);
 
-    expect(dbExists).toBe(false);
-    expect(walExists).toBe(false);
-    expect(brainExists).toBe(false);
-    expect(annotExists).toBe(false);
+    expect(dbExists).toBe(true);
+    expect(walExists).toBe(true);
+    expect(brainExists).toBe(true);
+    expect(annotExists).toBe(true);
+
+    client.updateConfig({ ...DEFAULT_CONFIG, antigravity: { ...DEFAULT_CONFIG.antigravity, auto_delete_threads: true } });
+    expect(await client.deleteThread("agy_thread_test")).toBe(true);
+    expect(await access(convDb, constants.F_OK).then(() => true).catch(() => false)).toBe(false);
+    expect(await access(convWal, constants.F_OK).then(() => true).catch(() => false)).toBe(false);
+    expect(await access(brainDir, constants.F_OK).then(() => true).catch(() => false)).toBe(false);
+    expect(await access(annotDir, constants.F_OK).then(() => true).catch(() => false)).toBe(false);
   });
 
-  it("cleanupOldSessions strictly preserves user-created conversations and only deletes tool-managed sessions", async () => {
+  it("keeps all Antigravity sessions until cleanup is enabled", async () => {
     const logger = new StudioLogger(temporaryRoot);
     await logger.init();
     const client = new AntigravityClient(temporaryRoot, DEFAULT_CONFIG, logger);
@@ -176,16 +196,36 @@ describe("Antigravity Client", () => {
     (client as unknown as { managedConversations: Set<string> }).managedConversations.add(toolConvId);
 
     const res = await client.cleanupOldSessions(0);
-    expect(res.removed).toBeGreaterThanOrEqual(1);
+    expect(res).toEqual({ removed: 0 });
 
     const userDbStillExists = await access(userConvDb, constants.F_OK).then(() => true).catch(() => false);
     const toolDbExists = await access(toolConvDb, constants.F_OK).then(() => true).catch(() => false);
 
     expect(userDbStillExists).toBe(true); // User manual session MUST NOT be deleted
-    expect(toolDbExists).toBe(false); // Tool session is cleaned up
+    expect(toolDbExists).toBe(true);
 
-    // Clean up test user DB
+    client.updateConfig({ ...DEFAULT_CONFIG, antigravity: { ...DEFAULT_CONFIG.antigravity, auto_delete_threads: true } });
+    expect((await client.cleanupOldSessions(0)).removed).toBeGreaterThanOrEqual(1);
+    expect(await access(toolConvDb, constants.F_OK).then(() => true).catch(() => false)).toBe(false);
+
+    // Clean up the user-created test conversation.
     await rm(userConvDb, { force: true });
+  });
+
+  it("blocks manual Antigravity cleanup while the setting is off", async () => {
+    await mkdir(path.join(temporaryRoot, "templates"), { recursive: true });
+    await Promise.all([
+      writeFile(path.join(temporaryRoot, "templates", "example_channel_dna.md"), "# DNA\n", "utf8"),
+      writeFile(path.join(temporaryRoot, "templates", "example_style_guide.md"), "# Style\n", "utf8"),
+    ]);
+    const app = await buildApp(temporaryRoot);
+    try {
+      const response = await app.server.inject({ method: "POST", url: "/api/antigravity/cleanup", payload: {} });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ removed: 0 });
+    } finally {
+      await app.close();
+    }
   });
 
   it("isStudioTaskConversation accurately identifies studio tasks vs user conversations", async () => {
@@ -216,4 +256,3 @@ describe("Antigravity Client", () => {
     await rm(studioConvDb, { force: true });
   });
 });
-

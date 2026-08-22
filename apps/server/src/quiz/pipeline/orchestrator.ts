@@ -27,7 +27,7 @@ import type { AntigravityClient } from "../../antigravity.js";
 
 export type QuizOrchestratorInput = {
   repository: RepositoryService;
-  config: Pick<AppConfig, "audio_generation">;
+  config: Pick<AppConfig, "audio_generation"> & { image_generation?: AppConfig["image_generation"] };
   channelId: string;
   episodeId: string;
   activeEngine?: "codex" | "antigravity";
@@ -84,13 +84,15 @@ export async function generateDirector(input: QuizOrchestratorInput): Promise<{ 
 }
 
 export async function planAssets(input: QuizOrchestratorInput): Promise<{ asset_plan: QuizAssetPlan; artifact_path: string; invalidated: string[] }> {
-  const [quiz, director_plan] = await Promise.all([
+  const [quiz, director_plan, episode] = await Promise.all([
     input.repository.readQuiz(input.channelId, input.episodeId),
     input.repository.readDirectorPlan(input.channelId, input.episodeId),
+    input.repository.getEpisode(input.channelId, input.episodeId).catch(() => null),
   ]);
   if (!quiz) throw new RepositoryError("Generate the Quiz facts before planning assets", "QUIZ_REQUIRED");
   if (!director_plan) throw new RepositoryError("Generate the Director plan before planning assets", "DIRECTOR_REQUIRED");
-  const asset_plan = planQuizAssets(quiz, director_plan);
+  const visualStyle = episode?.quiz_config?.resolved_visual_style ?? "pixar_3d";
+  const asset_plan = planQuizAssets(quiz, director_plan, visualStyle);
   const artifact_path = await input.repository.writeAssetPlan(input.channelId, input.episodeId, asset_plan);
   const invalidatedStages = invalidateQuizArtifacts("assets");
   const invalidated = await input.repository.invalidateQuizArtifacts(input.channelId, input.episodeId, invalidatedStages);
@@ -98,15 +100,21 @@ export async function planAssets(input: QuizOrchestratorInput): Promise<{ asset_
 }
 
 export async function resolveAssets(input: QuizOrchestratorInput): Promise<{ asset_resolution: QuizAssetResolution; issues: QuizIssue[]; invalidated: string[] }> {
-  const asset_plan = await input.repository.readAssetPlan(input.channelId, input.episodeId);
+  const [asset_plan, episode] = await Promise.all([
+    input.repository.readAssetPlan(input.channelId, input.episodeId),
+    input.repository.getEpisode(input.channelId, input.episodeId).catch(() => null),
+  ]);
   if (!asset_plan) throw new RepositoryError("Plan Quiz assets before resolving them", "ASSET_PLAN_REQUIRED");
+  const visualStyle = episode?.quiz_config?.resolved_visual_style ?? "pixar_3d";
   const result = await resolveQuizAssets({
     repository: input.repository,
     channelId: input.channelId,
     episodeId: input.episodeId,
     plan: asset_plan,
+    visualStyle,
     activeEngine: input.activeEngine,
     antigravityClient: input.antigravityClient,
+    imageConfig: input.config.image_generation ? { api_key: input.config.image_generation.api_key, model: input.config.image_generation.model } : undefined,
     onProgress: input.onAssetProgress,
   });
   const invalidated = await input.repository.invalidateQuizArtifacts(input.channelId, input.episodeId, invalidateQuizArtifacts("asset_resolution"));

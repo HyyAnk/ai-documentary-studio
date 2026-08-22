@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { QuizV2Schema } from "@studio/shared";
-import { buildCandyArcadeComposition, candyArcadeHeroAreaRatio, highlightQuestionMarkup } from "../src/quiz/render/candyArcadeComposition.js";
+import { buildCandyArcadeCompositionBundle, candyArcadeHeroAreaRatio, highlightQuestionMarkup } from "../src/quiz/render/candyArcadeComposition.js";
 import { createDefaultDirectorPlan } from "../src/quiz/director/parseDirectorPlan.js";
 import { buildQuizVoicePlan } from "../src/quiz/audio/voicePlan.js";
 import { compileQuizTimeline } from "../src/quiz/timeline/compileTimeline.js";
@@ -33,7 +33,8 @@ const quiz = QuizV2Schema.parse({
 function renderHtml(): string {
   const director = createDefaultDirectorPlan(quiz);
   const timeline = compileQuizTimeline({ quiz, director, voicePlan: buildQuizVoicePlan(quiz) });
-  return buildCandyArcadeComposition({ quiz, director, timeline, theme: "candy_arcade", audioPath: "./narration.wav", narrationDurationSeconds: timeline.duration_seconds });
+  const bundle = buildCandyArcadeCompositionBundle({ quiz, director, timeline, theme: "candy_arcade", audioPath: "./narration.wav", narrationDurationSeconds: timeline.duration_seconds });
+  return [bundle.html, ...Object.values(bundle.files)].join("\n");
 }
 
 describe("Candy Arcade visual regression contract", () => {

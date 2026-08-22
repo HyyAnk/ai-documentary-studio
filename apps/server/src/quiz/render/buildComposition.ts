@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 import type { DirectorPlan, QuizConfig, QuizTimeline, QuizV2, Scene } from "@studio/shared";
-import { buildCandyArcadeComposition } from "./candyArcadeComposition.js";
+import { buildCandyArcadeComposition, buildCandyArcadeCompositionBundle, type CandyArcadeCompositionBundle } from "./candyArcadeComposition.js";
 
 export function buildQuizComposition(config: { question_count: number; quiz_format: string; age_band: string; visual_theme: string }, scenes: Scene[], audioPath: string, narrationDurationSeconds?: number): string {
   const sceneDuration = Math.max(0.1, scenes.reduce((sum, scene) => sum + scene.duration_seconds, 0));
@@ -113,6 +113,10 @@ export function buildQuizV2Composition(input: QuizV2CompositionInput): string {
   const audioSrc = audioSource(input.audioPath);
   return "<!doctype html><html><head><meta charset=\"utf-8\"><title>Quiz Engine V2 composition</title><style>" + v2Css() + "</style></head><body><main id=\"stage\" data-composition-id=\"quiz-v2\" data-no-timeline data-start=\"0\" data-width=\"1920\" data-height=\"1080\" data-duration=\"" + duration.toFixed(3) + "\" data-fps=\"30\">" + clips.filter(Boolean).join("\n") + "<audio id=\"quiz-narration\" class=\"clip\" data-start=\"0\" data-duration=\"" + duration.toFixed(3) + "\" data-track-index=\"2\" data-volume=\"1\" src=\"" + audioSrc + "\"></audio></main><script>window.__playerReady=true;window.__renderReady=true;</script></body></html>";
   /* c8 ignore stop */
+}
+
+export function buildQuizV2CompositionBundle(input: QuizV2CompositionInput): CandyArcadeCompositionBundle {
+  return buildCandyArcadeCompositionBundle(input);
 }
 
 function eventAt(events: QuizTimeline["events"], fallback: number): number {

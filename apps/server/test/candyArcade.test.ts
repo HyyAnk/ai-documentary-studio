@@ -5,9 +5,9 @@ import { planQuizAssets } from "../src/quiz/assets/assetPlanner.js";
 import { buildQuizVoicePlan } from "../src/quiz/audio/voicePlan.js";
 import { createDefaultDirectorPlan } from "../src/quiz/director/parseDirectorPlan.js";
 import { assessQuizVisualLayout } from "../src/quiz/qa/visualQa.js";
-import { buildCandyArcadeComposition, candyArcadeHeroAreaRatio } from "../src/quiz/render/candyArcadeComposition.js";
+import { buildCandyArcadeComposition, buildCandyArcadeCompositionBundle, candyArcadeHeroAreaRatio } from "../src/quiz/render/candyArcadeComposition.js";
 import { compileQuizTimeline } from "../src/quiz/timeline/compileTimeline.js";
-import { ambientPhaseSeconds, candyArcadeTemplate, quizTimerState, resolveLayout, resolvePalette, textLayout, timelineProgress, visualAnswerState } from "../src/quiz/visual/candyArcade.js";
+import { ambientPhaseSeconds, candyArcadePalettes, candyArcadeTemplate, quizTimerState, resolveLayout, resolvePalette, textLayout, timelineProgress, visualAnswerState } from "../src/quiz/visual/candyArcade.js";
 
 const quiz = QuizV2Schema.parse({
   schema_version: 2,
@@ -21,11 +21,33 @@ const quiz = QuizV2Schema.parse({
 });
 
 describe("Candy Arcade visual template", () => {
+  it("reserves AA-compliant colors for text on light cards and bright badges", () => {
+    for (const palette of candyArcadePalettes) {
+      expect(contrastRatio(palette.surfaceAccent, palette.surface), `${palette.id} surface accent`).toBeGreaterThanOrEqual(4.5);
+      for (const background of [palette.accent, palette.answerBadge, palette.correct, palette.incorrect]) {
+        expect(contrastRatio(palette.onAccent, background), `${palette.id} badge ink on ${background}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
   it("uses reusable tokens and never auto-repeats a palette", () => {
     expect(candyArcadeTemplate.tokens.safeArea.left).toBeGreaterThan(0);
     expect(candyArcadeTemplate.tokens.typography.question.family).toContain("Arial Rounded");
     const first = resolvePalette("auto", 0);
     expect(resolvePalette("auto", 0, first.id).id).not.toBe(first.id);
+  });
+
+  it("mounts scene files without parent-traversal asset paths", () => {
+    const director = createDefaultDirectorPlan(quiz);
+    const timeline = compileQuizTimeline({ quiz, director, voicePlan: buildQuizVoicePlan(quiz) });
+    const bundle = buildCandyArcadeCompositionBundle({ quiz, director, timeline, theme: "candy_arcade", audioPath: "./narration.wav", narrationDurationSeconds: timeline.duration_seconds });
+
+    expect(bundle.html).toContain('data-composition-src="compositions/candy-intro.html"');
+    expect(Object.keys(bundle.files)).toContain("compositions/candy-intro.html");
+    expect(Object.values(bundle.files).every((file) => !file.includes('src="../'))).toBe(true);
+    expect(Object.values(bundle.files).every((file) => !file.includes("data-start="))).toBe(true);
+    expect(Object.values(bundle.files).every((file) => !file.includes("data-track-index="))).toBe(true);
+    expect(bundle.html.match(/data-composition-src=/g)).toHaveLength(Object.keys(bundle.files).length);
   });
 
   it("selects semantic layouts and deterministic readable text tiers", () => {
@@ -83,9 +105,20 @@ describe("Candy Arcade visual template", () => {
     expect(AssetConsistencyGroupSchema.parse(groupWithoutFacePolicy).face_policy).toBe("natural_only");
     const hero = assetPlan.assets.find((asset) => asset.asset_id === "asset-question-01-hero")!;
     const heroPrompt = compileQuizAssetPrompt(hero);
-    expect(heroPrompt.prompt).toContain("polished 3D clay-like illustration");
-    expect(heroPrompt.prompt).toContain("gentle upper-left highlight");
-    expect(heroPrompt.prompt).toContain("Face policy: none");
+    expect(heroPrompt.prompt).toContain("3D Pixar Animation");
+    expect(heroPrompt.prompt).toContain("soft cinematic studio lighting");
+    expect(heroPrompt.prompt).toContain("Face policy: natural_only");
+    expect(heroPrompt.prompt).toContain("soft-focus pastel environment");
+
+    // Test other visual styles
+    const vectorPrompt = compileQuizAssetPrompt(hero, undefined, "flat_vector");
+    expect(vectorPrompt.prompt).toContain("2D Flat Vector");
+    expect(vectorPrompt.prompt).toContain("geometric or nature backdrop");
+
+    const voxelPrompt = compileQuizAssetPrompt(hero, undefined, "voxel_lowpoly");
+    expect(voxelPrompt.prompt).toContain("3D Voxel / Low-Poly");
+    expect(voxelPrompt.prompt).toContain("voxel grid landscape");
+
     expect(assessQuizVisualLayout({ quiz, director }).filter((issue) => issue.severity === "blocker")).toEqual([]);
     const fairnessIssues = assessQuizVisualLayout({ quiz, director, assetPlan });
     expect(fairnessIssues.filter((issue) => issue.severity === "blocker")).toEqual([]);
@@ -96,8 +129,16 @@ describe("Candy Arcade visual template", () => {
     const director = createDefaultDirectorPlan(quiz);
     const voice = buildQuizVoicePlan(quiz);
     const timeline = compileQuizTimeline({ quiz, director, voicePlan: voice });
-    const html = buildCandyArcadeComposition({ quiz, director, timeline, theme: "candy_arcade", audioPath: "./narration.wav", narrationDurationSeconds: timeline.duration_seconds });
+    const html = compositionSources({ quiz, director, timeline, theme: "candy_arcade", audioPath: "./narration.wav", narrationDurationSeconds: timeline.duration_seconds });
     expect(html).toContain("reveal-sparkles");
+    expect(html).toContain("--surface-accent:");
+    expect(html).toContain("--on-accent:");
+    expect(html).toContain(".fact-card span { color: var(--surface-accent);");
+    expect(html).toContain(".timer-marker { position: absolute;");
+    expect(html).toContain("background: var(--accent); color: var(--on-accent);");
+    expect(html).toContain(".intro-card > span, .outro-card > span { display: inline-flex; padding: 15px 23px; border-radius: 999px; background: #FF6277; color: #172A59;");
+    expect(html).toContain(".intro-stars, .outro-stars { margin-top: 35px; color: #172A59;");
+    expect(html).toContain("background: #29B9A8; color: #172A59;");
     expect(html).not.toContain("reveal-lockup");
     expect(html).toContain("timer-marker");
     expect(html).toContain('<div class="timer-progress"></div><span class="timer-marker" data-layout-allow-occlusion>?</span>');
@@ -129,7 +170,7 @@ describe("Candy Arcade visual template", () => {
     });
     const director = createDefaultDirectorPlan(maximumQuiz);
     const timeline = compileQuizTimeline({ quiz: maximumQuiz, director, voicePlan: buildQuizVoicePlan(maximumQuiz) });
-    const html = buildCandyArcadeComposition({ quiz: maximumQuiz, director, timeline, theme: "candy_arcade", audioPath: "./narration.wav", narrationDurationSeconds: timeline.duration_seconds });
+    const html = compositionSources({ quiz: maximumQuiz, director, timeline, theme: "candy_arcade", audioPath: "./narration.wav", narrationDurationSeconds: timeline.duration_seconds });
     expect((html.match(/<section id="quiz-q/g) ?? [])).toHaveLength(50);
     expect((html.match(/class="image-card hero-image"/g) ?? [])).toHaveLength(50);
     expect(html).toContain("ray-spin 150s");
@@ -148,3 +189,18 @@ describe("Candy Arcade visual template", () => {
     expect(assessQuizVisualLayout({ quiz, director, assetPlan: broken }).some((issue) => issue.code === "VISUAL_ANSWER_LEAKAGE" && issue.severity === "blocker")).toBe(true);
   });
 });
+
+function contrastRatio(foreground: string, background: string): number {
+  const luminance = (hex: string): number => {
+    const channels = [1, 3, 5].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16) / 255);
+    const [red, green, blue] = channels.map((channel) => channel <= .03928 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4);
+    return .2126 * red + .7152 * green + .0722 * blue;
+  };
+  const [lighter, darker] = [luminance(foreground), luminance(background)].sort((left, right) => right - left);
+  return (lighter + .05) / (darker + .05);
+}
+
+function compositionSources(input: Parameters<typeof buildCandyArcadeComposition>[0]): string {
+  const bundle = buildCandyArcadeCompositionBundle(input);
+  return [bundle.html, ...Object.values(bundle.files)].join("\n");
+}

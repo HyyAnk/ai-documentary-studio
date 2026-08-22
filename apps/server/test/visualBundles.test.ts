@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { parseContinuityBundles } from "../src/visualBundles.js";
+import { parseContinuityBundles, replaceBundleAnchorPrompt } from "../src/visualBundles.js";
 import { RepositoryService } from "../src/repository.js";
 
 const roots: string[] = [];
@@ -63,6 +63,14 @@ describe("continuity bundles", () => {
     expect(scenes[0].dialogue).toBe("First dialogue");
     expect(scenes[0].visual_prompt).toBe("Shot for First dialogue");
     expect((await repository.listBundleImages(channel.channel_id, episode.episode_id))[0]).toMatchObject({ bundle_id: "CB-01", filename: "CB-01.png" });
+  });
+
+  it("replaces anchor prompt for a target bundle without altering other bundles", () => {
+    const original = `# Episode Visual Bible\n\n## Continuity bundle CB-01 — The workshop\n\n- Era: 1950s\n- Anchor-frame prompt: A bloody battlefield with wounded soldiers.\n- Reference asset slots: anchor\n\n## Continuity bundle CB-02 — The archive\n\n- Anchor-frame prompt: A cool archive room with tall shelves.\n- Allowed shot variation: lens and camera height`;
+    const updated = replaceBundleAnchorPrompt(original, 1, "A cinematic historical battlefield shrouded in misty twilight with fallen banners.");
+    const parsed = parseContinuityBundles(updated);
+    expect(parsed[0].anchor_prompt).toBe("A cinematic historical battlefield shrouded in misty twilight with fallen banners.");
+    expect(parsed[1].anchor_prompt).toBe("A cool archive room with tall shelves.");
   });
 });
 

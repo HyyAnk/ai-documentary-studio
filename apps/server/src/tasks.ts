@@ -16,6 +16,7 @@ import {
   type TaskType,
   QUIZ_MAX_QUESTION_COUNT,
   QUIZ_MIN_QUESTION_COUNT,
+  QUIZ_MAX_CHOICES_PER_QUESTION,
   makeId,
   nowIso,
 } from "@studio/shared";
@@ -34,12 +35,14 @@ import type { AudioProvider } from "./providers/index.js";
 import { optimizeShortScenes, packBeatsIntoScenes, rebalanceEditorialOverlays, type Beat } from "./sceneTiming.js";
 import { calibratedScriptTargetWords, countWords, extractNarration, extractNarrationChunks, extractNarrationSections, hasHumorPolicyMarker, scriptWordBounds } from "./production.js";
 import { stripEditorialOverlayInstructions } from "./visualPrompt.js";
-import { parseContinuityBundles } from "./visualBundles.js";
+import { parseContinuityBundles, replaceBundleAnchorPrompt } from "./visualBundles.js";
+import { isContentFilterError, extractFilterReason, sanitizeImagePromptWithLLM } from "./utils/promptSanitizer.js";
 import { extractArtifactSectionNumbers, formatArtifactSectionNumbers, missingArtifactSectionNumbers, contiguousArtifactNumbers } from "./artifactSections.js";
 import { buildQuizComposition } from "./quiz/render/buildComposition.js";
 import { HyperframesRenderer } from "./quiz/render/hyperframesRenderer.js";
 import { preflightQuizRender } from "./quiz/qa/preflight.js";
 import { inspectRenderedVideo } from "./quiz/qa/postRenderQa.js";
+import { formatHyperframesCheckFailure, hasHyperframesContrastIssue, parseHyperframesCheckReport } from "./quiz/qa/hyperframesQuality.js";
 import { isQuizAssetResolutionComplete, resolveQuizAssets } from "./quiz/assets/resolveQuizAssets.js";
 import { compileTimeline, generateDirector, generateQuiz, generateVoice, planAssets, readQuizArtifacts, resolveAssets, runQa } from "./quiz/pipeline/orchestrator.js";
 import { quizVoicePlanNeedsRegeneration } from "./quiz/audio/voicePolicy.js";
@@ -113,7 +116,7 @@ export class TaskManager extends EventEmitter {
       match_target_duration: true,
     },
     audioProviderFactory?: (target: ChatterboxTarget, config: AppConfig["audio_generation"]) => AudioProvider,
-    codexConfig: CodexCleanupConfig = { auto_delete_threads: true, failed_thread_retention_days: 7 },
+    codexConfig: CodexCleanupConfig = { auto_delete_threads: false, failed_thread_retention_days: 7 },
     imageConfig: AppConfig["image_generation"] = DEFAULT_CONFIG.image_generation,
     private readonly antigravity?: AntigravityClient,
     activeEngine: "codex" | "antigravity" = "codex",
@@ -127,7 +130,7 @@ export class TaskManager extends EventEmitter {
     this.imageConfig = imageConfig;
     this.audioProviderFactory = audioProviderFactory ?? ((target, config) => new ChatterboxProvider(repository, config, target));
     this.codexCleanupConfig = { auto_delete_threads: codexConfig.auto_delete_threads, failed_thread_retention_days: codexConfig.failed_thread_retention_days };
-    this.antigravityCleanupConfig = { auto_delete_threads: true, failed_thread_retention_days: 0 };
+    this.antigravityCleanupConfig = { auto_delete_threads: false, failed_thread_retention_days: 0 };
     codex.on("status", (status: typeof this.connectionStatus) => {
       this.connectionStatus = status;
       this.emitEvent({ type: "codex.status", status });
@@ -429,6 +432,74 @@ export class TaskManager extends EventEmitter {
     }
   }
 
+  private async generateBundleImageWithSafetyRetry(
+    task: Task,
+    imageTarget: { channelId: string; episodeId: string; bundleNumber: number; variant: number; theme?: string },
+    initialPrompt: string,
+    signal?: AbortSignal,
+    output?: string,
+    visualBibleContent?: string,
+  ): Promise<{ image: { asset_path: string }; updatedPrompt?: string }> {
+    let currentPrompt = initialPrompt;
+    const maxAttempts = 2;
+    let lastError: unknown = null;
+
+    for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+      try {
+        const image = Gpti2ImageProvider.isConfigured(this.imageConfig.api_key)
+          ? await new Gpti2ImageProvider(this.repository, imageTarget, {
+              apiKey: this.imageConfig.api_key,
+              model: this.imageConfig.model,
+            }).generateReference(currentPrompt, signal)
+          : this.activeEngine === "antigravity"
+          ? await new AntigravityImageChainProvider(this.repository, imageTarget, this.antigravity, { allowTier3Fallback: false }).generateReference(currentPrompt, signal)
+          : ShopAiKeyImageProvider.isConfigured()
+          ? await new ShopAiKeyImageProvider(this.repository, imageTarget).generateReference(currentPrompt, signal)
+          : await new CodexImageProvider(this.repository, imageTarget, output ?? "").generateReference(currentPrompt);
+        return { image, updatedPrompt: currentPrompt !== initialPrompt ? currentPrompt : undefined };
+      } catch (err) {
+        lastError = err;
+        if (signal?.aborted || this.get(task.task_id).status === "CANCELLED") throw err;
+        if (isContentFilterError(err) && attempt < maxAttempts) {
+          const reason = extractFilterReason(err);
+          const client = this.activeEngine === "antigravity" && this.antigravity ? this.antigravity : this.codex;
+          const engineLabel = this.activeEngine === "antigravity" ? "Antigravity" : "Codex";
+          this.logger.warn(`Style anchor ${imageTarget.bundleNumber} prompt rejected by content filter (${reason}). Auto-rephrasing with ${engineLabel} (attempt ${attempt + 1}/${maxAttempts})...`, {
+            profileId: imageTarget.channelId,
+            step: "image_safety_rephrase",
+          });
+          await this.update(task.task_id, {
+            progress_message: `Prompt rejected by safety filter. Auto-rephrasing with ${engineLabel} (${attempt + 1}/${maxAttempts})...`,
+          });
+          const rephrased = await sanitizeImagePromptWithLLM({
+            client,
+            originalPrompt: currentPrompt,
+            rejectionReason: reason,
+            context: `Style anchor continuity bundle CB-${String(imageTarget.bundleNumber).padStart(2, "0")}`,
+            signal,
+          });
+          if (rephrased && rephrased !== currentPrompt) {
+            currentPrompt = rephrased;
+            if (visualBibleContent) {
+              const updated = replaceBundleAnchorPrompt(visualBibleContent, imageTarget.bundleNumber, rephrased);
+              if (updated !== visualBibleContent) {
+                await this.repository.saveEpisodeFile(imageTarget.channelId, imageTarget.episodeId, "visual_bible.md", updated).catch(() => undefined);
+                visualBibleContent = updated;
+              }
+            }
+            await this.update(task.task_id, {
+              progress_message: `Retrying continuity image with sanitized prompt (${attempt + 1}/${maxAttempts})`,
+              progress_percent: 45,
+            });
+            continue;
+          }
+        }
+        throw err;
+      }
+    }
+    throw lastError ?? new Error("Failed to generate continuity image");
+  }
+
   private async runGpti2BundleImageTask(task: Task): Promise<void> {
     const context = { profileId: task.channel_id, workerId: task.task_id, step: "run_gpti2_image" };
     const controller = new AbortController();
@@ -450,15 +521,13 @@ export class TaskManager extends EventEmitter {
           promptToUse = bundle.anchor_prompt;
         }
       }
-      const image = await new Gpti2ImageProvider(this.repository, {
+      const imageTarget = {
         channelId: task.channel_id,
         episodeId: task.episode_id,
         bundleNumber,
         variant: this.imageVariants.get(task.task_id) ?? 0,
-      }, {
-        apiKey: this.imageConfig.api_key,
-        model: this.imageConfig.model,
-      }).generateReference(promptToUse, controller.signal);
+      };
+      const { image } = await this.generateBundleImageWithSafetyRetry(task, imageTarget, promptToUse, controller.signal, undefined, visualBible?.content);
       const bundleId = `CB-${String(bundleNumber).padStart(2, "0")}`;
       await this.repository.attachBundleReference(task.channel_id, task.episode_id, bundleId, image.asset_path);
       await this.update(task.task_id, { progress_message: "Saving continuity image", progress_percent: 90 });
@@ -494,13 +563,14 @@ export class TaskManager extends EventEmitter {
           promptToUse = bundle.anchor_prompt;
         }
       }
-      const image = await new AntigravityImageChainProvider(this.repository, {
+      const imageTarget = {
         channelId: task.channel_id,
         episodeId: task.episode_id,
         bundleNumber,
         variant: this.imageVariants.get(task.task_id) ?? 0,
         theme: episode.quiz_config?.visual_theme,
-      }, this.antigravity, { allowTier3Fallback: false }).generateReference(promptToUse, controller.signal);
+      };
+      const { image } = await this.generateBundleImageWithSafetyRetry(task, imageTarget, promptToUse, controller.signal, undefined, visualBible?.content);
       const bundleId = `CB-${String(bundleNumber).padStart(2, "0")}`;
       await this.repository.attachBundleReference(task.channel_id, task.episode_id, bundleId, image.asset_path);
       await this.update(task.task_id, { progress_message: "Saving continuity image", progress_percent: 90 });
@@ -526,12 +596,22 @@ export class TaskManager extends EventEmitter {
       if (!bundleNumber) throw new RepositoryError("Bundle number is required", "BUNDLE_REQUIRED");
       const manifest = await this.contextEngine.build(task.task_type, task.channel_id, task.episode_id, bundleNumber, this.imageVariants.get(task.task_id) ?? 0);
       await this.update(task.task_id, { progress_message: "Generating continuity image", progress_percent: 35 });
-      const image = await new ShopAiKeyImageProvider(this.repository, {
+      const visualBible = await this.repository.getEpisodeFile(task.channel_id, task.episode_id, "visual_bible.md").catch(() => null);
+      let promptToUse = manifest.prompt;
+      if (visualBible?.content) {
+        const bundles = parseContinuityBundles(visualBible.content);
+        const bundle = bundles.find((b) => b.bundle_number === bundleNumber);
+        if (bundle?.anchor_prompt) {
+          promptToUse = bundle.anchor_prompt;
+        }
+      }
+      const imageTarget = {
         channelId: task.channel_id,
         episodeId: task.episode_id,
         bundleNumber,
         variant: this.imageVariants.get(task.task_id) ?? 0,
-      }).generateReference(manifest.prompt, controller.signal);
+      };
+      const { image } = await this.generateBundleImageWithSafetyRetry(task, imageTarget, promptToUse, controller.signal, undefined, visualBible?.content);
       const bundleId = `CB-${String(bundleNumber).padStart(2, "0")}`;
       await this.repository.attachBundleReference(task.channel_id, task.episode_id, bundleId, image.asset_path);
       await this.update(task.task_id, { progress_message: "Saving continuity image", progress_percent: 90 });
@@ -545,6 +625,7 @@ export class TaskManager extends EventEmitter {
       this.activeImageControllers.delete(task.task_id);
     }
   }
+
 
   private async runPipelineTask(task: Task): Promise<void> {
     if (!task.episode_id) {
@@ -731,10 +812,16 @@ export class TaskManager extends EventEmitter {
           throw new RepositoryError("Quiz V2 preflight blocked render: " + (blocker?.message ?? "Resolve the reported QA blockers before rendering."), "QUIZ_PREFLIGHT_BLOCKED");
         }
       }
-      const html = completeQuizV2
-        ? (await quizRenderer.prepare({ quiz: completeQuizV2.quiz, director: completeQuizV2.director, timeline: completeQuizV2.timeline, scenes, audioPath: "./narration.wav", theme: episode.quiz_config.visual_theme, narrationDurationSeconds: episode.narration_duration_seconds ?? undefined, assets: assetSources })).html
-        : buildQuizComposition(episode.quiz_config, scenes, "./narration.wav", episode.narration_duration_seconds ?? undefined);
+      const preparedQuizRender = completeQuizV2
+        ? await quizRenderer.prepare({ quiz: completeQuizV2.quiz, director: completeQuizV2.director, timeline: completeQuizV2.timeline, scenes, audioPath: "./narration.wav", theme: episode.quiz_config.visual_theme, narrationDurationSeconds: episode.narration_duration_seconds ?? undefined, assets: assetSources })
+        : null;
+      const html = preparedQuizRender?.html ?? buildQuizComposition(episode.quiz_config, scenes, "./narration.wav", episode.narration_duration_seconds ?? undefined);
       await writeFile(compositionPath, html, "utf8");
+      for (const [relativePath, content] of Object.entries(preparedQuizRender?.compositionFiles ?? {})) {
+        const filePath = path.join(renderRoot, relativePath);
+        await mkdir(path.dirname(filePath), { recursive: true });
+        await writeFile(filePath, content, "utf8");
+      }
       const sourceFingerprint = renderSourceFingerprint(html, narration.modified_at, narration.size, assetResolution?.assets ?? []);
       const checkpointPath = path.join(renderRoot, "render-checkpoint.json");
       const checkpoint = await readRenderCheckpoint(checkpointPath);
@@ -743,7 +830,17 @@ export class TaskManager extends EventEmitter {
         await this.update(task.task_id, { progress_message: "Video · layout and media checks already passed", progress_percent: 20 });
       } else {
         await this.update(task.task_id, { progress_message: "Video · checking layout and media", progress_percent: 20 });
-        await execFileAsync(npxCommand, hyperframesArgs("check", renderRoot, "--json", "--samples", "5", "--timeout", "60000"), { cwd: this.repository.rootDirectory, timeout: 600_000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 });
+        let checkOutput: string;
+        try {
+          ({ stdout: checkOutput } = await execFileAsync(npxCommand, hyperframesArgs("check", renderRoot, "--json", "--samples", "5", "--timeout", "60000"), { cwd: this.repository.rootDirectory, timeout: 600_000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 }));
+        } catch (error) {
+          const failure = error as Error & { stdout?: string };
+          throw new RepositoryError(formatHyperframesCheckFailure(parseHyperframesCheckReport(failure.stdout), failure.message), "QUIZ_COMPOSITION_CHECK_FAILED");
+        }
+        const checkReport = parseHyperframesCheckReport(checkOutput);
+        if (hasHyperframesContrastIssue(checkReport)) {
+          throw new RepositoryError(formatHyperframesCheckFailure(checkReport), "QUIZ_COMPOSITION_CONTRAST_FAILED");
+        }
         await writeRenderCheckpoint(checkpointPath, { schema_version: 2, source_fingerprint: sourceFingerprint, check: { status: "passed" } });
       }
       let reusableRender = layoutReady && checkpoint?.render?.status === "passed" && await hasNonEmptyFile(outputPath);
@@ -855,7 +952,7 @@ export class TaskManager extends EventEmitter {
   private async runQuizV2Pipeline(task: Task): Promise<void> {
     const input = {
       repository: this.repository,
-      config: { audio_generation: this.audioConfig },
+      config: { audio_generation: this.audioConfig, image_generation: this.imageConfig },
       channelId: task.channel_id,
       episodeId: task.episode_id!,
       activeEngine: this.activeEngine,
@@ -1185,16 +1282,14 @@ export class TaskManager extends EventEmitter {
             promptToUse = bundle.anchor_prompt;
           }
         }
-        const image = Gpti2ImageProvider.isConfigured(this.imageConfig.api_key)
-          ? await new Gpti2ImageProvider(this.repository, imageTarget, {
-              apiKey: this.imageConfig.api_key,
-              model: this.imageConfig.model,
-            }).generateReference(promptToUse)
-          : this.activeEngine === "antigravity"
-          ? await new AntigravityImageChainProvider(this.repository, imageTarget, this.antigravity, { allowTier3Fallback: false }).generateReference(promptToUse)
-          : ShopAiKeyImageProvider.isConfigured()
-          ? await new ShopAiKeyImageProvider(this.repository, imageTarget).generateReference(promptToUse)
-          : await new CodexImageProvider(this.repository, imageTarget, output).generateReference(active.manifest.prompt);
+        const { image } = await this.generateBundleImageWithSafetyRetry(
+          task,
+          imageTarget,
+          promptToUse,
+          undefined,
+          output,
+          visualBible?.content,
+        );
         const bundleId = `CB-${String(bundleNumber).padStart(2, "0")}`;
         await this.repository.attachBundleReference(task.channel_id, task.episode_id!, bundleId, image.asset_path);
         outputFiles = [image.asset_path];
@@ -1335,7 +1430,7 @@ export class TaskManager extends EventEmitter {
     active.output = "";
     active.researchAttempts += 1;
     await this.update(active.task.task_id, { codex_thread_id: threadId, codex_turn_id: turnId, progress_message: "Retrying research with complete claim ledger" });
-    if (previousThreadId !== threadId) void client.deleteThread(previousThreadId).catch(() => undefined);
+    if (previousThreadId !== threadId && this.isSessionCleanupEnabled()) void client.deleteThread(previousThreadId).catch(() => undefined);
   }
 
   private async retryScript(active: ActiveRun, reason: string): Promise<void> {
@@ -1351,7 +1446,7 @@ export class TaskManager extends EventEmitter {
     active.output = "";
     active.scriptAttempts += 1;
     await this.update(active.task.task_id, { codex_thread_id: threadId, codex_turn_id: turnId, progress_message: active.task.task_type === "GENERATE_SCRIPT" && reason.startsWith("Quiz script quality gate failed") ? "Retrying quiz script with strict question format" : "Retrying script with strict word budget" });
-    if (previousThreadId !== threadId) void client.deleteThread(previousThreadId).catch(() => undefined);
+    if (previousThreadId !== threadId && this.isSessionCleanupEnabled()) void client.deleteThread(previousThreadId).catch(() => undefined);
   }
 
   private async retryVisualBible(active: ActiveRun, reason: string): Promise<void> {
@@ -1379,7 +1474,7 @@ export class TaskManager extends EventEmitter {
     active.output = "";
     active.visualBibleAttempts += 1;
     await this.update(active.task.task_id, { codex_thread_id: threadId, codex_turn_id: turnId, progress_message: isQuiz ? "Retrying Quiz visual bible with safe motion rules" : "Retrying visual bible with strict continuity schema" });
-    if (previousThreadId !== threadId) void client.deleteThread(previousThreadId).catch(() => undefined);
+    if (previousThreadId !== threadId && this.isSessionCleanupEnabled()) void client.deleteThread(previousThreadId).catch(() => undefined);
   }
 
   private async retrySequenceScenes(active: ActiveRun, reason: string): Promise<void> {
@@ -1390,7 +1485,7 @@ export class TaskManager extends EventEmitter {
     const section = extractNarrationSections(script.content)[sequenceNumber - 1];
     const exactNarration = section?.text.trim() ?? "";
     const strictContract = isQuiz
-      ? `Preserve every quiz field and return only a JSON array. Copy every word from the exact narration below verbatim and in order into one or more dialogue fields. Split only at natural boundaries; never paraphrase, shorten, add, or omit words. The final narration coverage must be at least 97.5%. Every beat must use a non-empty continuity_bundle_id exactly "CB-${String(sequenceNumber).padStart(2, "0")}", a non-empty continuity_note, and a distinct visual_prompt with the exact uppercase sections CAMERA, ACTION, LIGHTING, ATMOSPHERE, and CONTINUITY. Every non-intro/outro beat must repeat the same question, visible choices, canonical answer, and explanation for this question. Set answer to the exact text of one visible choice; do not return a bare mismatched label, invented choice, or a different answer per beat. Every beat must include complete quiz question, choices, answer, and explanation data.`
+      ? `Preserve every quiz field and return only a JSON array. Copy every word from the exact narration below verbatim and in order into one or more dialogue fields. Split only at natural boundaries; never paraphrase, shorten, add, or omit words. The final narration coverage must be at least 97.5%. Every beat must use a non-empty continuity_bundle_id exactly "CB-${String(sequenceNumber).padStart(2, "0")}", a non-empty continuity_note, and a distinct visual_prompt with the exact uppercase sections CAMERA, ACTION, LIGHTING, ATMOSPHERE, and CONTINUITY. Every non-intro/outro beat must repeat the same question, visible choices (strictly maximum 3 choices: A, B, C only; never exceed 3), canonical answer, and explanation for this question. Set answer to the exact text of one visible choice; do not return a bare mismatched label, invented choice, or a different answer per beat. Every beat must include complete quiz question, choices, answer, and explanation data.`
       : "Return only a JSON array. Copy every word from the exact narration below verbatim and in order into one or more dialogue fields. Split only at natural boundaries; never paraphrase, shorten, add, or omit words. The final narration coverage must be at least 97.5%. Every beat must use a non-empty continuity_bundle_id, a non-empty continuity_note, and a distinct visual_prompt with the exact uppercase sections CAMERA, ACTION, LIGHTING, ATMOSPHERE, and CONTINUITY.";
     const narrationBlock = exactNarration ? `\n\nEXACT NARRATION TO COVER VERBATIM:\n<NARRATION>\n${exactNarration}\n</NARRATION>` : "";
     const previousThreadId = active.threadId;
@@ -1402,7 +1497,7 @@ export class TaskManager extends EventEmitter {
     active.output = "";
     active.sequenceAttempts += 1;
     await this.update(active.task.task_id, { codex_thread_id: threadId, codex_turn_id: turnId, progress_message: isQuiz ? "Retrying Quiz shot plan with strict continuity metadata" : "Retrying shot plan with strict structure metadata" });
-    if (previousThreadId !== threadId) void client.deleteThread(previousThreadId).catch(() => undefined);
+    if (previousThreadId !== threadId && this.isSessionCleanupEnabled()) void client.deleteThread(previousThreadId).catch(() => undefined);
   }
 
   private findSceneNumber(taskId: string): number | undefined {
@@ -1423,7 +1518,7 @@ export class TaskManager extends EventEmitter {
   }
 
   async cleanupCodexThreads(force = false): Promise<{ removed: number }> {
-    if (!force && !this.codexCleanupConfig.auto_delete_threads) return { removed: 0 };
+    if (!this.codexCleanupConfig.auto_delete_threads) return { removed: 0 };
     const now = Date.now();
     const retentionMs = this.codexCleanupConfig.failed_thread_retention_days * 24 * 60 * 60 * 1000;
     const candidates = this.list().filter((task) => {
@@ -1442,7 +1537,7 @@ export class TaskManager extends EventEmitter {
   }
 
   async cleanupAntigravityThreads(force = false): Promise<{ removed: number }> {
-    if (!force && !this.antigravityCleanupConfig.auto_delete_threads) return { removed: 0 };
+    if (!this.antigravityCleanupConfig.auto_delete_threads) return { removed: 0 };
     if (this.antigravity) {
       return await this.antigravity.cleanupOldSessions(force ? 0 : this.antigravityCleanupConfig.failed_thread_retention_days);
     }
@@ -1461,6 +1556,7 @@ export class TaskManager extends EventEmitter {
   private async tryDeleteThread(threadId: string, engine?: "codex" | "antigravity"): Promise<boolean> {
     const targetEngine = engine ?? this.activeEngine;
     if (targetEngine === "antigravity") {
+      if (!this.antigravityCleanupConfig.auto_delete_threads) return false;
       if (!this.antigravity) return false;
       try {
         return await this.antigravity.deleteThread(threadId);
@@ -1477,6 +1573,10 @@ export class TaskManager extends EventEmitter {
       this.logger.debug(`Codex thread cleanup skipped: ${error instanceof Error ? error.message : "unknown error"}`, { step: "codex_thread_cleanup" });
       return false;
     }
+  }
+
+  private isSessionCleanupEnabled(engine = this.activeEngine): boolean {
+    return engine === "antigravity" ? this.antigravityCleanupConfig.auto_delete_threads : this.codexCleanupConfig.auto_delete_threads;
   }
 
   private async update(taskId: string, patch: Partial<Task>): Promise<void> {
@@ -1668,6 +1768,7 @@ function parseTopicCandidates(output: string, channelId: string) {
       quiz_format: formats.includes(String(candidate.quiz_format) as typeof formats[number]) ? String(candidate.quiz_format) as typeof formats[number] : "knowledge",
       question_count: Math.max(QUIZ_MIN_QUESTION_COUNT, Math.min(QUIZ_MAX_QUESTION_COUNT, Number(candidate.question_count) || 8)),
       age_band: ages.includes(String(candidate.age_band) as typeof ages[number]) ? String(candidate.age_band) as typeof ages[number] : "7-9",
+      visual_style: "mixed" as const,
     };
   });
 }
@@ -1766,7 +1867,7 @@ function parseQuizSceneContent(value: unknown): Scene["quiz"] {
   const phases = ["intro", "question", "reveal", "explanation", "outro"] as const;
   const phaseValue = String(raw.phase ?? "question") as typeof phases[number];
   const choices = Array.isArray(raw.choices)
-    ? raw.choices.map(String).map((item) => stripQuizChoiceLabel(item.trim())).filter(Boolean).slice(0, 4)
+    ? raw.choices.map(String).map((item) => stripQuizChoiceLabel(item.trim())).filter(Boolean).slice(0, QUIZ_MAX_CHOICES_PER_QUESTION)
     : [];
   const rawAnswer = String(raw.answer ?? "").trim();
   const canonicalAnswer = canonicalizeVisibleQuizAnswer(choices, rawAnswer);
@@ -1842,7 +1943,7 @@ function validateQuizVisualBible(markdown: string, requiredBundleNumbers: number
   const missing = missingArtifactSectionNumbers(markdown, requiredBundleNumbers, "continuity_bundle");
   if (missing.length) throw new Error(`Quiz visual bible quality gate failed: missing continuity bundle${missing.length === 1 ? "" : "s"} ${formatArtifactSectionNumbers(missing)}`);
   if (bundles.length < requiredBundleNumbers.length) throw new Error(`Quiz visual bible quality gate failed: found ${bundles.length} continuity bundles for ${requiredBundleNumbers.length} questions`);
-  for (const required of ["palette", "countdown", "answer", "safe motion"]) if (!markdown.toLowerCase().includes(required)) throw new Error(`Quiz visual bible quality gate failed: missing ${required}`);
+  for (const required of ["safe motion"]) if (!markdown.toLowerCase().includes(required)) throw new Error(`Quiz visual bible quality gate failed: missing ${required}`);
 }
 
 function validateTreatment(markdown: string): void {

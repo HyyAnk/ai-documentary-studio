@@ -201,7 +201,11 @@ async function generateGptImage(
 
   if (!response.ok) {
     const errorMsg = (payload.error as { message?: string } | undefined)?.message || raw.slice(0, 300) || "Unknown error";
-    throw new RepositoryError(`gpti2.store API failed (${response.status}): ${errorMsg}`, "IMAGE_PROVIDER_FAILED");
+    const isContentFilter = response.status === 400 && /(?:content filter|safety|moderation|policy|prohibited)/i.test(errorMsg);
+    throw new RepositoryError(
+      `gpti2.store API failed (${response.status}): ${errorMsg}`,
+      isContentFilter ? "IMAGE_CONTENT_FILTER_REJECTED" : "IMAGE_PROVIDER_FAILED",
+    );
   }
 
   const dataArray = payload.data as Array<{ b64_json?: string; url?: string }> | undefined;
@@ -304,7 +308,12 @@ async function pollGptJob(
     }
 
     if (payload.status === "failed") {
-      throw new RepositoryError(`Image job failed: ${payload.error?.message || "Unknown error"}`, "IMAGE_PROVIDER_FAILED");
+      const errorMsg = payload.error?.message || "Unknown error";
+      const isContentFilter = /(?:content filter|safety|moderation|policy|prohibited)/i.test(errorMsg);
+      throw new RepositoryError(
+        `Image job failed: ${errorMsg}`,
+        isContentFilter ? "IMAGE_CONTENT_FILTER_REJECTED" : "IMAGE_PROVIDER_FAILED",
+      );
     }
   }
 

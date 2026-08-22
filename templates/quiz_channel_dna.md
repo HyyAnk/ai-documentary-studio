@@ -21,11 +21,12 @@ Rotate formats across a five-topic suggestion run:
 - Image guess: show a friendly visual clue before revealing the subject.
 - Multiple choice: A/B/C with a spoken pause and a visual countdown.
 - True or false: one simple claim, then a playful correction.
-- Odd one out: four items, one does not belong, followed by the rule.
+- Odd one out: three items (A, B, C), one does not belong, followed by the rule.
 
 ## Question design
 
 - Default episode size: 8 questions. Allow 3–30 questions.
+- Multiple-choice and option-based questions must strictly have a maximum of 3 choices (A, B, or C only). Never generate more than 3 options to prevent viewer fatigue and maintain a clean, uncluttered layout.
 - One idea per question. Use concrete nouns and short sentences.
 - Give children enough time to think before the reveal.
 - Never trick the viewer with ambiguous wording, obscure edge cases, or two defensible answers.

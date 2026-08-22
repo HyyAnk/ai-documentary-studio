@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { QuizAssessmentSchema, QuizAssetPlanSchema, QuizAssetResolutionSchema } from "@studio/shared";
 import { ContextEngine } from "../src/context.js";
+import { DEFAULT_CONFIG } from "../src/config.js";
 import { StudioLogger } from "../src/logger.js";
 import { RepositoryService } from "../src/repository.js";
 import { TaskManager, extractMarkdown, isSequenceOutputFailure, normalizeQuizBeatMetadata, parseBeatsOutput, planSequenceResume } from "../src/tasks.js";
@@ -243,7 +244,7 @@ describe("TaskManager locks", () => {
     await waitFor(() => manager.get(second.task_id).status === "COMPLETED");
     expect(manager.get(first.task_id).status).toBe("COMPLETED");
     expect(manager.get(second.task_id).status).toBe("COMPLETED");
-    expect(fake.deletedThreads).toContain("thread_1");
+    expect(fake.deletedThreads).toEqual([]);
     const secondEpisode = await repository.confirmTopic(channel.channel_id, topics[1].topic_id);
     const parallelA = manager.submit("GENERATE_RESEARCH", channel.channel_id, episode.episode_id);
     const parallelB = manager.submit("GENERATE_RESEARCH", channel.channel_id, secondEpisode.episode_id);
@@ -293,7 +294,7 @@ describe("TaskManager locks", () => {
     expect((await repository.readScenes(channel.channel_id, firstEpisode.episode_id))[0].audio_duration_seconds).toBe(2);
   });
 
-  it("keeps automatic cleanup off until a manual sweep is requested", async () => {
+  it("keeps manual cleanup off until session cleanup is enabled", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "documentary-thread-cleanup-"));
     roots.push(root);
     await mkdir(path.join(root, "templates"), { recursive: true });
@@ -328,6 +329,11 @@ describe("TaskManager locks", () => {
     await manager.load();
     expect(fake.deletedThreads).toHaveLength(0);
     expect(await manager.cleanupCodexThreads()).toEqual({ removed: 0 });
+    expect(await manager.cleanupCodexThreads(true)).toEqual({ removed: 0 });
+    expect(manager.get("task_old_thread").codex_thread_id).toBe("thread_old");
+    expect(fake.deletedThreads).toEqual([]);
+
+    manager.updateCodexConfig({ ...DEFAULT_CONFIG.codex, auto_delete_threads: true });
     expect(await manager.cleanupCodexThreads(true)).toEqual({ removed: 1 });
     expect(manager.get("task_old_thread").codex_thread_id).toBeNull();
     expect(fake.deletedThreads).toEqual(["thread_old"]);
@@ -388,7 +394,7 @@ describe("TaskManager locks", () => {
     const visualBible = await repository.getEpisodeFile(channel.channel_id, episode.episode_id, "visual_bible.md");
     expect(visualBible.content.toLowerCase()).toContain("safe motion");
     expect(manager.get(task.task_id).progress_message).toBe("Completed");
-    expect(fake.deletedThreads).toContain("thread_1");
+    expect(fake.deletedThreads).toEqual([]);
   });
 
   it("retries a sequence shot plan when prompt structure or continuity metadata is missing", async () => {
@@ -422,7 +428,7 @@ describe("TaskManager locks", () => {
     expect(scenes[0]!.continuity_bundle_id).toBe("cb-01");
     expect(scenes[0]!.continuity_note).toContain("CB-01");
     expect(manager.get(task.task_id).progress_message).toBe("Completed");
-    expect(fake.deletedThreads).toContain("thread_1");
+    expect(fake.deletedThreads).toEqual([]);
     expect(fake.prompts.some((prompt) => prompt.includes("EXACT NARRATION TO COVER VERBATIM") && prompt.includes("Opening narration."))).toBe(true);
   });
 
@@ -452,7 +458,7 @@ describe("TaskManager locks", () => {
     const research = await repository.getEpisodeFile(channel.channel_id, episode.episode_id, "research.md");
     expect(research.content).toContain("C15");
     expect(manager.get(task.task_id).progress_message).toBe("Completed");
-    expect(fake.deletedThreads).toContain("thread_1");
+    expect(fake.deletedThreads).toEqual([]);
   });
 
   it("runs the one-click pipeline and skips artifacts that are already ready", async () => {
@@ -571,6 +577,7 @@ describe("TaskManager locks", () => {
     const task2 = manager.submit("GENERATE_PIPELINE", channel.channel_id, episode.episode_id);
     expect(task2.accumulated_duration_seconds).toBeGreaterThanOrEqual(119);
     expect(task2.accumulated_duration_seconds).toBeLessThanOrEqual(121);
+    await waitFor(() => manager.get(task2.task_id).status === "FAILED" || manager.get(task2.task_id).status === "COMPLETED");
   });
 });
 

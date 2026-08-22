@@ -58,6 +58,19 @@ export type TaskType = z.infer<typeof TaskTypeSchema>;
 
 const IsoDate = z.string().datetime({ offset: true });
 
+export const QuizImageStyleSchema = z.enum(["pixar_3d", "flat_vector", "kawaii_chibi", "voxel_lowpoly", "plastic_toy"]);
+export type QuizImageStyle = z.infer<typeof QuizImageStyleSchema>;
+
+export const ALL_QUIZ_IMAGE_STYLES: QuizImageStyle[] = ["pixar_3d", "flat_vector", "kawaii_chibi", "voxel_lowpoly", "plastic_toy"];
+
+export const QUIZ_IMAGE_STYLE_LABELS: Record<QuizImageStyle, string> = {
+  pixar_3d: "3D Pixar Animation",
+  flat_vector: "2D Flat Vector",
+  kawaii_chibi: "Chibi Kawaii Anime",
+  voxel_lowpoly: "3D Voxel / Low-Poly",
+  plastic_toy: "3D Glossy Vinyl Toy",
+};
+
 export const ChannelSchema = z.object({
   channel_id: z.string().min(1),
   slug: z.string().min(1),
@@ -75,6 +88,7 @@ export const ChannelSchema = z.object({
   voice_reference_path: z.string().nullable().default(null),
   group_id: z.enum(["documentary", "quiz"]).default("documentary"),
   engine: z.enum(["documentary", "quiz"]).default("documentary"),
+  selected_styles: z.array(QuizImageStyleSchema).default(["pixar_3d", "flat_vector", "kawaii_chibi", "voxel_lowpoly", "plastic_toy"]),
 });
 export type Channel = z.infer<typeof ChannelSchema>;
 
@@ -91,6 +105,7 @@ export const TopicCandidateSchema = z.object({
   quiz_format: z.enum(["knowledge", "image_guess", "multiple_choice", "true_false", "odd_one_out"]).default("knowledge"),
   question_count: z.number().int().min(QUIZ_MIN_QUESTION_COUNT).max(QUIZ_MAX_QUESTION_COUNT).default(8),
   age_band: z.enum(["4-6", "7-9", "10-12", "family"]).default("7-9"),
+  visual_style: z.enum(["mixed", "pixar_3d", "flat_vector", "kawaii_chibi", "voxel_lowpoly", "plastic_toy"]).default("mixed"),
 });
 export type TopicCandidate = z.infer<typeof TopicCandidateSchema>;
 
@@ -109,6 +124,8 @@ export const QuizConfigSchema = z.object({
   age_band: z.enum(["4-6", "7-9", "10-12", "family"]).default("7-9"),
   answer_mode: z.enum(["voice_and_reveal", "voice_only"]).default("voice_and_reveal"),
   visual_theme: QuizVisualThemeSchema.default("candy_arcade"),
+  visual_style: z.enum(["mixed", "pixar_3d", "flat_vector", "kawaii_chibi", "voxel_lowpoly", "plastic_toy"]).default("mixed"),
+  resolved_visual_style: QuizImageStyleSchema.default("pixar_3d"),
 });
 export type QuizConfig = z.infer<typeof QuizConfigSchema>;
 
@@ -121,6 +138,8 @@ export type QuizAgeBand = z.infer<typeof QuizAgeBandSchema>;
 // A child-friendly quiz needs reading, thinking, reveal, and explanation time.
 // Keep this shared so topic selection and episode creation make the same promise.
 export const QUIZ_SECONDS_PER_QUESTION = 33;
+export const QUIZ_MIN_CHOICES_PER_QUESTION = 2;
+export const QUIZ_MAX_CHOICES_PER_QUESTION = 3;
 
 export const QuizChoiceSchema = z.object({
   id: z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/),
@@ -141,7 +160,7 @@ export const QuizQuestionSchema = z.object({
   format: QuizQuestionFormatSchema,
   difficulty: z.number().int().min(1).max(5),
   question: z.string().trim().min(1).max(320),
-  choices: QuizChoiceSchema.array().min(2).max(6),
+  choices: QuizChoiceSchema.array().min(QUIZ_MIN_CHOICES_PER_QUESTION).max(QUIZ_MAX_CHOICES_PER_QUESTION),
   correct_choice_id: z.string().min(1),
   explanation: z.string().trim().min(1).max(600),
   fun_fact: z.string().trim().max(600).default(""),
@@ -474,7 +493,7 @@ export const QuizSceneContentSchema = z.object({
   phase: z.enum(["intro", "question", "reveal", "explanation", "outro"]).default("question"),
   question_number: z.number().int().positive().nullable().default(null),
   question: z.string().default(""),
-  choices: z.array(z.string()).max(4).default([]),
+  choices: z.array(z.string()).max(QUIZ_MAX_CHOICES_PER_QUESTION).default([]),
   answer: z.string().default(""),
   explanation: z.string().default(""),
   image_prompt: z.string().default(""),
@@ -627,7 +646,7 @@ export const AppConfigSchema = z.object({
     experimental_api: z.boolean().default(false),
     api_base_url: z.string().default(""),
     api_key: z.string().default(""),
-    auto_delete_threads: z.boolean().default(true),
+    auto_delete_threads: z.boolean().default(false),
     failed_thread_retention_days: z.number().int().nonnegative().default(7),
   }),
   antigravity: z.object({
@@ -636,7 +655,7 @@ export const AppConfigSchema = z.object({
     model: z.string().default("gemini-2.5-pro"),
     api_base_url: z.string().default(""),
     api_key: z.string().default(""),
-    auto_delete_threads: z.boolean().default(true),
+    auto_delete_threads: z.boolean().default(false),
     failed_thread_retention_days: z.number().int().nonnegative().default(7),
   }),
   audio_generation: z.object({
@@ -736,7 +755,7 @@ export const CodexSettingsSchema = z.object({
   has_api_key: z.boolean(),
   app_server_endpoint: z.string(),
   command: z.string(),
-  auto_delete_threads: z.boolean().default(true),
+  auto_delete_threads: z.boolean().default(false),
   failed_thread_retention_days: z.number().int().nonnegative().default(7),
 });
 export type CodexSettings = z.infer<typeof CodexSettingsSchema>;
@@ -774,7 +793,7 @@ export const AntigravitySettingsSchema = z.object({
   command: z.string(),
   api_base_url: z.string(),
   has_api_key: z.boolean(),
-  auto_delete_threads: z.boolean().default(true),
+  auto_delete_threads: z.boolean().default(false),
   failed_thread_retention_days: z.number().int().nonnegative().default(7),
 });
 export type AntigravitySettings = z.infer<typeof AntigravitySettingsSchema>;
@@ -829,6 +848,7 @@ export const UpdateChannelInputSchema = z.object({
   language: z.string().trim().max(80).optional(),
   market: z.string().trim().max(120).optional(),
   status: ChannelStatusSchema.optional(),
+  selected_styles: z.array(QuizImageStyleSchema).optional(),
 });
 
 export const SaveTextInputSchema = z.object({ content: z.string() });
@@ -836,6 +856,7 @@ export const SaveTextInputSchema = z.object({ content: z.string() });
 export const TopicConfirmInputSchema = z.object({
   topic_id: z.string().min(1),
   question_count: z.number().int().min(QUIZ_MIN_QUESTION_COUNT).max(QUIZ_MAX_QUESTION_COUNT).optional(),
+  visual_style: z.enum(["mixed", "pixar_3d", "flat_vector", "kawaii_chibi", "voxel_lowpoly", "plastic_toy"]).optional(),
 });
 
 export const EpisodeSettingsInputSchema = z.object({
@@ -845,6 +866,8 @@ export const EpisodeSettingsInputSchema = z.object({
   age_band: z.enum(["4-6", "7-9", "10-12", "family"]).optional(),
   answer_mode: z.enum(["voice_and_reveal", "voice_only"]).optional(),
   visual_theme: QuizVisualThemeSchema.optional(),
+  visual_style: z.enum(["mixed", "pixar_3d", "flat_vector", "kawaii_chibi", "voxel_lowpoly", "plastic_toy"]).optional(),
+  resolved_visual_style: QuizImageStyleSchema.optional(),
 });
 export type EpisodeSettingsInput = z.infer<typeof EpisodeSettingsInputSchema>;
 

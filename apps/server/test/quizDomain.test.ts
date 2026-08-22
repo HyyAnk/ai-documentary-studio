@@ -91,4 +91,24 @@ describe("Quiz V2 domain and Director", () => {
     const assessment = assessQuiz({ quiz, director: createDefaultDirectorPlan(quiz) });
     expect(assessment.issues.some((issue) => issue.code === "visual_subject_missing" && issue.severity === "blocker")).toBe(true);
   });
+
+  it("limits choices to a maximum of 3 (A, B, C) and rejects fewer than 2 choices", () => {
+    // 4 choices should be sliced down to 3
+    const sceneWith4Choices = scene(1, "Tiger");
+    sceneWith4Choices.quiz = {
+      ...sceneWith4Choices.quiz!,
+      choices: ["Tiger", "Dolphin", "Elephant", "Leopard"],
+    };
+    const quiz = deriveQuizV2FromScenes({ episodeId: "episode-1", language: "English", ageBand: "7-9", format: "multiple_choice", scenes: [sceneWith4Choices] });
+    expect(quiz.questions[0].choices).toHaveLength(3);
+    expect(quiz.questions[0].choices.map((c) => c.text)).toEqual(["Tiger", "Dolphin", "Elephant"]);
+
+    // 1 choice should throw QUIZ_QUESTION_INCOMPLETE
+    const sceneWith1Choice = scene(1, "Tiger");
+    sceneWith1Choice.quiz = {
+      ...sceneWith1Choice.quiz!,
+      choices: ["Tiger"],
+    };
+    expect(() => deriveQuizV2FromScenes({ episodeId: "episode-1", language: "English", ageBand: "7-9", format: "multiple_choice", scenes: [sceneWith1Choice] })).toThrow("missing question, choices");
+  });
 });

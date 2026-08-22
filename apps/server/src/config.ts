@@ -48,7 +48,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     experimental_api: false,
     api_base_url: "",
     api_key: "",
-    auto_delete_threads: true,
+    auto_delete_threads: false,
     failed_thread_retention_days: 7,
   },
   antigravity: {
@@ -57,7 +57,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     model: "pro",
     api_base_url: "",
     api_key: "",
-    auto_delete_threads: true,
+    auto_delete_threads: false,
     failed_thread_retention_days: 7,
   },
   audio_generation: {

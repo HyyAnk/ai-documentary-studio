@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -14,6 +14,9 @@ import { validateRenderProbe } from "../src/quiz/qa/postRenderQa.js";
 import { buildQuizVoicePlan } from "../src/quiz/audio/voicePlan.js";
 import { quizVoiceFingerprint, quizVoiceTempo } from "../src/quiz/audio/voiceSynthesis.js";
 import { compileQuizTimeline } from "../src/quiz/timeline/compileTimeline.js";
+
+import { resolveQuizAssets } from "../src/quiz/assets/resolveQuizAssets.js";
+import { RepositoryService } from "../src/repository.js";
 
 const roots: string[] = [];
 const quiz = QuizV2Schema.parse({
@@ -106,5 +109,60 @@ describe("Quiz V2 assets and QA", () => {
     const invalidProbe = validateRenderProbe({ format: { duration: "10" }, streams: [{ codec_type: "video", width: 1280, height: 720, r_frame_rate: "24/1", duration: "10" }] }, { width: 1920, height: 1080, fps: 30 });
     expect(invalidProbe.some((issue) => issue.code === "render_audio_stream_missing")).toBe(true);
     expect(invalidProbe.some((issue) => issue.code === "render_resolution_mismatch")).toBe(true);
+  });
+
+  it("automatically bridges and reuses Continuity bundle images for hero question assets", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "quiz-continuity-bridge-"));
+    roots.push(root);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# Channel DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "quiz_channel_dna.md"), "# Quiz Channel DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style Guide\n", "utf8");
+    const repository = new RepositoryService(root);
+    const channel = await repository.createChannel({ name: "Bridge Quiz", description: "", target_audience: "", language: "English", market: "", dna_mode: "example", group_id: "quiz" });
+    const topics = Array.from({ length: 5 }, (_, index) => ({ topic_id: "topic-" + index, channel_id: channel.channel_id, title: "Topic " + index, premise: "Premise", why_it_fits: "Fits", hook: "Hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false }));
+    await repository.saveTopicRun(channel.channel_id, topics);
+    const episode = await repository.confirmTopic(channel.channel_id, topics[0].topic_id);
+
+    // Create a 1x1 valid PNG image in Continuity bundle 1 (CB-01)
+    const pngBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAFAAI/9B+f9AAAAABJRU5ErkJggg==", "base64");
+    await repository.writeBundleImage(channel.channel_id, episode.episode_id, 1, pngBytes, 0, { price_vnd: 250, model: "imagen-3" });
+
+    const quizWithVisual = QuizV2Schema.parse({
+      schema_version: 2,
+      episode_id: episode.episode_id,
+      age_band: "7-9",
+      language: "English",
+      questions: [{
+        id: "question-01",
+        number: 1,
+        format: "multiple_choice",
+        difficulty: 1,
+        question: "Which ocean is largest?",
+        choices: [{ id: "choice-a", text: "Pacific" }, { id: "choice-b", text: "Atlantic" }, { id: "choice-c", text: "Indian" }],
+        correct_choice_id: "choice-a",
+        explanation: "Pacific is largest.",
+        fun_fact: "",
+        source_ids: ["C01"],
+        visual_opportunity: "Show a clean blue globe",
+        validation: { semantic_status: "validated", source_coverage: true, fact_locked: true },
+      }],
+    });
+
+    const director = createDefaultDirectorPlan(quizWithVisual);
+    const plan = planQuizAssets(quizWithVisual, director);
+
+    // Resolve assets without any third-party provider configured
+    const { resolution } = await resolveQuizAssets({
+      repository,
+      channelId: channel.channel_id,
+      episodeId: episode.episode_id,
+      plan,
+    });
+
+    const heroAsset = resolution.assets.find((a) => a.asset_id === "asset-question-01-hero");
+    expect(heroAsset).toBeDefined();
+    expect(heroAsset?.source).toBe("explicit_episode");
+    expect(heroAsset?.path).toContain("asset-question-01-hero");
   });
 });

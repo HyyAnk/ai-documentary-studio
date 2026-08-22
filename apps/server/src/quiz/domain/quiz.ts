@@ -1,6 +1,8 @@
 import {
   QuizQuestionFormatSchema,
   QuizV2Schema,
+  QUIZ_MAX_CHOICES_PER_QUESTION,
+  QUIZ_MIN_CHOICES_PER_QUESTION,
   type QuizConfig,
   type QuizQuestionFormat,
   type QuizV2,
@@ -101,11 +103,11 @@ export function deriveQuizV2FromScenes(input: {
   const questions = [...grouped.entries()].sort(([a], [b]) => a - b).map(([number, questionScenes], index) => {
     const quizScenes = questionScenes.map((scene) => scene.quiz).filter((quiz): quiz is NonNullable<Scene["quiz"]> => Boolean(quiz));
     const question = quizScenes.find((quiz) => quiz.question.trim())?.question.trim() ?? "";
-    const choicesText = quizScenes.find((quiz) => quiz.choices.length > 0)?.choices ?? [];
+    const choicesText = (quizScenes.find((quiz) => quiz.choices.length > 0)?.choices ?? []).slice(0, QUIZ_MAX_CHOICES_PER_QUESTION);
     const answer = quizScenes.find((quiz) => quiz.answer.trim())?.answer.trim() ?? "";
     const explanation = quizScenes.find((quiz) => quiz.explanation.trim())?.explanation.trim() ?? "";
-    if (!question || choicesText.length < 2 || !answer || !explanation) {
-      throw new QuizDomainError("Question " + number + " is missing question, choices, canonical answer, or explanation", "QUIZ_QUESTION_INCOMPLETE");
+    if (!question || choicesText.length < QUIZ_MIN_CHOICES_PER_QUESTION || choicesText.length > QUIZ_MAX_CHOICES_PER_QUESTION || !answer || !explanation) {
+      throw new QuizDomainError("Question " + number + " is missing question, choices (must have 2–3 choices: A, B, or C), canonical answer, or explanation", "QUIZ_QUESTION_INCOMPLETE");
     }
     const choices = choicesText.map((text, choiceIndex) => ({ id: "choice-" + String.fromCharCode(97 + choiceIndex), text: stripQuizChoiceLabel(text) }));
     const canonicalChoiceIndex = resolveVisibleQuizChoice(choices.map((choice) => choice.text), answer);

@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import type { QuizAssetPlan, QuizAssetResolution, QuizIssue } from "@studio/shared";
+import type { QuizAssetPlan, QuizAssetResolution, QuizImageStyle, QuizIssue } from "@studio/shared";
 import { StudioLogger } from "../../logger.js";
 import type { RepositoryService } from "../../repository.js";
 import { Gpti2QuizImageProvider } from "../../providers/gpti2Image.js";
@@ -7,6 +7,7 @@ import { ShopAiKeyQuizImageProvider } from "../../providers/shopAiKeyImage.js";
 import { AntigravityImageChainProvider } from "../../providers/antigravityImageChain.js";
 import { assetFingerprint } from "./assetFingerprint.js";
 import { compileQuizAssetPrompt } from "./promptCompiler.js";
+import { isContentFilterError, extractFilterReason, sanitizeImagePromptWithLLM } from "../../utils/promptSanitizer.js";
 
 import type { AntigravityClient } from "../../antigravity.js";
 
@@ -15,6 +16,7 @@ export async function resolveQuizAssets(input: {
   channelId: string;
   episodeId: string;
   plan: QuizAssetPlan;
+  visualStyle?: QuizImageStyle;
   activeEngine?: "codex" | "antigravity";
   antigravityClient?: AntigravityClient;
   imageConfig?: { api_key?: string; model?: string };
@@ -30,7 +32,11 @@ export async function resolveQuizAssets(input: {
 
   for (const [index, request] of input.plan.assets.entries()) {
     let reused = false;
-    const compiled = compileQuizAssetPrompt(request, request.consistency_group_id ? consistencyGroups.get(request.consistency_group_id) : undefined);
+    const compiled = compileQuizAssetPrompt(
+      request,
+      request.consistency_group_id ? consistencyGroups.get(request.consistency_group_id) : undefined,
+      input.visualStyle ?? "pixar_3d",
+    );
     logger.info(`Compiled prompt for ${request.asset_id}: ${JSON.stringify(compiled.prompt)}`, { profileId: input.channelId, workerId: input.episodeId, step: "compile_asset_prompt" });
     const providerName = Gpti2QuizImageProvider.isConfigured(input.imageConfig?.api_key)
       ? "gpti2"
@@ -41,8 +47,37 @@ export async function resolveQuizAssets(input: {
       : "inline-fallback";
     const fingerprint = assetFingerprint(request, providerName, compiled.cacheVersion);
     const cached = byFingerprint.get(fingerprint);
+    const bundleNumber = request.question_id ? Number(/^question-(\d+)$/i.exec(request.question_id)?.[1] ?? 0) : 0;
+    let existingBundleFile: Awaited<ReturnType<RepositoryService["getBundleImageFile"]>> | null = null;
+    if (request.purpose === "hero_question_image" && bundleNumber > 0) {
+      const bundleTarget = await input.repository.getBundleImagePath(input.channelId, input.episodeId, bundleNumber);
+      existingBundleFile = await input.repository.getBundleImageFile(input.channelId, input.episodeId, bundleTarget.filename).catch(() => null);
+    }
+
     try {
-      if (cached && await isValidQuizAsset(input.repository, input.channelId, input.episodeId, cached.path)) {
+      if (existingBundleFile) {
+        const bundleBytes = new Uint8Array(await readFile(existingBundleFile.absolutePath));
+        const quizAssetPath = await input.repository.writeQuizImageAsset(
+          input.channelId,
+          input.episodeId,
+          request.asset_id,
+          fingerprint,
+          bundleBytes,
+          {
+            price_vnd: existingBundleFile.price_vnd,
+            price_breakdown: existingBundleFile.price_breakdown,
+            model: existingBundleFile.model,
+            aspect_ratio: existingBundleFile.aspect_ratio,
+          },
+        );
+        assets.push({
+          ...request,
+          fingerprint,
+          path: quizAssetPath,
+          source: "explicit_episode",
+        });
+        reused = true;
+      } else if (cached && await isValidQuizAsset(input.repository, input.channelId, input.episodeId, cached.path)) {
         assets.push({
           ...request,
           fingerprint,
@@ -61,13 +96,47 @@ export async function resolveQuizAssets(input: {
           { channelId: input.channelId, episodeId: input.episodeId },
           { apiKey: input.imageConfig?.api_key, model: input.imageConfig?.model },
         );
-        const generated = await provider.generateAsset({
-          assetId: request.asset_id,
-          fingerprint,
-          prompt: compiled.prompt,
-          aspect_ratio: request.aspect_ratio,
-        });
+        let currentPrompt = compiled.prompt;
+        let generated: { path: string } | null = null;
+        const maxAttempts = 2;
+        for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+          try {
+            generated = await provider.generateAsset({
+              assetId: request.asset_id,
+              fingerprint,
+              prompt: currentPrompt,
+              aspect_ratio: request.aspect_ratio,
+            });
+            break;
+          } catch (err) {
+            if (isContentFilterError(err) && attempt < maxAttempts && input.antigravityClient) {
+              const reason = extractFilterReason(err);
+              logger.warn(`Quiz asset ${request.asset_id} rejected by content filter (${reason}). Auto-rephrasing...`, { profileId: input.channelId, workerId: input.episodeId });
+              const rephrased = await sanitizeImagePromptWithLLM({
+                client: input.antigravityClient,
+                originalPrompt: currentPrompt,
+                rejectionReason: reason,
+                context: `Quiz visual asset for question ${request.asset_id}`,
+              });
+              if (rephrased && rephrased !== currentPrompt) {
+                currentPrompt = rephrased;
+                continue;
+              }
+            }
+            throw err;
+          }
+        }
+        if (!generated) throw new Error(`Failed to generate asset ${request.asset_id}`);
         assets.push({ ...request, fingerprint, path: generated.path, source: "provider" });
+        if (request.purpose === "hero_question_image" && bundleNumber > 0) {
+          try {
+            const resolvedPath = await input.repository.resolveQuizAssetPath(input.channelId, input.episodeId, generated.path);
+            const imageBytes = new Uint8Array(await readFile(resolvedPath));
+            await input.repository.writeBundleImage(input.channelId, input.episodeId, bundleNumber, imageBytes);
+          } catch {
+            // Non-critical background sync
+          }
+        }
       } else if (activeEngine === "antigravity") {
         const episode = await input.repository.getEpisode(input.channelId, input.episodeId);
         const chainProvider = new AntigravityImageChainProvider(input.repository, {
@@ -88,6 +157,14 @@ export async function resolveQuizAssets(input: {
         });
         if (result.degraded || result.fallback_tier === 3) {
           issues.push(issue(request, "asset_fallback_degraded", "warning", `Asset ${request.asset_id} used Tier 3 deterministic fallback. Visual review recommended.`, "Inspect the generated fallback card or replace with a dedicated image."));
+        } else if (request.purpose === "hero_question_image" && bundleNumber > 0) {
+          try {
+            const resolvedPath = await input.repository.resolveQuizAssetPath(input.channelId, input.episodeId, result.asset_path);
+            const imageBytes = new Uint8Array(await readFile(resolvedPath));
+            await input.repository.writeBundleImage(input.channelId, input.episodeId, bundleNumber, imageBytes);
+          } catch {
+            // Non-critical background sync
+          }
         }
       } else if (!ShopAiKeyQuizImageProvider.isConfigured()) {
         if (request.required) {
@@ -97,6 +174,15 @@ export async function resolveQuizAssets(input: {
         const provider = new ShopAiKeyQuizImageProvider(input.repository, { channelId: input.channelId, episodeId: input.episodeId });
         const generated = await provider.generateAsset({ assetId: request.asset_id, fingerprint, prompt: compiled.prompt });
         assets.push({ ...request, fingerprint, path: generated.path, source: "provider" });
+        if (request.purpose === "hero_question_image" && bundleNumber > 0) {
+          try {
+            const resolvedPath = await input.repository.resolveQuizAssetPath(input.channelId, input.episodeId, generated.path);
+            const imageBytes = new Uint8Array(await readFile(resolvedPath));
+            await input.repository.writeBundleImage(input.channelId, input.episodeId, bundleNumber, imageBytes);
+          } catch {
+            // Non-critical background sync
+          }
+        }
       }
     } catch (error) {
       issues.push(issue(request, "asset_generation_failed", request.required ? "blocker" : "warning", `Image generation failed for ${request.asset_id}: ${error instanceof Error ? error.message : "unknown error"}`, request.required ? "Retry generation or attach the exact semantic asset before rendering." : "Continue with the deterministic illustration fallback or retry generation."));

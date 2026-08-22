@@ -19,6 +19,7 @@ import type {
   TopicCandidate,
   VoiceProfile,
   VoicePlan,
+  QuizImageStyle,
 } from "@studio/shared";
 
 export type BundleImage = {
@@ -71,7 +72,7 @@ export const api = {
   saveDna: (id: string, content: string) => request<{ path: string; modified_at: string }>(`/api/channels/${id}/dna`, { method: "PUT", body: JSON.stringify({ content }) }),
   topics: (id: string) => request<{ topics: TopicCandidate[] }>(`/api/channels/${id}/topics`),
   suggestTopics: (id: string) => request<{ task: Task }>(`/api/channels/${id}/topics/suggest`, { method: "POST", body: "{}" }),
-  confirmTopic: (channelId: string, topicId: string, questionCount: number) => request<{ episode: Episode }>(`/api/channels/${channelId}/topics/${topicId}/confirm`, { method: "POST", body: JSON.stringify({ topic_id: topicId, question_count: questionCount }) }),
+  confirmTopic: (channelId: string, topicId: string, questionCount: number, visualStyle?: QuizImageStyle | "mixed") => request<{ episode: Episode }>(`/api/channels/${channelId}/topics/${topicId}/confirm`, { method: "POST", body: JSON.stringify({ topic_id: topicId, question_count: questionCount, visual_style: visualStyle }) }),
   episodes: (id: string) => request<{ episodes: Episode[] }>(`/api/channels/${id}/episodes`),
   deleteEpisode: (channelId: string, episodeId: string) => request<{ ok: true }>(`/api/channels/${channelId}/episodes/${episodeId}?confirm=true`, { method: "DELETE" }),
   updateEpisode: (channelId: string, episodeId: string, body: Partial<Episode["quiz_config"]> & { target_duration_minutes?: number }) => request<Episode>(`/api/channels/${channelId}/episodes/${episodeId}`, { method: "PATCH", body: JSON.stringify(body) }),

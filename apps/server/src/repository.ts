@@ -15,6 +15,7 @@ import {
   QUIZ_SECONDS_PER_QUESTION,
   VoicePlanSchema,
   VoiceProfileSchema,
+  ALL_QUIZ_IMAGE_STYLES,
   type Channel,
   type CreateChannelInput,
   type DirectorPlan,
@@ -23,6 +24,7 @@ import {
   type QuizAssessment,
   type QuizAssetPlan,
   type QuizAssetResolution,
+  type QuizImageStyle,
   type QuizTimeline,
   type QuizV2,
   type Scene,
@@ -40,6 +42,38 @@ import { invalidateQuizArtifacts as quizInvalidationStages } from "./quiz/pipeli
 const execFileAsync = promisify(execFile);
 
 const DEFAULT_NARRATION_WORDS_PER_SECOND = 2.3;
+
+function isPng(content: Uint8Array): boolean {
+  return content.length >= 8
+    && content[0] === 0x89
+    && content[1] === 0x50
+    && content[2] === 0x4e
+    && content[3] === 0x47
+    && content[4] === 0x0d
+    && content[5] === 0x0a
+    && content[6] === 0x1a
+    && content[7] === 0x0a;
+}
+
+function isJpeg(content: Uint8Array): boolean {
+  return content.length >= 3 && content[0] === 0xff && content[1] === 0xd8 && content[2] === 0xff;
+}
+
+function isWebp(content: Uint8Array): boolean {
+  return content.length >= 12
+    && content[0] === 0x52
+    && content[1] === 0x49
+    && content[2] === 0x46
+    && content[3] === 0x46
+    && content[8] === 0x57
+    && content[9] === 0x45
+    && content[10] === 0x42
+    && content[11] === 0x50;
+}
+
+function isValidImageBuffer(content: Uint8Array): boolean {
+  return isPng(content) || isJpeg(content) || isWebp(content);
+}
 
 function estimateQuizTargetDurationMinutes(questionCount: number): number {
   return Math.max(3, Math.round((questionCount * QUIZ_SECONDS_PER_QUESTION) / 60));
@@ -216,7 +250,7 @@ export class RepositoryService {
     return channel;
   }
 
-  async updateChannel(channelId: string, patch: Partial<Pick<Channel, "display_name" | "description" | "target_audience" | "language" | "market" | "status" | "updated_at" | "voice_reference_path">>): Promise<Channel> {
+  async updateChannel(channelId: string, patch: Partial<Pick<Channel, "display_name" | "description" | "target_audience" | "language" | "market" | "status" | "updated_at" | "voice_reference_path" | "selected_styles">>): Promise<Channel> {
     const current = await this.getChannel(channelId);
     const next = ChannelSchema.parse({ ...current, ...patch, updated_at: nowIso() });
     await this.writeJsonAtomic(this.resolvePath("channels", current.slug, "channel.json"), next);
@@ -430,12 +464,13 @@ export class RepositoryService {
   async writeQuizImageAsset(channelId: string, episodeId: string, assetId: string, fingerprint: string, content: Uint8Array, meta?: BundleImageMeta): Promise<string> {
     if (!/^[a-z0-9][a-z0-9_-]{0,119}$/i.test(assetId)) throw new RepositoryError("Quiz asset ID is invalid", "INVALID_ASSET");
     if (!/^[a-f0-9]{64}$/i.test(fingerprint)) throw new RepositoryError("Quiz asset fingerprint is invalid", "INVALID_ASSET");
-    if (!isPng(content)) throw new RepositoryError("Quiz image output is not a PNG file", "INVALID_IMAGE");
+    if (!isValidImageBuffer(content)) throw new RepositoryError("Quiz image output is not a valid image file", "INVALID_IMAGE");
     const episode = await this.getEpisode(channelId, episodeId);
     const channel = await this.getChannel(channelId);
     const directory = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets", "quiz-images");
     await mkdir(directory, { recursive: true });
-    const filename = `${assetId}-${fingerprint.slice(0, 12)}.png`;
+    const extension = isJpeg(content) ? ".jpg" : isWebp(content) ? ".webp" : ".png";
+    const filename = `${assetId}-${fingerprint.slice(0, 12)}${extension}`;
     const absolutePath = path.join(directory, filename);
     await this.writeBinaryAtomic(absolutePath, content);
     if (meta) {
@@ -451,7 +486,7 @@ export class RepositoryService {
     const expected = `channels/${channel.slug}/episodes/${episode.slug}/assets/quiz-images/`;
     if (!assetPath.replaceAll("\\", "/").startsWith(expected)) throw new RepositoryError("Quiz asset path is outside this episode", "UNSAFE_PATH");
     const filename = path.basename(assetPath);
-    if (!/^[a-z0-9][a-z0-9_-]{0,119}-[a-f0-9]{12}\.png$/i.test(filename)) throw new RepositoryError("Quiz asset filename is invalid", "UNSAFE_PATH");
+    if (!/^[a-z0-9][a-z0-9_-]{0,119}-[a-f0-9]{12}\.(png|jpe?g|webp)$/i.test(filename)) throw new RepositoryError("Quiz asset filename is invalid", "UNSAFE_PATH");
     const absolutePath = this.resolvePath("channels", channel.slug, "episodes", episode.slug, "assets", "quiz-images", filename);
     await access(absolutePath);
     return absolutePath;
@@ -548,11 +583,17 @@ export class RepositoryService {
     await this.writeJsonAtomic(path.join(directory, `suggestion-${Date.now()}-${makeId("run")}.json`), run);
   }
 
-  async confirmTopic(channelId: string, topicId: string, questionCount?: number): Promise<Episode> {
+  async confirmTopic(channelId: string, topicId: string, questionCount?: number, visualStyle?: QuizImageStyle | "mixed"): Promise<Episode> {
     const channel = await this.getChannel(channelId);
     const candidate = (await this.listTopics(channelId)).find((topic) => topic.topic_id === topicId);
     if (!candidate) throw new RepositoryError("Topic candidate not found", "TOPIC_NOT_FOUND");
-    const selectedQuestionCount = TopicConfirmInputSchema.parse({ topic_id: topicId, question_count: questionCount }).question_count ?? candidate.question_count;
+    const parsedConfirm = TopicConfirmInputSchema.parse({ topic_id: topicId, question_count: questionCount, visual_style: visualStyle });
+    const selectedQuestionCount = parsedConfirm.question_count ?? candidate.question_count;
+    const requestedStyle = parsedConfirm.visual_style ?? candidate.visual_style ?? "mixed";
+    const availableStyles = channel.selected_styles && channel.selected_styles.length > 0 ? channel.selected_styles : ALL_QUIZ_IMAGE_STYLES;
+    const resolvedStyle: QuizImageStyle = requestedStyle === "mixed"
+      ? (availableStyles[Math.floor(Math.random() * availableStyles.length)] || "pixar_3d")
+      : requestedStyle;
     const targetDurationMinutes = estimateQuizTargetDurationMinutes(selectedQuestionCount);
     const targetWordCount = estimateQuizTargetWordCount(targetDurationMinutes, DEFAULT_NARRATION_WORDS_PER_SECOND);
     await this.markTopicSelected(channelId, topicId, selectedQuestionCount);
@@ -582,6 +623,8 @@ export class RepositoryService {
         age_band: candidate.age_band,
         answer_mode: "voice_and_reveal",
         visual_theme: candidate.quiz_format === "image_guess" ? "jungle_jamboree" : "candy_pop",
+        visual_style: requestedStyle,
+        resolved_visual_style: resolvedStyle,
       },
       created_at: timestamp,
       updated_at: timestamp,
@@ -606,6 +649,18 @@ export class RepositoryService {
   async updateEpisodeSettings(channelId: string, episodeId: string, input: EpisodeSettingsInput, wordsPerSecond: number): Promise<Episode> {
     const episode = await this.getEpisode(channelId, episodeId);
     const channel = await this.getChannel(channelId);
+    let nextResolvedStyle = episode.quiz_config.resolved_visual_style ?? "pixar_3d";
+    const nextStyle = input.visual_style ?? episode.quiz_config.visual_style ?? "mixed";
+    if (input.visual_style !== undefined) {
+      if (input.visual_style === "mixed") {
+        const availableStyles = channel.selected_styles && channel.selected_styles.length > 0 ? channel.selected_styles : ALL_QUIZ_IMAGE_STYLES;
+        nextResolvedStyle = availableStyles[Math.floor(Math.random() * availableStyles.length)] || "pixar_3d";
+      } else {
+        nextResolvedStyle = input.visual_style;
+      }
+    } else if (input.resolved_visual_style !== undefined) {
+      nextResolvedStyle = input.resolved_visual_style;
+    }
     const nextQuizConfig = {
       ...episode.quiz_config,
       ...(input.question_count === undefined ? {} : { question_count: input.question_count }),
@@ -613,11 +668,15 @@ export class RepositoryService {
       ...(input.age_band === undefined ? {} : { age_band: input.age_band }),
       ...(input.answer_mode === undefined ? {} : { answer_mode: input.answer_mode }),
       ...(input.visual_theme === undefined ? {} : { visual_theme: input.visual_theme }),
+      visual_style: nextStyle,
+      resolved_visual_style: nextResolvedStyle,
     };
     const quizSettingsChanged = nextQuizConfig.question_count !== episode.quiz_config.question_count
       || nextQuizConfig.quiz_format !== episode.quiz_config.quiz_format
       || nextQuizConfig.age_band !== episode.quiz_config.age_band
-      || nextQuizConfig.visual_theme !== episode.quiz_config.visual_theme;
+      || nextQuizConfig.visual_theme !== episode.quiz_config.visual_theme
+      || nextQuizConfig.visual_style !== episode.quiz_config.visual_style
+      || nextQuizConfig.resolved_visual_style !== episode.quiz_config.resolved_visual_style;
     const targetDurationMinutes = input.target_duration_minutes ?? estimateQuizTargetDurationMinutes(nextQuizConfig.question_count);
     const targetWordCount = estimateQuizTargetWordCount(targetDurationMinutes, episode.measured_narration_words_per_second ?? wordsPerSecond);
     const next = EpisodeSchema.parse({
@@ -722,7 +781,7 @@ export class RepositoryService {
   }
 
   async writeBundleImage(channelId: string, episodeId: string, bundleNumber: number, content: Uint8Array, variant = 0, meta?: BundleImageMeta): Promise<string> {
-    if (!isPng(content)) throw new RepositoryError("Image output is not a PNG file", "INVALID_IMAGE");
+    if (!isValidImageBuffer(content)) throw new RepositoryError("Image output is not a valid image file", "INVALID_IMAGE");
     const target = await this.getBundleImagePath(channelId, episodeId, bundleNumber, variant);
     const directory = path.dirname(target.absolutePath);
     const episodeDirectory = path.dirname(directory);
@@ -1215,10 +1274,6 @@ export class RepositoryService {
 
 function clearSceneAudio(scene: Scene): Scene {
   return { ...scene, audio_asset_path: null, audio_generated_at: null, audio_duration_seconds: null };
-}
-
-function isPng(content: Uint8Array): boolean {
-  return content.length >= 8 && content[0] === 0x89 && content[1] === 0x50 && content[2] === 0x4e && content[3] === 0x47 && content[4] === 0x0d && content[5] === 0x0a && content[6] === 0x1a && content[7] === 0x0a;
 }
 
 export function parseScenes(markdown: string, episodeId: string): Scene[] {

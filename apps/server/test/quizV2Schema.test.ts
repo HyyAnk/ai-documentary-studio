@@ -52,6 +52,33 @@ describe("Quiz V2 shared schemas", () => {
     expect(() => QuizV2Schema.parse({ ...validQuiz(), questions: [{ ...question, choices: [choice("a", "Tiger"), choice("a", "Lion"), choice("c", " tiger ")] }] })).toThrow(/duplicated|unique after normalization/);
   });
 
+  it("rejects questions with more than 3 choices or fewer than 2 choices", () => {
+    const question = validQuiz().questions[0];
+    // 4 choices (A, B, C, D) should be rejected
+    expect(() => QuizV2Schema.parse({
+      ...validQuiz(),
+      questions: [{ ...question, choices: [choice("a", "Tiger"), choice("b", "Lion"), choice("c", "Cheetah"), choice("d", "Leopard")] }],
+    })).toThrow();
+
+    // 1 choice should be rejected
+    expect(() => QuizV2Schema.parse({
+      ...validQuiz(),
+      questions: [{ ...question, choices: [choice("a", "Tiger")] }],
+    })).toThrow();
+
+    // 2 choices (A, B) should be accepted
+    expect(() => QuizV2Schema.parse({
+      ...validQuiz(),
+      questions: [{ ...question, choices: [choice("a", "Tiger"), choice("b", "Lion")] }],
+    })).not.toThrow();
+
+    // 3 choices (A, B, C) should be accepted
+    expect(() => QuizV2Schema.parse({
+      ...validQuiz(),
+      questions: [{ ...question, choices: [choice("a", "Tiger"), choice("b", "Lion"), choice("c", "Cheetah")] }],
+    })).not.toThrow();
+  });
+
   it("rejects duplicate or non-sequential question identity", () => {
     const question = validQuiz().questions[0];
     expect(() => QuizV2Schema.parse({ ...validQuiz(), questions: [question, { ...question, id: "q2", number: 3 }] })).toThrow("Question numbers must be sequential");

@@ -8,11 +8,62 @@ export function Sidebar({ page, setPage, activeTaskCount }: { page: Page; setPag
     { page: "channels", label: "Channels", icon: Broadcast },
     { page: "tasks", label: "Tasks", icon: ListChecks },
   ];
-  return <aside className="sidebar"><div className="brand-lockup"><div className="brand-mark">QS</div><div><span className="brand-name">Quiz</span><span className="brand-subtitle">Studio</span></div></div><div className="sidebar-rule" /><nav className="primary-nav" aria-label="Primary navigation">{items.map(({ page: itemPage, label, icon: Icon }) => <button key={itemPage} className={`nav-item ${page === itemPage ? "is-active" : ""}`} onClick={() => setPage(itemPage)}><Icon size={18} weight={page === itemPage ? "fill" : "regular"} /><span>{label}</span>{itemPage === "tasks" && activeTaskCount > 0 ? <span className="nav-count">{activeTaskCount}</span> : null}</button>)}<button className={`nav-item mobile-settings-nav ${page === "settings" ? "is-active" : ""}`} aria-label="Settings" onClick={() => setPage("settings")}><Gear size={18} /><span>Settings</span></button></nav><div className="sidebar-bottom"><button className={`nav-item ${page === "settings" ? "is-active" : ""}`} onClick={() => setPage("settings")}><Gear size={18} /><span>Settings</span></button><div className="local-badge"><span className="status-dot" />Local workspace</div></div></aside>;
+  return (
+    <aside className="sidebar">
+      <div className="brand-lockup">
+        <div className="brand-mark" title="AI Documentary & Quiz Studio">
+          <Sparkle size={18} weight="fill" />
+        </div>
+        <div>
+          <span className="brand-name">Studio</span>
+          <span className="brand-subtitle">Doc & Quiz AI</span>
+        </div>
+      </div>
+      <div className="sidebar-rule" />
+      <nav className="primary-nav" aria-label="Primary navigation">
+        {items.map(({ page: itemPage, label, icon: Icon }) => (
+          <button
+            key={itemPage}
+            className={`nav-item ${page === itemPage ? "is-active" : ""}`}
+            onClick={() => setPage(itemPage)}
+          >
+            <Icon size={18} weight={page === itemPage ? "fill" : "regular"} />
+            <span>{label}</span>
+            {itemPage === "tasks" && activeTaskCount > 0 ? (
+              <span className="nav-count">{activeTaskCount}</span>
+            ) : null}
+          </button>
+        ))}
+        <button
+          className={`nav-item mobile-settings-nav ${page === "settings" ? "is-active" : ""}`}
+          aria-label="Settings"
+          onClick={() => setPage("settings")}
+        >
+          <Gear size={18} />
+          <span>Settings</span>
+        </button>
+      </nav>
+      <div className="sidebar-bottom">
+        <button
+          className={`nav-item ${page === "settings" ? "is-active" : ""}`}
+          onClick={() => setPage("settings")}
+        >
+          <Gear size={18} weight={page === "settings" ? "fill" : "regular"} />
+          <span>Settings</span>
+        </button>
+        <div className="local-badge">
+          <span className="status-dot" />
+          <span>Local workspace</span>
+        </div>
+      </div>
+    </aside>
+  );
 }
 
 export function Topbar({
   channel,
+  channels = [],
+  onSelectChannel,
   activeEngine,
   engineStatus,
   git,
@@ -32,6 +83,8 @@ export function Topbar({
   onShutdown,
 }: {
   channel: Channel | null;
+  channels?: Channel[];
+  onSelectChannel?: (channelId: string) => void;
   activeEngine: "codex" | "antigravity";
   engineStatus: string;
   git: GitInfo;
@@ -58,7 +111,30 @@ export function Topbar({
     <header className="topbar">
       <div className="context-trail">
         <span className="context-kicker">Workspace</span>
-        <span className="context-title">{channel?.display_name ?? "Overview"}</span>
+        {channels && channels.length > 0 ? (
+          <div className="topbar-channel-selector">
+            <select
+              aria-label="Quick Switch Channel"
+              value={channel?.channel_id ?? ""}
+              onChange={(e) => {
+                if (e.target.value) onSelectChannel?.(e.target.value);
+              }}
+            >
+              <option value="" disabled={Boolean(channel)}>
+                {channel ? channel.display_name : "Select Channel…"}
+              </option>
+              {channels.map((ch) => (
+                <option key={ch.channel_id} value={ch.channel_id}>
+                  {ch.engine === "quiz" ? "🎯 " : "🎬 "}
+                  {ch.display_name}
+                </option>
+              ))}
+            </select>
+            <CaretDown size={12} className="selector-caret" />
+          </div>
+        ) : (
+          <span className="context-title">{channel?.display_name ?? "Overview"}</span>
+        )}
       </div>
       <div className="topbar-meta">
         <div className="engine-toggle-group" role="group" aria-label="Dual-Engine Selection">
@@ -87,10 +163,10 @@ export function Topbar({
             type="button"
             className="topbar-key-missing-btn"
             onClick={onOpenImageSettings}
-            title="Chưa cấu hình API Key gpti2.store. Bấm vào đây để tới trang Cài đặt."
+            title="gpti2.store API Key is not configured. Click to open Settings."
           >
             <WarningCircle size={14} weight="fill" className="key-warning-icon" />
-            <span>Chưa nhập Image Key</span>
+            <span>Missing Image Key</span>
           </button>
         ) : (
           <label className="model-select image-model-select" title="Image Generation Model (gpti2.store)">
@@ -102,8 +178,8 @@ export function Topbar({
               value={currentImageModel || "gpt-image-2"}
               onChange={(event) => void onImageModelChange(event.target.value)}
             >
-              <option value="gpt-image-2">gpt-image-2 (50đ)</option>
-              <option value="nano-banana-2">nano-banana-2 (100đ - 2K)</option>
+              <option value="gpt-image-2">gpt-image-2 (50 VND)</option>
+              <option value="nano-banana-2">nano-banana-2 (100 VND - 2K)</option>
             </select>
           </label>
         )}

@@ -14,6 +14,11 @@ export type CandyArcadeCompositionInput = {
   assets?: Record<string, string>;
 };
 
+export type CandyArcadeCompositionBundle = {
+  html: string;
+  files: Record<string, string>;
+};
+
 type Copy = ReturnType<typeof quizCopy>;
 type Phase = "question" | "choices" | "think" | "countdown" | "reveal" | "explain";
 
@@ -36,6 +41,10 @@ export function candyArcadeHeroAreaRatio(layout: keyof typeof CANDY_ARCADE_LAYOU
 }
 
 export function buildCandyArcadeComposition(input: CandyArcadeCompositionInput): string {
+  return buildCandyArcadeCompositionBundle(input).html;
+}
+
+export function buildCandyArcadeCompositionBundle(input: CandyArcadeCompositionInput): CandyArcadeCompositionBundle {
   const duration = Math.max(3, input.narrationDurationSeconds, input.timeline.duration_seconds);
   const copy = quizCopy(input.quiz.language);
   const template = getQuizVisualTemplate(input.theme);
@@ -75,8 +84,52 @@ export function buildCandyArcadeComposition(input: CandyArcadeCompositionInput):
   });
   if (typeof outroStart === "number" && outroStart < duration - .04) clips.push(outroClip(outroStart, duration, input.quiz.questions.length, copy));
 
+  const scenes = clips.filter(Boolean).map(toSubComposition);
   const audioSrc = source(input.audioPath);
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Candy Arcade Quiz</title><style>${candyArcadeCss()}</style></head><body><main id="stage" data-composition-id="quiz-v2-candy-arcade" data-no-timeline data-start="0" data-width="1920" data-height="1080" data-duration="${duration.toFixed(3)}" data-fps="30">${clips.filter(Boolean).join("\n")}<audio id="quiz-narration" class="clip" data-start="0" data-duration="${duration.toFixed(3)}" data-track-index="2" data-volume="1" src="${audioSrc}"></audio></main><script>window.__playerReady=true;window.__renderReady=true;</script></body></html>`;
+  return {
+    html: `<!doctype html><html><head><meta charset="utf-8"><title>Candy Arcade Quiz</title><style>${candyArcadeCss()}</style></head><body><main id="stage" data-composition-id="quiz-v2-candy-arcade" data-no-timeline data-start="0" data-width="1920" data-height="1080" data-duration="${duration.toFixed(3)}" data-fps="30">${scenes.map(subCompositionMount).join("\n")}<audio id="quiz-narration" class="clip" data-start="0" data-duration="${duration.toFixed(3)}" data-track-index="2" data-volume="1" src="${audioSrc}"></audio></main><script>window.__playerReady=true;window.__renderReady=true;</script></body></html>`,
+    files: Object.fromEntries(scenes.map((scene) => [`compositions/${scene.id}.html`, scene.html])),
+  };
+}
+
+type SubComposition = {
+  id: string;
+  start: string;
+  duration: string;
+  trackIndex: string;
+  html: string;
+};
+
+function toSubComposition(clip: string): SubComposition {
+  const openingTag = clip.match(/^<section\b[^>]*>/)?.[0];
+  if (!openingTag) throw new Error("Candy Arcade clip must start with a section element");
+  const id = requiredAttribute(openingTag, "id");
+  const start = requiredAttribute(openingTag, "data-start");
+  const duration = requiredAttribute(openingTag, "data-duration");
+  const trackIndex = requiredAttribute(openingTag, "data-track-index");
+  const sceneRoot = openingTag
+    .replace(/\sdata-start="[^"]*"/g, "")
+    .replace(/\sdata-duration="[^"]*"/g, "")
+    .replace(/\sdata-track-index="[^"]*"/g, "")
+    .replace(/>$/, ` data-composition-id="${id}" data-width="1920" data-height="1080">`);
+  const body = rootRelativeSubCompositionAssets(clip.replace(openingTag, sceneRoot));
+  return { id, start, duration, trackIndex, html: `<template id="${id}-template">${body}</template>` };
+}
+
+function requiredAttribute(tag: string, name: string): string {
+  const value = tag.match(new RegExp(`\\s${name}="([^"]+)"`))?.[1];
+  if (!value) throw new Error(`Candy Arcade clip is missing ${name}`);
+  return value;
+}
+
+function rootRelativeSubCompositionAssets(html: string): string {
+  return html
+    .replace(/\b(src|poster)="\.\//g, "$1=\"")
+    .replace(/url\("\.\//g, 'url("');
+}
+
+function subCompositionMount(scene: SubComposition): string {
+  return `<div id="${scene.id}-mount" data-composition-id="${scene.id}" data-composition-src="compositions/${scene.id}.html" data-start="${scene.start}" data-duration="${scene.duration}" data-track-index="${scene.trackIndex}"></div>`;
 }
 
 function introClip(end: number, count: number, copy: Copy): string {
@@ -174,7 +227,7 @@ function sceneDecorations(questionIndex: number): string {
 
 function styleAttributes(visual: QuizTemplateScene, layout: ReturnType<typeof textLayout>, clipStart: number, choicesStart: number, revealStart: number, rewardStart: number, clipEnd: number): string {
   const palette = visual.palette;
-  return `style="--bg-primary:${palette.backgroundPrimary};--bg-secondary:${palette.backgroundSecondary};--accent:${palette.accent};--badge:${palette.answerBadge};--correct:${palette.correct};--incorrect:${palette.incorrect};--surface:${palette.surface};--ink:${palette.text};--muted:${palette.muted};--question-size:${layout.fontSize}px;--question-leading:${layout.lineHeight};--clip-start:${clipStart.toFixed(3)}s;--scene-duration:${Math.max(.04, clipEnd - clipStart).toFixed(3)}s;--choices-at:${Math.max(0, choicesStart - clipStart).toFixed(3)}s;--reveal-at:${Math.max(0, revealStart - clipStart).toFixed(3)}s;--reward-at:${Math.max(0, rewardStart - clipStart).toFixed(3)}s;--choices-duration:${Math.max(.04, revealStart - choicesStart).toFixed(3)}s;--reveal-duration:${Math.max(.04, rewardStart - revealStart).toFixed(3)}s;--ambient-phase:${ambientPhaseSeconds("drift", 0, String(clipStart))}s"`;
+  return `style="--bg-primary:${palette.backgroundPrimary};--bg-secondary:${palette.backgroundSecondary};--accent:${palette.accent};--surface-accent:${palette.surfaceAccent};--on-accent:${palette.onAccent};--badge:${palette.answerBadge};--correct:${palette.correct};--incorrect:${palette.incorrect};--surface:${palette.surface};--ink:${palette.text};--muted:${palette.muted};--question-size:${layout.fontSize}px;--question-leading:${layout.lineHeight};--clip-start:${clipStart.toFixed(3)}s;--scene-duration:${Math.max(.04, clipEnd - clipStart).toFixed(3)}s;--choices-at:${Math.max(0, choicesStart - clipStart).toFixed(3)}s;--reveal-at:${Math.max(0, revealStart - clipStart).toFixed(3)}s;--reward-at:${Math.max(0, rewardStart - clipStart).toFixed(3)}s;--choices-duration:${Math.max(.04, revealStart - choicesStart).toFixed(3)}s;--reveal-duration:${Math.max(.04, rewardStart - revealStart).toFixed(3)}s;--ambient-phase:${ambientPhaseSeconds("drift", 0, String(clipStart))}s"`;
 }
 
 function assetFor(assets: Record<string, string>, ...keys: string[]): string | null {
@@ -243,7 +296,7 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
  .game-stage { position: static; display: grid; justify-items: center; width: 1600px; margin: 20px auto 0; }
 .question-title { max-width: 1550px; padding: 25px 58px 27px; border: 6px solid rgba(255,255,255,.84); border-radius: 43px; background: var(--surface); box-shadow: 0 18px 0 var(--depth-shadow); text-align: center; }
 .question-title h1 { margin: 0; font-size: var(--question-size); font-weight: 900; line-height: var(--question-leading); letter-spacing: -2.4px; text-wrap: balance; text-shadow: 0 4px 0 rgba(13,35,71,.12); }
-.keyword-highlight { color: var(--accent); text-shadow: 0 3px 0 rgba(13,35,71,.1); }
+.keyword-highlight { color: var(--surface-accent); text-shadow: 0 3px 0 rgba(13,35,71,.1); }
 .image-card { position: relative; display: block; margin: 0; overflow: hidden; border: 12px solid #fff; border-radius: 42px; background: #fff; box-shadow: 0 20px 0 rgba(13,35,71,.2), 0 29px 44px rgba(13,35,71,.18); }
 .image-card img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .image-shine { position: absolute; inset: 0; background: linear-gradient(125deg, rgba(255,255,255,.35), transparent 31%); pointer-events: none; }
@@ -279,7 +332,7 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .answer-count-4, .answer-count-5, .answer-count-6 { grid-template-columns: repeat(2, 1fr); }
 .answer-card { position: relative; display: flex; align-items: center; min-height: 148px; gap: 19px; padding: 20px 30px 20px 20px; overflow: hidden; border: 5px solid rgba(17,39,84,.14); border-radius: 38px; background: var(--surface); box-shadow: 0 14px 0 var(--depth-shadow), inset 0 4px 0 rgba(255,255,255,.7); font-size: 34px; font-weight: 900; }
 .answer-card::after { position: absolute; right: -35px; bottom: -41px; width: 118px; height: 118px; border-radius: 50%; background: var(--muted); content: ""; }
-.answer-card > b, .visual-answer-label > b { position: relative; z-index: 1; display: grid; flex: 0 0 auto; place-items: center; width: 66px; height: 66px; border-radius: 23px; background: var(--badge); color: #fff; box-shadow: inset 0 -5px 0 rgba(13,35,71,.14); font-size: 35px; }
+.answer-card > b, .visual-answer-label > b { position: relative; z-index: 1; display: grid; flex: 0 0 auto; place-items: center; width: 66px; height: 66px; border-radius: 23px; background: var(--badge); color: var(--on-accent); box-shadow: inset 0 -5px 0 rgba(13,35,71,.14); font-size: 35px; }
 .answer-card:nth-child(2) > b { background: var(--accent); }
 .answer-card:nth-child(3) > b { background: #F6B83D; }
 .answer-card span { position: relative; z-index: 1; flex: 1 1 auto; min-width: 0; padding-right: 54px; line-height: 1.1; }
@@ -287,13 +340,13 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .choice-tier-long span, .choice-tier-very_long span { font-size: 28px; }
 .answer-card.answer-correct { animation: correct-card-reveal .62s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--reveal-at) + .14s) both; }
 .answer-card.answer-incorrect { animation: incorrect-card-settle .38s ease-out calc(var(--clip-start) + var(--reveal-at)) both; }
-.answer-check, .answer-cross { position: absolute; z-index: 2; top: 16px; right: 19px; display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: var(--correct); color: #fff; box-shadow: 0 5px 0 rgba(13,35,71,.16); font-size: 31px; font-style: normal; opacity: 0; animation: status-pop .38s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--reveal-at) + .16s) both; }
+.answer-check, .answer-cross { position: absolute; z-index: 2; top: 16px; right: 19px; display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: var(--correct); color: var(--on-accent); box-shadow: 0 5px 0 rgba(13,35,71,.16); font-size: 31px; font-style: normal; opacity: 0; animation: status-pop .38s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--reveal-at) + .16s) both; }
 .answer-cross { background: var(--incorrect); }
  .thinking-bar { display: flex; align-items: center; width: 1380px; min-height: 96px; margin-top: 0; padding: 18px 28px; border: 0; border-radius: 999px; background: transparent; box-shadow: none; opacity: 0; animation: phase-hold var(--timer-duration) steps(1,end) var(--clip-start) both; }
  .thinking-track { position: relative; width: 100%; height: 58px; overflow: visible; border: 5px solid rgba(255,255,255,.84); border-radius: 999px; background: rgba(255,255,255,.28); box-shadow: inset 0 4px 0 rgba(13,35,71,.12), 0 7px 0 var(--depth-edge), 0 0 24px rgba(255,255,255,.22); }
 .thinking-track::after { position: absolute; inset: 8px 12px; border-radius: inherit; background: repeating-linear-gradient(90deg, rgba(21,42,87,.12) 0 2px, transparent 2px 12.5%); content: ""; pointer-events: none; }
  .timer-progress { position: absolute; inset: 0; overflow: visible; border-radius: inherit; background: linear-gradient(90deg, #2FBE79 0%, #31C7D9 28%, #6D70F4 54%, #C35CE5 76%, #FF6B86 100%); transform-origin: left center; animation: quiz-timer-drain var(--timer-duration) linear var(--clip-start) both; }
-.timer-marker { position: absolute; top: 50%; left: 100%; display: grid; place-items: center; width: 76px; height: 76px; border: 7px solid #fff; border-radius: 50%; background: var(--accent); color: #fff; box-shadow: 0 8px 0 rgba(13,35,71,.24), inset 0 -5px 0 rgba(13,35,71,.14); font-size: 36px; font-weight: 900; font-style: normal; transform: translate(-50%,-50%); animation: quiz-timer-marker-slide var(--timer-duration) linear var(--clip-start) both; }
+.timer-marker { position: absolute; top: 50%; left: 100%; display: grid; place-items: center; width: 76px; height: 76px; border: 7px solid #fff; border-radius: 50%; background: var(--accent); color: var(--on-accent); box-shadow: 0 8px 0 rgba(13,35,71,.24), inset 0 -5px 0 rgba(13,35,71,.14); font-size: 36px; font-weight: 900; font-style: normal; transform: translate(-50%,-50%); animation: quiz-timer-marker-slide var(--timer-duration) linear var(--clip-start) both; }
 .timer-marker::after { position: absolute; inset: -10px; border: 3px dashed rgba(255,255,255,.68); border-radius: 50%; content: ""; transform: rotate(-8deg); }
 .timer-sparkles { position: absolute; inset: -20px -14px; pointer-events: none; }
 .timer-sparkles i { position: absolute; color: var(--accent); font-size: 24px; font-style: normal; animation: timer-sparkle var(--timer-duration) ease-in-out calc(var(--clip-start) + var(--ambient-phase)) 1 both; }
@@ -306,7 +359,7 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .reveal-sparkles i { font-style: normal; }
 .reveal-sparkles i:nth-child(2) { color: #ffd34d; transform: translateY(-12px); }
 .fact-card { max-width: 1220px; margin-top: 22px; padding: 20px 38px 23px; border: 6px solid rgba(255,255,255,.79); border-radius: 35px; background: var(--surface); box-shadow: 0 15px 0 rgba(13,35,71,.18); text-align: center; opacity: 0; animation: phase-enter .01s steps(1,end) calc(var(--clip-start) + var(--reward-at)) both; }
-.fact-card span { color: var(--accent); font-size: 22px; font-weight: 900; letter-spacing: 1.5px; text-transform: uppercase; }
+.fact-card span { color: var(--surface-accent); font-size: 22px; font-weight: 900; letter-spacing: 1.5px; text-transform: uppercase; }
 .fact-card p { margin: 8px 0 0; font-size: 30px; font-weight: 800; line-height: 1.24; }
 .visual-answer-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 28px; width: 1560px; margin-top: 25px; opacity: 0; animation: phase-enter .01s steps(1,end) calc(var(--clip-start) + var(--choices-at)) both; }
 .visual-answer-card { position: relative; }
@@ -324,7 +377,7 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .reward-small i { font-size: 57px; }
 .reward-big i { font-size: 71px; }
 .episode-progress.streak { animation: progress-pop .52s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + .12s) both; }
-.episode-progress.streak i { margin-left: 2px; color: #FFD34D; font-size: 24px; font-style: normal; }
+.episode-progress.streak i { margin-left: 2px; color: var(--surface-accent); font-size: 24px; font-style: normal; }
 .quiz-question-clip::after { position: absolute; z-index: 2; top: 58%; left: 50%; width: 980px; height: 440px; border: 26px solid rgba(255,255,255,.54); border-radius: 50%; content: ""; pointer-events: none; transform: translate(-50%,-50%) scale(.45); animation: reveal-impact .7s ease-out calc(var(--clip-start) + var(--reveal-at) + .04s) both; }
 .is-final-scene .question-title { border-color: #FFD64D; box-shadow: 0 18px 0 rgba(255,212,77,.38); }
 .quiz-question-clip .question-title { animation: title-enter .58s cubic-bezier(.18,1.42,.34,1) var(--clip-start) both; }
@@ -346,12 +399,12 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .candy-intro, .candy-outro { display: grid; place-items: center; background: #F6B83D; color: #172A59; }
  .intro-rays { position: absolute; inset: -30%; opacity: .12; background: repeating-conic-gradient(from 8deg, rgba(255,255,255,.9) 0 9deg, transparent 9deg 19deg); animation: ray-spin 150s linear 0s infinite both; }
 .intro-card, .outro-card { position: relative; z-index: 3; display: grid; justify-items: center; text-align: center; }
-.intro-card > span, .outro-card > span { display: inline-flex; padding: 15px 23px; border-radius: 999px; background: #FF6277; color: #fff; box-shadow: 0 10px 0 rgba(13,35,71,.18); font-size: 25px; font-weight: 900; letter-spacing: 1.5px; }
+.intro-card > span, .outro-card > span { display: inline-flex; padding: 15px 23px; border-radius: 999px; background: #FF6277; color: #172A59; box-shadow: 0 10px 0 rgba(13,35,71,.18); font-size: 25px; font-weight: 900; letter-spacing: 1.5px; }
 .intro-card h1, .outro-card h1 { max-width: 1050px; margin: 29px 0 9px; font-size: 96px; line-height: 1.02; letter-spacing: -4px; }
 .intro-card p, .outro-card p { margin: 0; font-size: 37px; font-weight: 900; }
-.intro-stars, .outro-stars { margin-top: 35px; color: #fff; font-size: 43px; }
+.intro-stars, .outro-stars { margin-top: 35px; color: #172A59; font-size: 43px; }
 .intro-dot { position: absolute; border-radius: 50%; background: #fff; opacity: .47; }.dot-a { top: 126px; left: 250px; width: 158px; height: 158px; }.dot-b { right: 235px; bottom: 149px; width: 128px; height: 128px; }
-.brand-mascot { position: absolute; z-index: 3; right: 255px; bottom: 95px; display: grid; place-items: center; width: 179px; height: 179px; border: 10px solid #fff; border-radius: 53px; background: #29B9A8; color: #fff; box-shadow: 0 20px 0 rgba(13,35,71,.2); font-size: 93px; transform: rotate(-8deg); }
+.brand-mascot { position: absolute; z-index: 3; right: 255px; bottom: 95px; display: grid; place-items: center; width: 179px; height: 179px; border: 10px solid #fff; border-radius: 53px; background: #29B9A8; color: #172A59; box-shadow: 0 20px 0 rgba(13,35,71,.2); font-size: 93px; transform: rotate(-8deg); }
 .outro-blob { position: absolute; border-radius: 50%; background: rgba(255,255,255,.36); }.outro-blob.blob-a { top: 112px; left: 205px; width: 170px; height: 170px; }.outro-blob.blob-b { right: 220px; bottom: 130px; width: 205px; height: 205px; background: rgba(41,185,168,.36); }
 .scene-decor { position: absolute; z-index: 2; inset: 0; pointer-events: none; color: rgba(255,255,255,.62); }
 .scene-decor i { position: absolute; display: block; font-style: normal; animation: decor-drift var(--scene-duration) ease-in-out var(--clip-start) 1 alternate both; }

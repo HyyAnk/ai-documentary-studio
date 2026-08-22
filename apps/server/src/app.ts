@@ -116,6 +116,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     antigravity,
     config.active_engine,
   );
+  tasks.updateAntigravityConfig(config.antigravity);
   await tasks.load();
   const getStorageInfo = (): StorageInfo => ({
     path: repository.storageRoot,
@@ -436,7 +437,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     const params = request.params as { channelId: string; topicId: string };
     const payload = request.body && typeof request.body === "object" && !Array.isArray(request.body) ? request.body : {};
     const input = TopicConfirmInputSchema.parse({ ...payload, topic_id: params.topicId });
-    return reply.code(201).send({ episode: await repository.confirmTopic(params.channelId, input.topic_id, input.question_count) });
+    return reply.code(201).send({ episode: await repository.confirmTopic(params.channelId, input.topic_id, input.question_count, input.visual_style) });
   });
   server.get("/api/channels/:channelId/episodes", async (request) => ({ episodes: await repository.listEpisodes((request.params as { channelId: string }).channelId) }));
   server.delete("/api/channels/:channelId/episodes/:episodeId", async (request) => {

@@ -189,6 +189,8 @@ export function App() {
       <main className="main-column">
         <Topbar
           channel={selectedChannel}
+          channels={channels}
+          onSelectChannel={openChannel}
           activeEngine={activeEngine}
           engineStatus={currentEngineStatus}
           git={git}
@@ -229,7 +231,7 @@ export function App() {
             tasks={tasks}
             activeTasks={activeTasks}
             now={taskClock}
-            onCreate={() => requestCreateChannel("quiz")}
+            onCreate={(groupId) => requestCreateChannel(groupId || "quiz")}
             openChannel={openChannel}
             onDelete={requestDeleteChannel}
             openTaskList={() => navigate("tasks")}

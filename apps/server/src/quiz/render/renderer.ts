@@ -11,7 +11,7 @@ export type QuizRenderInput = {
   assets?: Record<string, string>;
 };
 
-export type PreparedQuizRender = { html: string; durationSeconds: number; questionCount: number };
+export type PreparedQuizRender = { html: string; compositionFiles: Record<string, string>; durationSeconds: number; questionCount: number };
 export type QuizRenderResult = { composition: string; durationSeconds: number };
 
 export interface QuizRenderer {

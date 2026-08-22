@@ -375,6 +375,7 @@ export class AntigravityClient extends EventEmitter {
   }
 
   async deleteThread(threadId: string): Promise<boolean> {
+    if (!this.config.antigravity.auto_delete_threads) return false;
     const conversationId = this.threadConversations.get(threadId) || (this.managedConversations.has(threadId) ? threadId : null);
     if (conversationId) {
       this.threadConversations.delete(threadId);
@@ -422,6 +423,7 @@ export class AntigravityClient extends EventEmitter {
   }
 
   async cleanupOldSessions(retentionDays = 7): Promise<{ removed: number }> {
+    if (!this.config.antigravity.auto_delete_threads) return { removed: 0 };
     await this.loadManagedSessions();
     const baseDir = this.getAntigravityBaseDir();
     const convDir = path.join(baseDir, "conversations");

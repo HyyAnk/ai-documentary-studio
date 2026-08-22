@@ -35,9 +35,9 @@ export class ErrorBoundary extends Component<Props, State> {
         <section className="shutdown-screen" style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: "24px" }}>
           <div className="shutdown-card" style={{ maxWidth: "560px", width: "100%" }}>
             <WarningCircle size={42} weight="duotone" style={{ color: "var(--notice-error, #e53e3e)" }} />
-            <h1 style={{ fontSize: "22px", margin: "14px 0 8px" }}>Đã xảy ra lỗi hiển thị</h1>
+            <h1 style={{ fontSize: "22px", margin: "14px 0 8px" }}>Render Error</h1>
             <p style={{ color: "var(--muted)", fontSize: "13px", lineHeight: "1.6", margin: "0 0 16px" }}>
-              Một lỗi giao diện tạm thời đã xảy ra trong quá trình kết xuất dữ liệu.
+              An unexpected interface rendering error occurred while displaying this page.
             </p>
             {this.state.error?.message ? (
               <pre
@@ -64,7 +64,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 onClick={this.handleReset}
                 style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}
               >
-                <ArrowClockwise size={16} /> Tải lại trang
+                <ArrowClockwise size={16} /> Reload page
               </button>
               <button
                 type="button"
@@ -73,7 +73,7 @@ export class ErrorBoundary extends Component<Props, State> {
                   window.location.href = window.location.pathname;
                 }}
               >
-                Về danh sách kênh
+                Back to Channels
               </button>
             </div>
           </div>

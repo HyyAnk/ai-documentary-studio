@@ -1,8 +1,10 @@
-import { QuizAssetPlanSchema, type DirectorPlan, type QuizAssetPlan, type QuizV2 } from "@studio/shared";
+import { QuizAssetPlanSchema, type DirectorPlan, type QuizAssetPlan, type QuizImageStyle, type QuizV2 } from "@studio/shared";
+import { QUIZ_STYLE_CONTRACTS } from "./promptCompiler.js";
 
 export const QUIZ_ASSET_SUBJECT_MAX_LENGTH = 180;
 
-export function planQuizAssets(quiz: QuizV2, director: DirectorPlan): QuizAssetPlan {
+export function planQuizAssets(quiz: QuizV2, director: DirectorPlan, visualStyle: QuizImageStyle = "pixar_3d"): QuizAssetPlan {
+  const contract = QUIZ_STYLE_CONTRACTS[visualStyle] || QUIZ_STYLE_CONTRACTS.pixar_3d;
   const assets: QuizAssetPlan["assets"] = [];
   const consistencyGroups: QuizAssetPlan["consistency_groups"] = [];
   for (const beat of director.beats) {
@@ -29,16 +31,16 @@ export function planQuizAssets(quiz: QuizV2, director: DirectorPlan): QuizAssetP
         group_id: groupId,
         question_id: question.id,
         purpose: "visual_answer_set",
-        style_family: "Candy Arcade bright storybook companions",
-        rendering_medium: "polished 3D clay-like illustration",
-        lighting: "soft frontal studio light with gentle upper-left highlight",
+        style_family: contract.styleFamily,
+        rendering_medium: contract.renderingMedium,
+        lighting: contract.lighting,
         framing: "one centered subject, eye-level, full silhouette visible",
-        background_treatment: "the same clean pale studio backdrop with no scenery",
+        background_treatment: contract.optionBackground,
         subject_scale: "subject fills roughly 68 percent of the square frame",
         contrast: "medium-high and matched across every option",
         saturation: "bright but matched across every option",
-        edge_treatment: "soft rounded edges with a thin consistent rim light",
-        detail_level: "medium, simplified child-friendly detail with one clear silhouette",
+        edge_treatment: contract.edgeTreatment,
+        detail_level: contract.detailLevel,
         face_policy: "natural_only",
         asset_ids: optionAssetIds,
       });

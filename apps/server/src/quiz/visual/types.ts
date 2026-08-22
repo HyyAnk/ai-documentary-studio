@@ -15,6 +15,10 @@ export type QuizPalette = {
   backgroundPrimary: string;
   backgroundSecondary: string;
   accent: string;
+  /** Accent reserved for text/icons placed on the light card surface. */
+  surfaceAccent: string;
+  /** High-contrast ink for labels placed on bright badges and timer markers. */
+  onAccent: string;
   answerBadge: string;
   correct: string;
   incorrect: string;
