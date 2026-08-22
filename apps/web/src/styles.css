@@ -106,6 +106,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .engine-toggle-btn { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); font: 700 10px "DM Mono", monospace; cursor: pointer; transition: all .15s ease; }
 .engine-toggle-btn:hover { color: var(--ink); background: color-mix(in srgb, var(--surface-strong) 60%, transparent); }
 .engine-toggle-btn.is-active { background: var(--accent); color: var(--on-accent); border-color: var(--accent-deep); box-shadow: 0 1px 3px color-mix(in srgb, var(--accent-deep) 30%, transparent); }
+.topbar-key-missing-btn { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: color-mix(in srgb, var(--notice-error) 15%, var(--surface)); border: 1px solid var(--notice-error); border-radius: 7px; color: var(--notice-error-ink, #c92a2a); font: 700 10px "DM Mono", monospace; cursor: pointer; transition: all 0.15s ease; box-shadow: 0 1px 4px color-mix(in srgb, var(--notice-error) 20%, transparent); }
+.topbar-key-missing-btn:hover { background: var(--notice-error); color: #ffffff; transform: translateY(-1px); }
+.topbar-key-missing-btn .key-warning-icon { animation: pulse-warning 1.8s ease-in-out infinite; }
+@keyframes pulse-warning { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.6; transform: scale(1.18); } }
 .model-error-tooltip { color: var(--accent); cursor: help; display: inline-flex; align-items: center; }
 .codex-pill { gap: 7px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: 10px; font-weight: 700; }
 .codex-pill:not(.is-connected) .status-dot { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }

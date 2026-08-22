@@ -55,6 +55,7 @@ import { composeMergedVisualPrompt, mergeEditorialOverlays, optimizeShortScenes 
 import { assessProduction, countWords, extractNarration, extractNarrationChunks, extractNarrationSections } from "./production.js";
 import { parseContinuityBundles } from "./visualBundles.js";
 import { loadServerEnv } from "./env.js";
+import { checkGpti2Balance } from "./providers/gpti2Image.js";
 import { assertQuizRenderReady, compileTimeline, generateDirector, generateQuiz, generateVoice, planAssets, planVoice, readQuizArtifacts, resolveAssets, runQa } from "./quiz/pipeline/orchestrator.js";
 
 const VOICE_PREVIEW_TEXT = "This is a preview of this narrator voice for AI Documentary Studio.";
@@ -174,7 +175,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     ...config,
     codex: { ...config.codex, api_key: "" },
     antigravity: { ...config.antigravity, api_key: "" },
-    image_generation: { ...config.image_generation, api_key: "", has_api_key: Boolean(config.image_generation.api_key) },
+    image_generation: { ...config.image_generation, api_key: config.image_generation.api_key, has_api_key: Boolean(config.image_generation.api_key) },
   }));
   server.get("/api/storage", async () => getStorageInfo());
   server.post("/api/storage", async (request) => {
@@ -332,7 +333,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
   server.get("/api/image/settings", async () => ({
     settings: {
       ...config.image_generation,
-      api_key: "",
+      api_key: config.image_generation.api_key,
       has_api_key: Boolean(config.image_generation.api_key),
     },
     models: [
@@ -340,6 +341,13 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
       { id: "nano-banana-2", label: "Nano Banana 2 (100đ / ảnh - 2K)" },
     ],
   }));
+  server.get("/api/image/balance", async () => {
+    try {
+      return await checkGpti2Balance(config.image_generation.api_key);
+    } catch (error) {
+      throw new RepositoryError(error instanceof Error ? error.message : "Failed to check balance", "IMAGE_BALANCE_FAILED");
+    }
+  });
   server.post("/api/image/settings", async (request) => {
     const input = ImageSettingsInputSchema.parse(request.body);
     if (tasks.hasActiveWork()) throw new RepositoryError("Finish active tasks before changing image settings", "IMAGE_SETTINGS_BUSY");
@@ -348,12 +356,12 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     return {
       image_generation: {
         ...config.image_generation,
-        api_key: "",
+        api_key: config.image_generation.api_key,
         has_api_key: Boolean(config.image_generation.api_key),
       },
       settings: {
         ...config.image_generation,
-        api_key: "",
+        api_key: config.image_generation.api_key,
         has_api_key: Boolean(config.image_generation.api_key),
       },
     };

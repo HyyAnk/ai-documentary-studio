@@ -197,11 +197,13 @@ export function App() {
           loadingModels={loadingModels}
           modelsError={modelsError}
           currentImageModel={currentImageModel}
+          hasImageApiKey={Boolean(appConfig?.image_generation?.has_api_key || appConfig?.image_generation?.api_key)}
           theme={theme}
           onEngineToggle={handleEngineToggle}
           onThemeToggle={() => setTheme((current) => current === "dark" ? "light" : "dark")}
           onModelChange={handleModelChange}
           onImageModelChange={handleImageModelChange}
+          onOpenImageSettings={() => navigate("settings")}
           onReconnect={async () => {
             try {
               if (activeEngine === "antigravity") {

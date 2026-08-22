@@ -147,7 +147,13 @@ export class AntigravityNativeImageProvider implements ImageProvider {
     // 1. If prompt has Anchor-frame prompt section (from visual bible or task manifest)
     const anchorMatch = rawPrompt.match(/Anchor[- ]frame prompt\s*:\s*([^\n\r]+)/i);
     if (anchorMatch && anchorMatch[1].trim()) {
-      return anchorMatch[1].replace(/[`"]/g, "").replace(/\s+/g, " ").trim().slice(0, 450);
+      const cleanedAnchor = anchorMatch[1]
+        .replace(/\b(?:with\s+a\s+|showing\s+a\s+|displaying\s+a\s+)?(?:question|quiz)\s+card(?:\s+overlay|\s+showing|\s+with)?[^,.]*/gi, "")
+        .replace(/\b(?:choice\s+box(?:es)?|answer\s+buttons?|countdown\s+timer|timer\s+bar)\b[^,.]*/gi, "")
+        .replace(/[`"]/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      return (cleanedAnchor || anchorMatch[1].replace(/[`"]/g, "").replace(/\s+/g, " ").trim()).slice(0, 450);
     }
 
     // 2. If prompt is compiled quiz asset prompt (e.g. Subject: ..., Purpose: ..., Solo hero art contract: ...)

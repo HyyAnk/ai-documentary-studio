@@ -21,11 +21,13 @@ export function Topbar({
   loadingModels = false,
   modelsError = null,
   currentImageModel = "gpt-image-2",
+  hasImageApiKey = false,
   theme,
   onEngineToggle,
   onThemeToggle,
   onModelChange,
   onImageModelChange,
+  onOpenImageSettings,
   onReconnect,
   onShutdown,
 }: {
@@ -38,11 +40,13 @@ export function Topbar({
   loadingModels?: boolean;
   modelsError?: string | null;
   currentImageModel?: string;
+  hasImageApiKey?: boolean;
   theme: Theme;
   onEngineToggle: (engine: "codex" | "antigravity") => Promise<void> | void;
   onThemeToggle: () => void;
   onModelChange: (model: string) => Promise<void>;
   onImageModelChange: (model: string) => Promise<void>;
+  onOpenImageSettings?: () => void;
   onReconnect: () => void;
   onShutdown: () => void;
 }) {
@@ -78,19 +82,31 @@ export function Topbar({
           </button>
         </div>
 
-        <label className="model-select image-model-select" title="Image Generation Model (gpti2.store)">
-          <Image size={13} style={{ marginRight: 2 }} />
-          <span>Image</span>
-          <CaretDown size={13} />
-          <select
-            aria-label="Image generation model"
-            value={currentImageModel || "gpt-image-2"}
-            onChange={(event) => void onImageModelChange(event.target.value)}
+        {!hasImageApiKey ? (
+          <button
+            type="button"
+            className="topbar-key-missing-btn"
+            onClick={onOpenImageSettings}
+            title="Chưa cấu hình API Key gpti2.store. Bấm vào đây để tới trang Cài đặt."
           >
-            <option value="gpt-image-2">gpt-image-2 (50đ)</option>
-            <option value="nano-banana-2">nano-banana-2 (100đ - 2K)</option>
-          </select>
-        </label>
+            <WarningCircle size={14} weight="fill" className="key-warning-icon" />
+            <span>Chưa nhập Image Key</span>
+          </button>
+        ) : (
+          <label className="model-select image-model-select" title="Image Generation Model (gpti2.store)">
+            <Image size={13} style={{ marginRight: 2 }} />
+            <span>Image</span>
+            <CaretDown size={13} />
+            <select
+              aria-label="Image generation model"
+              value={currentImageModel || "gpt-image-2"}
+              onChange={(event) => void onImageModelChange(event.target.value)}
+            >
+              <option value="gpt-image-2">gpt-image-2 (50đ)</option>
+              <option value="nano-banana-2">nano-banana-2 (100đ - 2K)</option>
+            </select>
+          </label>
+        )}
 
         <label className="model-select">
           <span>Model</span>

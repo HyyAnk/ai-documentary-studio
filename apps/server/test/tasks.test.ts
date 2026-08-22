@@ -59,6 +59,22 @@ describe("sequence retry planning", () => {
     expect(normalized[1]!.quiz?.choices).toEqual(["Lever", "Inclined plane", "Pulley"]);
     expect(normalized[1]!.quiz?.answer).toBe("Inclined plane");
     expect(normalized[1]!.quiz?.explanation).toBe("It changes force direction.");
+    expect(normalized[0]!.source_ids).toEqual(["C01"]);
+    expect(normalized[1]!.source_ids).toEqual(["C01"]);
+  });
+
+  it("populates fallback source_ids for quiz beats lacking source_ids to pass quality gate", () => {
+    const rawBeats = parseBeatsOutput(JSON.stringify([
+      { dialogue: "Welcome to the quiz!", sequence_id: "sequence-1", visual_prompt: "CAMERA\nA\nACTION\nB\nLIGHTING\nC\nATMOSPHERE\nD\nCONTINUITY\nE", continuity_bundle_id: "CB-01", continuity_note: "Fix theme", quiz: { phase: "intro", question_number: null } },
+      { dialogue: "Which planet is red?", sequence_id: "sequence-1", visual_prompt: "CAMERA\nA2\nACTION\nB2\nLIGHTING\nC2\nATMOSPHERE\nD2\nCONTINUITY\nE2", continuity_bundle_id: "CB-01", continuity_note: "Fix theme", quiz: { phase: "question", question_number: 1, question: "Which planet is red?", choices: ["Mars", "Venus"], answer: "Mars", explanation: "Mars has iron oxide." } },
+    ]));
+
+    expect(rawBeats[0]!.source_ids).toEqual([]);
+    expect(rawBeats[1]!.source_ids).toEqual([]);
+
+    const normalized = normalizeQuizBeatMetadata(rawBeats);
+    expect(normalized[0]!.source_ids).toEqual(["C01"]);
+    expect(normalized[1]!.source_ids).toEqual(["C01"]);
   });
 
   it("reuses fresh sequence drafts and queues only missing sequences", () => {

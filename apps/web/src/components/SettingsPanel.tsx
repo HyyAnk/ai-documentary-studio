@@ -1,4 +1,4 @@
-import { CircleNotch, FileText, FloppyDisk, GitBranch, Play, Plus, SpeakerHigh, Sparkle, TerminalWindow, Trash, VideoCamera } from "@phosphor-icons/react";
+import { CircleNotch, Eye, EyeSlash, FileText, FloppyDisk, GitBranch, Play, Plus, SpeakerHigh, Sparkle, TerminalWindow, Trash, VideoCamera } from "@phosphor-icons/react";
 import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import type { AppConfig, Channel, CodexSettingsResponse, AntigravitySettingsResponse, StorageInfo, VoiceProfile } from "@studio/shared";
 import { api } from "../api";
@@ -46,7 +46,8 @@ export function SettingsView({ channels, appConfig, codex, codexStatus, antigrav
   const [imageEnabled, setImageEnabled] = useState(appConfig?.image_generation?.enabled ?? true);
   const [imagesPerBundle, setImagesPerBundle] = useState(appConfig?.image_generation?.images_per_bundle ?? 1);
   const [imageModel, setImageModel] = useState(appConfig?.image_generation?.model ?? "gpt-image-2");
-  const [imageApiKey, setImageApiKey] = useState("");
+  const [imageApiKey, setImageApiKey] = useState(appConfig?.image_generation?.api_key ?? "");
+  const [showImageKey, setShowImageKey] = useState(false);
   const [hasImageApiKey, setHasImageApiKey] = useState(Boolean(appConfig?.image_generation?.has_api_key || appConfig?.image_generation?.api_key));
   const [maxConcurrentImageTasks, setMaxConcurrentImageTasks] = useState(appConfig?.image_generation?.max_concurrent_tasks ?? 3);
   const [selectedChannelId, setSelectedChannelId] = useState(channels[0]?.channel_id ?? "");
@@ -59,6 +60,8 @@ export function SettingsView({ channels, appConfig, codex, codexStatus, antigrav
   const [savingAudio, setSavingAudio] = useState(false);
   const [savingVideo, setSavingVideo] = useState(false);
   const [savingImage, setSavingImage] = useState(false);
+  const [checkingImageBalance, setCheckingImageBalance] = useState(false);
+  const [imageBalanceInfo, setImageBalanceInfo] = useState<{ balance_vnd: number; rpm?: number } | null>(null);
   const [cleaningThreads, setCleaningThreads] = useState(false);
   const [cleaningAgyThreads, setCleaningAgyThreads] = useState(false);
   const [voiceBusy, setVoiceBusy] = useState(false);
@@ -91,6 +94,7 @@ export function SettingsView({ channels, appConfig, codex, codexStatus, antigrav
       setImageModel(appConfig.image_generation.model ?? "gpt-image-2");
       setMaxConcurrentImageTasks(appConfig.image_generation.max_concurrent_tasks ?? 3);
       setHasImageApiKey(Boolean(appConfig.image_generation.has_api_key || appConfig.image_generation.api_key));
+      setImageApiKey(appConfig.image_generation.api_key ?? "");
     }
   }, [appConfig]);
 
@@ -168,7 +172,8 @@ export function SettingsView({ channels, appConfig, codex, codexStatus, antigrav
   };
 
   const saveImage = async (event: FormEvent) => {
-    event.preventDefault(); setSavingImage(true);
+    event.preventDefault();
+    setSavingImage(true);
     try {
       const next = await api.saveImageSettings({
         enabled: imageEnabled,
@@ -177,15 +182,54 @@ export function SettingsView({ channels, appConfig, codex, codexStatus, antigrav
         model: imageModel,
         quality: "low",
         max_concurrent_tasks: maxConcurrentImageTasks,
-        ...(imageApiKey.trim() ? { api_key: imageApiKey.trim() } : {}),
+        api_key: imageApiKey.trim(),
       });
       await onImageSaved(next.image_generation);
-      if (imageApiKey.trim()) setHasImageApiKey(true);
-      setImageApiKey("");
-      onNotice({ tone: "good", message: "Image generation settings saved locally" });
+      setHasImageApiKey(Boolean(next.image_generation.api_key || next.image_generation.has_api_key));
+      setImageApiKey(next.image_generation.api_key ?? "");
+      onNotice({ tone: "good", message: "Đã lưu cài đặt tạo ảnh" });
     }
     catch (error) { onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Could not save image settings" }); }
     finally { setSavingImage(false); }
+  };
+
+  const clearImageKey = async () => {
+    if (!window.confirm("Bạn có chắc chắn muốn xóa API Key gpti2.store này không?")) return;
+    setSavingImage(true);
+    try {
+      const next = await api.saveImageSettings({
+        api_key: "",
+      });
+      await onImageSaved(next.image_generation);
+      setImageApiKey("");
+      setHasImageApiKey(false);
+      setImageBalanceInfo(null);
+      onNotice({ tone: "good", message: "Đã xóa API Key gpti2.store" });
+    } catch (error) {
+      onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Không thể xóa API Key" });
+    } finally {
+      setSavingImage(false);
+    }
+  };
+
+  const checkImageBalance = async () => {
+    setCheckingImageBalance(true);
+    try {
+      const result = await api.imageBalance();
+      setImageBalanceInfo(result);
+      onNotice({
+        tone: "good",
+        message: `API Key hợp lệ! Số dư: ${result.balance_vnd.toLocaleString("vi-VN")}đ${result.rpm ? ` (RPM: ${result.rpm})` : ""}`,
+      });
+    } catch (error) {
+      setImageBalanceInfo(null);
+      onNotice({
+        tone: "bad",
+        message: error instanceof Error ? error.message : "Kiểm tra API Key thất bại",
+      });
+    } finally {
+      setCheckingImageBalance(false);
+    }
   };
 
   const assignVoice = async (voiceId: string | null) => {
@@ -236,7 +280,7 @@ export function SettingsView({ channels, appConfig, codex, codexStatus, antigrav
     <section className="panel codex-settings-panel"><div className="panel-heading"><div><p className="eyebrow">Connection</p><h2>Codex (OpenAI)</h2></div><TerminalWindow size={22} /></div><StatusLine label="Status" value={codexStatus} /><StatusLine label="Transport" value={codex?.settings.transport === "openai_compatible" ? "Cockpit API" : "App Server"} /><StatusLine label="Selected model" value={codex?.settings.model || "Codex default"} /><form className="codex-form" onSubmit={(event) => void saveCodex(event)}><label>Transport<select value={transport} onChange={(event) => setTransport(event.target.value as "app_server" | "openai_compatible")}><option value="app_server">Local Codex App Server</option><option value="openai_compatible">Cockpit API Service</option></select></label>{transport === "openai_compatible" ? <><label>Base URL<input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="http://127.0.0.1:PORT/v1" /></label><label>API key<input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={codex?.settings.has_api_key ? "Saved locally - leave blank to keep" : "Paste Cockpit API key"} autoComplete="off" /></label></> : null}<label className="toggle-field"><input type="checkbox" checked={autoDeleteThreads} onChange={(event) => setAutoDeleteThreads(event.target.checked)} />Auto-delete completed Codex sessions</label><label>Failed/cancelled retention (days)<input type="number" min="0" max="3650" step="1" value={failedThreadRetentionDays} onChange={(event) => setFailedThreadRetentionDays(Number(event.target.value))} /></label><button className="primary-button" disabled={savingCodex}>{savingCodex ? <CircleNotch className="spin" size={16} /> : <FloppyDisk size={16} />}Save Codex</button></form><div className="codex-cleanup-action"><button className="quiet-button" disabled={cleaningThreads} onClick={() => void cleanupCodex()}>{cleaningThreads ? <CircleNotch className="spin" size={15} /> : <Trash size={15} />}{cleaningThreads ? "Cleaning…" : "Clean up old Codex sessions"}</button></div></section>
     <section className="panel codex-settings-panel"><div className="panel-heading"><div><p className="eyebrow">Connection</p><h2>Antigravity (Google)</h2></div><Sparkle size={22} /></div><StatusLine label="Status" value={antigravityStatus ?? "Ready"} /><StatusLine label="Mode" value={antigravity?.settings.has_api_key ? "Google AI API (Custom Key)" : "Native AgentAPI (Zero API Key)"} /><StatusLine label="CLI Command" value={agyCommand} /><StatusLine label="Selected model" value={antigravity?.settings.model || appConfig?.antigravity.model || "gemini-3.7-flash-high"} /><form className="codex-form" onSubmit={(event) => void saveAntigravity(event)}><label>CLI Command<input value={agyCommand} onChange={(event) => setAgyCommand(event.target.value)} placeholder="agy" /><small className="field-help">Google Antigravity CLI binary name or absolute executable path. Uses active IDE session with zero API key.</small></label><label>Gemini API key (Optional)<input type="password" value={agyApiKey} onChange={(event) => setAgyApiKey(event.target.value)} placeholder={antigravity?.settings.has_api_key ? "Saved locally - leave blank to keep" : "Paste Google Gemini API key"} autoComplete="off" /><small className="field-help">Tuỳ chọn: Dùng quota API Key riêng để tạo ảnh trực tiếp qua Google Generative AI (gemini-3.1-flash-image / gemini-3.1-flash-lite-image).</small></label><label className="toggle-field"><input type="checkbox" checked={agyAutoDeleteThreads} onChange={(event) => setAgyAutoDeleteThreads(event.target.checked)} />Auto-delete completed Antigravity sessions</label><label>Failed/cancelled retention (days)<input type="number" min="0" max="3650" step="1" value={agyFailedThreadRetentionDays} onChange={(event) => setAgyFailedThreadRetentionDays(Number(event.target.value))} /></label><button className="primary-button" disabled={savingAntigravity}>{savingAntigravity ? <CircleNotch className="spin" size={16} /> : <FloppyDisk size={16} />}Save Antigravity</button></form><div className="codex-cleanup-action"><button className="quiet-button" disabled={cleaningAgyThreads} onClick={() => void cleanupAntigravity()}>{cleaningAgyThreads ? <CircleNotch className="spin" size={15} /> : <Trash size={15} />}{cleaningAgyThreads ? "Cleaning…" : "Clean up old Antigravity sessions"}</button></div></section>
     <section className="panel video-settings-panel"><div className="panel-heading"><div><p className="eyebrow">Video generation</p><h2>Scene packing</h2></div><VideoCamera size={22} /></div><StatusLine label="Current limit" value={`${maxDuration}s`} /><form className="codex-form" onSubmit={(event) => void saveVideo(event)}><label>Scene duration (seconds)<input type="number" min="1" max="120" step="0.5" value={maxSceneDuration} onChange={(event) => setMaxSceneDuration(Number(event.target.value))} /><small className="field-help">The maximum length your video generation tool can produce per call. Scene breakdown packs narration beats to fill this duration automatically.</small></label><label>Narration pace (words/sec)<input type="number" min="0.1" max="20" step="0.1" value={narrationWordsPerSecond} onChange={(event) => setNarrationWordsPerSecond(Number(event.target.value))} /><small className="field-help">Used to estimate spoken length when packing beats into scenes.</small></label><button className="primary-button" disabled={savingVideo}>{savingVideo ? <CircleNotch className="spin" size={16} /> : <FloppyDisk size={16} />}Save video</button></form></section>
-    <section className="panel image-settings-panel"><div className="panel-heading"><div><p className="eyebrow">Image provider</p><h2>gpti2.store</h2></div><FileText size={22} /></div><StatusLine label="Provider" value="gpti2.store (API)" /><StatusLine label="API Key status" value={hasImageApiKey ? "Configured (Saved locally)" : "Not configured"} /><form className="codex-form" onSubmit={(event) => void saveImage(event)}><label className="toggle-field"><input type="checkbox" checked={imageEnabled} onChange={(event) => setImageEnabled(event.target.checked)} />Enable continuity anchor images</label><label>gpti2.store API key<input type="password" value={imageApiKey} onChange={(event) => setImageApiKey(event.target.value)} placeholder={hasImageApiKey ? "Saved locally - leave blank to keep" : "Paste gpti2.store API key (sk-...)"} autoComplete="off" /><small className="field-help">Lưu trữ bảo mật trong .documentary-studio/ (gitignored), không bao giờ lộ lên Git repo.</small></label><label>Default Model<select value={imageModel} onChange={(event) => setImageModel(event.target.value)}><option value="gpt-image-2">gpt-image-2 (50đ / ảnh - Tiết kiệm)</option><option value="nano-banana-2">nano-banana-2 (100đ / ảnh - 2K)</option></select></label><label>Parallel Generation Threads<select value={maxConcurrentImageTasks} onChange={(event) => setMaxConcurrentImageTasks(Number(event.target.value))}><option value="1">1 luồng</option><option value="2">2 luồng</option><option value="3">3 luồng (Khuyến nghị)</option><option value="4">4 luồng</option></select></label><label>Images per bundle<select value={imagesPerBundle} disabled={!imageEnabled} onChange={(event) => setImagesPerBundle(Number(event.target.value))}><option value="1">1 anchor</option><option value="2">2 anchors</option></select></label><small className="field-help">Chỉ sử dụng quality low để tiết kiệm tối đa chi phí. Đã kích hoạt cơ chế chống mất lượt (Prefer: respond-async) và chống tính trùng tiền (Idempotency-Key).</small><button className="primary-button" disabled={savingImage}>{savingImage ? <CircleNotch className="spin" size={16} /> : <FloppyDisk size={16} />}Save images</button></form></section>
+    <section className="panel image-settings-panel"><div className="panel-heading"><div><p className="eyebrow">Image provider</p><h2>gpti2.store</h2></div><FileText size={22} /></div><StatusLine label="Provider" value="gpti2.store (API)" /><StatusLine label="API Key status" value={hasImageApiKey ? "Configured (Đã cấu hình)" : "Not configured (Chưa cấu hình)"} />{imageBalanceInfo ? <StatusLine label="Số dư khả dụng" value={`${imageBalanceInfo.balance_vnd.toLocaleString("vi-VN")}đ${imageBalanceInfo.rpm ? ` (RPM: ${imageBalanceInfo.rpm})` : ""}`} /> : null}<form className="codex-form" onSubmit={(event) => void saveImage(event)}><label className="toggle-field"><input type="checkbox" checked={imageEnabled} onChange={(event) => setImageEnabled(event.target.checked)} />Enable continuity anchor images</label><label>gpti2.store API key<div style={{ display: "flex", gap: "6px", alignItems: "center", width: "100%" }}><input type={showImageKey ? "text" : "password"} value={imageApiKey} onChange={(event) => setImageApiKey(event.target.value)} placeholder="Paste gpti2.store API key (sk-...)" autoComplete="off" style={{ flex: 1 }} /><button type="button" className="quiet-button compact" title={showImageKey ? "Ẩn key" : "Hiện key"} onClick={() => setShowImageKey(!showImageKey)} style={{ height: "35px", padding: "0 10px" }}>{showImageKey ? <EyeSlash size={16} /> : <Eye size={16} />}</button>{hasImageApiKey || imageApiKey ? <button type="button" className="icon-button danger compact" title="Xóa API Key này" disabled={savingImage} onClick={() => void clearImageKey()} style={{ height: "35px", width: "35px", minWidth: "35px", borderRadius: "6px" }}><Trash size={16} /></button> : null}</div><small className="field-help">{hasImageApiKey ? "Key đang được lưu trong .documentary-studio/ (gitignored). Bạn có thể chỉnh sửa trực tiếp để thay key mới hoặc bấm biểu tượng thùng rác để xóa." : "Lấy key tại tab Tài khoản trên https://gpti2.store. Lưu trữ bảo mật trong .documentary-studio/ (gitignored)."}</small></label><label>Default Model<select value={imageModel} onChange={(event) => setImageModel(event.target.value)}><option value="gpt-image-2">gpt-image-2 (50đ / ảnh - Tiết kiệm)</option><option value="nano-banana-2">nano-banana-2 (100đ / ảnh - 2K)</option></select></label><label>Parallel Generation Threads<select value={maxConcurrentImageTasks} onChange={(event) => setMaxConcurrentImageTasks(Number(event.target.value))}><option value="1">1 luồng</option><option value="2">2 luồng</option><option value="3">3 luồng (Khuyến nghị)</option><option value="4">4 luồng</option></select></label><label>Images per bundle<select value={imagesPerBundle} disabled={!imageEnabled} onChange={(event) => setImagesPerBundle(Number(event.target.value))}><option value="1">1 anchor</option><option value="2">2 anchors</option></select></label><small className="field-help">Chỉ sử dụng quality low để tiết kiệm tối đa chi phí. Đã kích hoạt cơ chế chống mất lượt (Prefer: respond-async) và chống tính trùng tiền (Idempotency-Key).</small><div style={{ display: "flex", gap: "8px", alignItems: "center" }}><button className="primary-button" disabled={savingImage}>{savingImage ? <CircleNotch className="spin" size={16} /> : <FloppyDisk size={16} />}Save images</button>{hasImageApiKey ? <button type="button" className="quiet-button" disabled={checkingImageBalance} onClick={() => void checkImageBalance()}>{checkingImageBalance ? <CircleNotch className="spin" size={15} /> : null}{checkingImageBalance ? "Đang kiểm tra…" : "Kiểm tra số dư & Key"}</button> : null}</div></form></section>
     <section className="panel audio-settings-panel"><div className="panel-heading"><div><p className="eyebrow">Local speech</p><h2>Audio</h2></div><SpeakerHigh size={22} /></div><StatusLine label="Provider" value="Chatterbox" /><form className="codex-form" onSubmit={(event) => void saveAudio(event)}><label>Service URL<input value={audioUrl} onChange={(event) => setAudioUrl(event.target.value)} placeholder="http://127.0.0.1:8890" /></label><label>Exaggeration<input type="number" min="0" max="1" step="0.05" value={exaggeration} onChange={(event) => setExaggeration(Number(event.target.value))} /></label><label>CFG weight<input type="number" min="0" max="1" step="0.05" value={cfgWeight} onChange={(event) => setCfgWeight(Number(event.target.value))} /></label><label>Merge gap (ms)<input type="number" min="0" max="10000" step="50" value={mergeGapMs} onChange={(event) => setMergeGapMs(Number(event.target.value))} /></label><label className="toggle-field"><input type="checkbox" checked={matchTargetDuration} onChange={(event) => setMatchTargetDuration(event.target.checked)} />Match episode target duration</label><button className="primary-button" disabled={savingAudio}>{savingAudio ? <CircleNotch className="spin" size={16} /> : <FloppyDisk size={16} />}Save audio</button></form></section>
     <section className="panel voices-panel"><div className="panel-heading"><div><p className="eyebrow">Voice library</p><h2>Voices</h2></div><SpeakerHigh size={22} /></div><form className="voice-add-form" onSubmit={(event) => void addVoice(event)}><input aria-label="Voice name" placeholder="Voice name" value={voiceName} onChange={(event) => setVoiceName(event.target.value)} /><label className="file-picker"><FileText size={15} />{voiceFile?.name ?? "Choose WAV"}<input type="file" accept="audio/wav,.wav" onChange={(event) => setVoiceFile(event.target.files?.[0] ?? null)} /></label><button className="primary-button compact" disabled={voiceBusy || !voiceName.trim() || !voiceFile}>{voiceBusy ? <CircleNotch className="spin" size={15} /> : <Plus size={15} />}Add voice</button></form><div className="voice-list">{voices.length === 0 ? <p className="storage-hint">No voices yet.</p> : voices.map((voice) => <article className="voice-card" key={voice.voice_id}><div><strong>{voice.name}</strong><span>{new Date(voice.created_at).toLocaleDateString()}</span></div><audio controls preload="none" aria-label={`Preview ${voice.name}`} src={api.voiceSampleUrl(voice.voice_id)} /><button className="icon-button danger" title={`Delete ${voice.name}`} aria-label={`Delete ${voice.name}`} disabled={voiceBusy} onClick={() => void deleteVoice(voice)}><Trash size={15} /></button></article>)}</div></section>
     <section className="panel channel-voice-panel"><div className="panel-heading"><div><p className="eyebrow">Channel voice</p><h2>Assignment</h2></div><Play size={22} /></div><div className="voice-reference"><label>Channel<select value={selectedChannelId} onChange={(event) => setSelectedChannelId(event.target.value)} disabled={channels.length === 0}><option value="">Choose a channel</option>{channels.map((channel) => <option key={channel.channel_id} value={channel.channel_id}>{channel.display_name}</option>)}</select></label>{selectedChannel ? <><label>Voice<select aria-label="Assigned channel voice" value={selectedVoice?.voice_id ?? ""} disabled={voiceBusy} onChange={(event) => void assignVoice(event.target.value || null)}><option value="">Default (built-in)</option>{voices.map((voice) => <option key={voice.voice_id} value={voice.voice_id}>{voice.name}</option>)}</select></label>{selectedVoice ? <audio controls preload="none" aria-label={`Current voice preview for ${selectedChannel.display_name}`} src={api.voiceSampleUrl(selectedVoice.voice_id)} /> : <span className="storage-hint">Built-in default voice</span>}<label className="file-picker"><FileText size={15} />Upload new voice for this channel<input type="file" accept="audio/wav,.wav" onChange={(event) => void uploadForChannel(event)} disabled={voiceBusy} /></label></> : <p className="storage-hint">Create a channel before assigning a voice.</p>}</div></section>

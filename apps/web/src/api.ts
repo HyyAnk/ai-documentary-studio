@@ -118,6 +118,7 @@ export const api = {
   saveAudioSettings: (body: AppConfig["audio_generation"]) => request<{ audio_generation: AppConfig["audio_generation"] }>("/api/audio/settings", { method: "POST", body: JSON.stringify(body) }),
   saveVideoSettings: (body: Pick<AppConfig["video_generation"], "max_scene_duration_seconds" | "narration_words_per_second">) => request<{ video_generation: AppConfig["video_generation"] }>("/api/video/settings", { method: "POST", body: JSON.stringify(body) }),
   imageSettings: () => request<{ settings: AppConfig["image_generation"] & { has_api_key?: boolean }; models: Array<{ id: string; label: string }> }>("/api/image/settings"),
+  imageBalance: () => request<{ balance_vnd: number; rpm?: number }>("/api/image/balance"),
   saveImageSettings: (body: Partial<AppConfig["image_generation"]>) => request<{ image_generation: AppConfig["image_generation"] }>("/api/image/settings", { method: "POST", body: JSON.stringify(body) }),
   codexModels: () => request<{ models: CodexSettingsResponse["models"] }>("/api/codex/models"),
   storage: () => request<StorageInfo>("/api/storage"),

@@ -34,19 +34,46 @@ export function resolveImageDimensions(
     return { aspect_ratio: ratio, size: "2K" };
   }
 
-  // gpt-image-2 (OpenAI DALL-E format) sizes (quality: low)
+  // gpt-image-2 exact supported sizes on gpti2.store (quality: low)
   const sizeMap: Record<string, string> = {
-    "16:9": "1536x1024",
-    "9:16": "1024x1536",
+    "16:9": "1280x720",
+    "9:16": "720x1280",
     "1:1": "1024x1024",
-    "4:3": "1408x1056",
-    "3:4": "1056x1408",
-    "2:3": "1024x1536",
+    "4:3": "1024x768",
+    "3:4": "768x1024",
     "3:2": "1536x1024",
+    "2:3": "1024x1536",
   };
 
-  const size = sizeMap[normRatio] || "1536x1024";
+  const size = sizeMap[normRatio] || "1280x720";
   return { size, aspect_ratio: normRatio };
+}
+
+export async function checkGpti2Balance(apiKey?: string): Promise<{ balance_vnd: number; rpm?: number }> {
+  const key = (apiKey || process.env.GPTI2_API_KEY || process.env.SHOPAIKEY_API_KEY || "").trim();
+  if (!key) {
+    throw new RepositoryError("API key for gpti2.store is not configured.", "IMAGE_PROVIDER_NOT_CONFIGURED");
+  }
+  const response = await fetch(`${DEFAULT_BASE_URL}/v1/balance`, {
+    headers: {
+      Authorization: `Bearer ${key}`,
+    },
+  });
+  const raw = await response.text();
+  let payload: { balance_vnd?: number; rpm?: number; error?: { message?: string } } = {};
+  try {
+    payload = JSON.parse(raw) as typeof payload;
+  } catch {
+    //
+  }
+  if (!response.ok) {
+    const msg = payload.error?.message || raw || `HTTP ${response.status}`;
+    throw new RepositoryError(`gpti2.store API failed (${response.status}): ${msg}`, "IMAGE_PROVIDER_FAILED");
+  }
+  return {
+    balance_vnd: typeof payload.balance_vnd === "number" ? payload.balance_vnd : 0,
+    rpm: payload.rpm,
+  };
 }
 
 type Gpti2GenerationOptions = {

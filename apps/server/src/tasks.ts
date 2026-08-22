@@ -1200,7 +1200,14 @@ export class TaskManager extends EventEmitter {
         const sequenceNumber = this.findSceneNumber(task.task_id);
         if (!sequenceNumber) throw new Error("Sequence number is required");
         const parsedBeats = parseBeatsOutput(output);
-        const beats = isQuiz ? normalizeQuizBeatMetadata(parsedBeats) : parsedBeats;
+        const beats = isQuiz
+          ? normalizeQuizBeatMetadata(parsedBeats)
+          : parsedBeats.map((beat) => {
+              if (beat.source_ids.length === 0 && beat.asset_type !== "transition") {
+                return { ...beat, source_ids: [`C${String(sequenceNumber).padStart(2, "0")}`] };
+              }
+              return beat;
+            });
         validateBeatOutput(beats, 1, isQuiz);
         const episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
         const script = await this.repository.getEpisodeFile(task.channel_id, task.episode_id!, "script.md");
@@ -1225,7 +1232,16 @@ export class TaskManager extends EventEmitter {
         }
       } else if (task.task_type === "GENERATE_SCENES") {
         const parsedBeats = parseBeatsOutput(output);
-        const beats = isQuiz ? normalizeQuizBeatMetadata(parsedBeats) : parsedBeats;
+        const beats = isQuiz
+          ? normalizeQuizBeatMetadata(parsedBeats)
+          : parsedBeats.map((beat, idx) => {
+              if (beat.source_ids.length === 0 && beat.asset_type !== "transition") {
+                const seqMatch = beat.sequence_id.match(/\d+/);
+                const seqNum = seqMatch ? Number(seqMatch[0]) : idx + 1;
+                return { ...beat, source_ids: [`C${String(seqNum).padStart(2, "0")}`] };
+              }
+              return beat;
+            });
         validateBeatOutput(beats, 5, isQuiz);
         const episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
         const script = await this.repository.getEpisodeFile(task.channel_id, task.episode_id!, "script.md");
@@ -1894,15 +1910,29 @@ export function normalizeQuizBeatMetadata(beats: Beat[]): Beat[] {
 
   return beats.map((beat) => {
     const quiz = beat.quiz;
-    if (!quiz || ["intro", "outro"].includes(quiz.phase) || !quiz.question_number) return beat;
+    const resolvedSourceIds = beat.source_ids.length > 0
+      ? beat.source_ids
+      : quiz?.question_number
+      ? [`C${String(quiz.question_number).padStart(2, "0")}`]
+      : beat.continuity_bundle_id && /^cb-(\d+)$/i.test(beat.continuity_bundle_id)
+      ? [`C${String(Number(beat.continuity_bundle_id.match(/^cb-(\d+)$/i)![1])).padStart(2, "0")}`]
+      : beat.sequence_id && /^sequence-(\d+)$/i.test(beat.sequence_id)
+      ? [`C${String(Number(beat.sequence_id.match(/^sequence-(\d+)$/i)![1])).padStart(2, "0")}`]
+      : [];
+
+    const beatWithSources = resolvedSourceIds.length > 0 && beat.source_ids.length === 0
+      ? { ...beat, source_ids: resolvedSourceIds }
+      : beat;
+
+    if (!quiz || ["intro", "outro"].includes(quiz.phase) || !quiz.question_number) return beatWithSources;
     const canonical = canonicalByQuestion.get(quiz.question_number);
-    if (!canonical) return beat;
+    if (!canonical) return beatWithSources;
     const ownAnswer = canonicalizeVisibleQuizAnswer(quiz.choices, quiz.answer);
     if (ownAnswer) {
-      return { ...beat, quiz: { ...quiz, choices: quiz.choices.map(stripQuizChoiceLabel), answer: ownAnswer } };
+      return { ...beatWithSources, quiz: { ...quiz, choices: quiz.choices.map(stripQuizChoiceLabel), answer: ownAnswer } };
     }
     return {
-      ...beat,
+      ...beatWithSources,
       quiz: {
         ...quiz,
         question: quiz.question.trim() || canonical.question,

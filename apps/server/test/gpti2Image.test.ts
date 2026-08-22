@@ -208,7 +208,7 @@ describe("gpti2.store Image Provider", () => {
       aspect_ratio: "9:16",
     });
     requestBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
-    expect(requestBody.size).toBe("1024x1536");
+    expect(requestBody.size).toBe("720x1280");
 
     // Test 4:3 for gpt-image-2
     await generateGpti2ImageBytes("A vintage television", {
@@ -217,7 +217,7 @@ describe("gpti2.store Image Provider", () => {
       aspect_ratio: "4:3",
     });
     requestBody = JSON.parse(fetchMock.mock.calls[2][1].body as string);
-    expect(requestBody.size).toBe("1408x1056");
+    expect(requestBody.size).toBe("1024x768");
 
     // Test nano-banana-2 with direct aspect_ratio
     fetchMock.mockResolvedValueOnce({
@@ -248,5 +248,21 @@ describe("gpti2.store Image Provider", () => {
     expect(nanoResult.price_vnd).toBe(100);
     const nanoCallBody = JSON.parse(fetchMock.mock.calls[3][1].body as string);
     expect(nanoCallBody.aspect_ratio).toBe("1:1");
+  });
+
+  it("checks balance successfully via checkGpti2Balance", async () => {
+    const { checkGpti2Balance } = await import("../src/providers/gpti2Image.js");
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        balance_vnd: 50000,
+        rpm: 10,
+      }),
+    } as unknown as Response);
+
+    const balance = await checkGpti2Balance("sk-valid-key");
+    expect(balance.balance_vnd).toBe(50000);
+    expect(balance.rpm).toBe(10);
   });
 });
