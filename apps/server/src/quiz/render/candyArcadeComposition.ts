@@ -4,6 +4,8 @@ import type { DirectorPlan, QuizConfig, QuizTimeline, QuizV2 } from "@studio/sha
 import { getQuizVisualTemplate } from "../visual/registry.js";
 import { ambientPhaseSeconds, motionCssClass, textLayout, visualAnswerState } from "../visual/candyArcade.js";
 import type { QuizTemplateScene } from "../visual/types.js";
+import { defaultBgmRegistry } from "../audio/bgmRegistry.js";
+
 
 export type CandyArcadeCompositionInput = {
   quiz: QuizV2;
@@ -87,11 +89,14 @@ export function buildCandyArcadeCompositionBundle(input: CandyArcadeCompositionI
 
   const scenes = clips.filter(Boolean).map(toSubComposition);
   const audioSrc = source(input.audioPath);
+  const bgmClips = buildBgmClips(duration, input.assets);
   const sfxClips = buildSfxClips(events, input.assets);
   const audioTags = [
     `<audio id="quiz-narration" class="clip" data-start="0" data-duration="${duration.toFixed(3)}" data-track-index="2" data-volume="1" src="${audioSrc}"></audio>`,
+    ...bgmClips,
     ...sfxClips,
   ].join("\n");
+
   return {
     html: `<!doctype html><html><head><meta charset="utf-8"><title>Candy Arcade Quiz</title><style>${candyArcadeCss()}</style></head><body><main id="stage" data-composition-id="quiz-v2-candy-arcade" data-no-timeline data-start="0" data-width="1920" data-height="1080" data-duration="${duration.toFixed(3)}" data-fps="30">${scenes.map(subCompositionMount).join("\n")}\n${audioTags}</main><script>window.__playerReady=true;window.__renderReady=true;</script></body></html>`,
     files: Object.fromEntries(scenes.map((scene) => [`compositions/${scene.id}.html`, scene.html])),
@@ -244,6 +249,13 @@ function assetFor(assets: Record<string, string>, ...keys: string[]): string | n
 function source(value: string): string {
   if (/^(data:|https?:|file:)/i.test(value) || value.startsWith("./") || value.startsWith("../")) return value;
   return pathToFileURL(value).href;
+}
+
+function buildBgmClips(duration: number, assets?: Record<string, string>): string[] {
+  const schedule = defaultBgmRegistry.resolveBgmSchedule(duration, { assets, bpmPreference: "120_bpm_upbeat" });
+  return schedule.map((item) => {
+    return `<audio id="${item.id}" class="clip bgm-clip" data-start="${item.startSeconds.toFixed(3)}" data-duration="${item.durationSeconds.toFixed(3)}" data-track-index="4" data-volume="${item.volume.toFixed(2)}" src="${item.src}"></audio>`;
+  });
 }
 
 function buildSfxClips(events: QuizTimeline["events"], assets?: Record<string, string>): string[] {

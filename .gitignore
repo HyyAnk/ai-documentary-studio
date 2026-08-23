@@ -46,3 +46,12 @@ output/
 # Machine-local Documentary Studio configuration.
 .documentary-studio/config.json
 .documentary-studio/*.json
+
+# Heavy media assets managed via GitHub Releases
+assets/audio/bgm/tracks/*.mp3
+!assets/audio/bgm/tracks/.gitkeep
+assets/audio/bgm/*.zip
+dist-assets/
+*.zip
+
+
