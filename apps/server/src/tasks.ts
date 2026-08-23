@@ -2044,7 +2044,7 @@ export function normalizeQuizBeatMetadata(beats: Beat[]): Beat[] {
     if (!quiz || ["intro", "outro"].includes(quiz.phase) || !quiz.question_number) continue;
     const canonicalAnswer = canonicalizeVisibleQuizAnswer(quiz.choices, quiz.answer);
     if (!quiz.question.trim() || quiz.choices.length < 2 || !canonicalAnswer) continue;
-    if (!canonicalByQuestion.has(quiz.question_number)) {
+    if (!canonicalByQuestion.has(quiz.question_number) || (!canonicalByQuestion.get(quiz.question_number)!.image_prompt.trim() && quiz.image_prompt.trim())) {
       canonicalByQuestion.set(quiz.question_number, {
         ...quiz,
         choices: quiz.choices.map(stripQuizChoiceLabel),
@@ -2074,7 +2074,15 @@ export function normalizeQuizBeatMetadata(beats: Beat[]): Beat[] {
     if (!canonical) return beatWithSources;
     const ownAnswer = canonicalizeVisibleQuizAnswer(quiz.choices, quiz.answer);
     if (ownAnswer) {
-      return { ...beatWithSources, quiz: { ...quiz, choices: quiz.choices.map(stripQuizChoiceLabel), answer: ownAnswer } };
+      return {
+        ...beatWithSources,
+        quiz: {
+          ...quiz,
+          choices: quiz.choices.map(stripQuizChoiceLabel),
+          answer: ownAnswer,
+          image_prompt: quiz.image_prompt.trim() || canonical.image_prompt,
+        },
+      };
     }
     return {
       ...beatWithSources,

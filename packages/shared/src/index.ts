@@ -165,7 +165,7 @@ export const QuizQuestionSchema = z.object({
   explanation: z.string().trim().min(1).max(600),
   fun_fact: z.string().trim().max(600).default(""),
   source_ids: z.string().min(1).array().default([]),
-  visual_opportunity: z.string().trim().max(500).default(""),
+  visual_opportunity: z.string().trim().max(1000).default(""),
   validation: QuizQuestionValidationSchema.default({}),
 }).superRefine((question, ctx) => {
   const choiceIds = new Set<string>();

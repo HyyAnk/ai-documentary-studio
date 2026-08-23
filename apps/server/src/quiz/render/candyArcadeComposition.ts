@@ -210,7 +210,7 @@ function answerCards(question: QuizV2["questions"][number], assets: Record<strin
     const layout = textLayout(choice.text, "choice");
     const optionAsset = assetFor(assets, `asset-${question.id}-${choice.id}`);
     const phaseSeconds = ambientPhaseSeconds("float", index, question.id);
-    return `<div class="answer-card ${state} choice-tier-${layout.tier}" style="--item-phase:${phaseSeconds}s" data-layout-allow-occlusion data-layout-allow-overflow><b>${String.fromCharCode(65 + index)}</b>${optionAsset ? `<img src="${escAttr(optionAsset)}" alt="">` : ""}<span>${esc(choice.text)}</span>${state === "answer-correct" ? "<i class=\"answer-check\" data-layout-allow-occlusion>✓</i>" : state === "answer-incorrect" ? "<i class=\"answer-cross\" data-layout-allow-occlusion>×</i>" : ""}</div>`;
+    return `<div class="answer-card ${state} choice-tier-${layout.tier}" style="--item-phase:${phaseSeconds}s" data-layout-allow-occlusion data-layout-allow-overflow><b>${String.fromCharCode(65 + index)}</b>${optionAsset ? `<img src="${escAttr(optionAsset)}" alt="">` : ""}<span>${esc(choice.text)}</span>${state === "answer-correct" ? "<i class=\"answer-check\" data-layout-ignore aria-hidden=\"true\">✓</i>" : state === "answer-incorrect" ? "<i class=\"answer-cross\" data-layout-ignore aria-hidden=\"true\">×</i>" : ""}</div>`;
   }).join("")}</div>`;
 }
 
@@ -218,7 +218,7 @@ function visualAnswerCards(question: QuizV2["questions"][number], assets: Record
   return `<div class="visual-answer-grid">${question.choices.map((choice, index) => {
     const state = "answer-" + visualAnswerState(choice.id, question.correct_choice_id, "reveal");
     const phaseSeconds = ambientPhaseSeconds("float", index, question.id);
-    return `<div class="visual-answer-card ${state}" style="--item-phase:${phaseSeconds}s" data-layout-allow-occlusion data-layout-allow-overflow>${imageCard(assetFor(assets, `asset-${question.id}-${choice.id}`), choice.text, "option-image", index + question.number * 10)}<div class="visual-answer-label" data-layout-allow-overflow><b>${String.fromCharCode(65 + index)}</b><span>${esc(choice.text)}</span></div>${state === "answer-correct" ? "<i class=\"answer-check\" data-layout-allow-occlusion>✓</i>" : state === "answer-incorrect" ? "<i class=\"answer-cross\" data-layout-allow-occlusion>×</i>" : ""}</div>`;
+    return `<div class="visual-answer-card ${state}" style="--item-phase:${phaseSeconds}s" data-layout-allow-occlusion data-layout-allow-overflow>${imageCard(assetFor(assets, `asset-${question.id}-${choice.id}`), choice.text, "option-image", index + question.number * 10)}<div class="visual-answer-label" data-layout-allow-overflow><b>${String.fromCharCode(65 + index)}</b><span>${esc(choice.text)}</span></div>${state === "answer-correct" ? "<i class=\"answer-check\" data-layout-ignore aria-hidden=\"true\">✓</i>" : state === "answer-incorrect" ? "<i class=\"answer-cross\" data-layout-ignore aria-hidden=\"true\">×</i>" : ""}</div>`;
   }).join("")}</div>`;
 }
 
@@ -228,7 +228,7 @@ function thinkingBar(input: { start: number; end: number }): string {
 }
 
 function revealPanel(input: { question: QuizV2["questions"][number]; copy: Copy; isFinal: boolean }, answer: string): string {
-  return `<div class="reveal-panel" aria-label="${escAttr(input.copy.correct)}" data-layout-allow-occlusion><span class="reveal-stamp">✓</span><strong class="reveal-title">${esc(input.copy.correct)}</strong><span class="reveal-answer">${esc(answer)}</span><div class="reveal-sparkles" data-layout-ignore aria-hidden="true"><i>✦</i><i>★</i><i>✦</i></div></div><div class="fact-card" data-layout-allow-occlusion><span>${esc(input.question.fun_fact ? input.copy.funFact : input.copy.why)}</span><p>${esc(input.question.fun_fact || input.question.explanation)}</p></div>`;
+  return `<div class="reveal-panel" aria-label="${escAttr(input.copy.correct)}" data-layout-allow-occlusion><span class="reveal-stamp" data-layout-ignore aria-hidden="true">✓</span><strong class="reveal-title">${esc(input.copy.correct)}</strong><span class="reveal-answer">${esc(answer)}</span><div class="reveal-sparkles" data-layout-ignore aria-hidden="true"><i>✦</i><i>★</i><i>✦</i></div></div><div class="fact-card" data-layout-allow-occlusion><span>${esc(input.question.fun_fact ? input.copy.funFact : input.copy.why)}</span><p>${esc(input.question.fun_fact || input.question.explanation)}</p></div>`;
 }
 
 function sceneDecorations(questionIndex: number): string {
