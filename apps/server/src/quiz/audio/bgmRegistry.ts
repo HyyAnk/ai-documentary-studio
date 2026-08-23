@@ -146,9 +146,8 @@ export class BgmRegistry {
     const longEnoughTracks = available.filter((t) => t.duration_seconds >= duration - 1.0);
     if (longEnoughTracks.length > 0) {
       const track = longEnoughTracks[seed % longEnoughTracks.length]!;
-      const trackFile = path.join(this.bgmDir, track.path);
       const customAsset = options?.assets?.[`bgm:${track.id}`] ?? options?.assets?.[track.filename];
-      const src = customAsset ? formatAudioSource(customAsset) : formatAudioSource(trackFile);
+      const src = customAsset ? formatAudioSource(customAsset) : `./bgm/${track.filename}`;
 
       return [
         {
@@ -175,9 +174,8 @@ export class BgmRegistry {
       const track = available[trackIndex]!;
       const segmentDuration = Math.min(remaining, track.duration_seconds);
 
-      const trackFile = path.join(this.bgmDir, track.path);
       const customAsset = options?.assets?.[`bgm:${track.id}`] ?? options?.assets?.[track.filename];
-      const src = customAsset ? formatAudioSource(customAsset) : formatAudioSource(trackFile);
+      const src = customAsset ? formatAudioSource(customAsset) : `./bgm/${track.filename}`;
 
       placements.push({
         id: `bgm-clip-${index + 1}-${Math.round(cursor * 1000)}`,

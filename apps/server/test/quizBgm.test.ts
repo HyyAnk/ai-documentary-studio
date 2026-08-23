@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { QuizV2Schema } from "@studio/shared";
 import { BgmRegistry, defaultBgmRegistry } from "../src/quiz/audio/bgmRegistry.js";
 import { buildQuizVoicePlan } from "../src/quiz/audio/voicePlan.js";
@@ -113,6 +113,9 @@ describe("BGM Registry and Audio Pipeline", () => {
     expect(bundle.html).toContain('class="clip bgm-clip"');
     expect(bundle.html).toContain('data-track-index="4"');
     expect(bundle.html).toContain('data-volume="0.18"');
+    expect(bundle.html).toContain('src="./bgm/');
+    expect(bundle.html).not.toContain('src="file:///');
+
 
     // Check narration and SFX tracks coexist cleanly
     expect(bundle.html).toContain('id="quiz-narration"');

@@ -842,6 +842,28 @@ export class TaskManager extends EventEmitter {
           }
         }
       }
+      const bgmTargetDir = path.join(renderRoot, "bgm");
+      await mkdir(bgmTargetDir, { recursive: true });
+      const bgmCandidates = [
+        path.join(this.repository.rootDirectory, "assets", "audio", "bgm", "tracks"),
+        path.resolve("assets", "audio", "bgm", "tracks"),
+        path.join(this.repository.rootDirectory, "assets", "audio", "bgm"),
+        path.resolve("assets", "audio", "bgm"),
+      ];
+      for (const candidateDir of bgmCandidates) {
+        try {
+          const entries = await readdir(candidateDir);
+          for (const entry of entries) {
+            if (entry.endsWith(".mp3")) {
+              await copyFile(path.join(candidateDir, entry), path.join(bgmTargetDir, entry));
+            }
+          }
+          break;
+        } catch {
+          // try next candidate
+        }
+      }
+
       const sourceFingerprint = renderSourceFingerprint(html, narration.modified_at, narration.size, assetResolution?.assets ?? []);
       const checkpointPath = path.join(renderRoot, "render-checkpoint.json");
       const checkpoint = await readRenderCheckpoint(checkpointPath);
