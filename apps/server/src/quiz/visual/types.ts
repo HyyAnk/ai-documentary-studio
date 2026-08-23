@@ -6,7 +6,7 @@ export type QuizVisualTokens = {
   typography: Record<"question" | "answer" | "badge" | "label" | "counter" | "fact" | "interstitial", { family: string; weight: number; size: number; lineHeight: number; letterSpacing: number; shadow: string }>;
   shadow: { card: string; lift: string; sticker: string; glow: string };
   motion: { enterMs: number; staggerMs: number; revealMs: number; transitionMs: number; ambientSeconds: number; easing: Record<"pop" | "out" | "soft" | "linear", string> };
-  zIndex: { background: number; ambient: number; content: number; mascot: number; overlay: number; transition: number };
+  zIndex: { background: number; ambient: number; decor?: number; content: number; header?: number; phaseRegion?: number; statusBadge?: number; reward?: number; mascot: number; overlay: number; transition: number };
   safeArea: { top: number; right: number; bottom: number; left: number };
 };
 

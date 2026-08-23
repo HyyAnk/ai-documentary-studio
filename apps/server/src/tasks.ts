@@ -822,6 +822,26 @@ export class TaskManager extends EventEmitter {
         await mkdir(path.dirname(filePath), { recursive: true });
         await writeFile(filePath, content, "utf8");
       }
+      const sfxTargetDir = path.join(renderRoot, "sfx");
+      await mkdir(sfxTargetDir, { recursive: true });
+      const sfxFiles = ["ui_pop.wav", "bubble_splash.wav", "lightning_brush.wav", "countdown_tick.wav", "countdown_final.wav", "correct_ding.wav", "correct_triumph.wav", "streak.wav"];
+      const sfxCandidates = [
+        path.join(this.repository.rootDirectory, "templates", "sfx"),
+        path.join(this.repository.rootDirectory, "assets", "audio", "sfx"),
+        path.resolve("templates", "sfx"),
+        path.resolve("assets", "audio", "sfx"),
+      ];
+      for (const file of sfxFiles) {
+        for (const candidateDir of sfxCandidates) {
+          const candidateFile = path.join(candidateDir, file);
+          try {
+            await copyFile(candidateFile, path.join(sfxTargetDir, file));
+            break;
+          } catch {
+            // try next candidate
+          }
+        }
+      }
       const sourceFingerprint = renderSourceFingerprint(html, narration.modified_at, narration.size, assetResolution?.assets ?? []);
       const checkpointPath = path.join(renderRoot, "render-checkpoint.json");
       const checkpoint = await readRenderCheckpoint(checkpointPath);

@@ -100,7 +100,7 @@ describe("Candy Arcade visual regression contract", () => {
     expect(html).toContain("@keyframes ray-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }");
     expect(html).not.toContain("translate(-50%,-50%) rotate(360deg)");
     expect(phaseCss).toContain("position: absolute");
-    expect(phaseCss).toContain("bottom: 54px");
+    expect(phaseCss).toContain("bottom: 24px");
     expect(html).not.toContain("grid-area: phase");
     expect(html).not.toContain("Think it through!");
     expect(html).not.toContain("Lock in your answer!");

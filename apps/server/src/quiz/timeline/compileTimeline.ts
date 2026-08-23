@@ -65,13 +65,15 @@ export function compileQuizTimeline(input: TimelineCompileInput): QuizTimeline {
       choiceNarrationEnd = round(choiceAt + choiceDuration);
     }
     const thinkingStart = round(choiceNarrationEnd + policy.thinking_settle_seconds);
-    const thinkingSeconds = Math.min(policy.maximum_thinking_seconds, Math.max(policy.minimum_thinking_seconds, beat.thinking_seconds));
-    add({ type: "countdown.start", at_seconds: thinkingStart, duration_seconds: thinkingSeconds, question_id: question.id, choice_id: null, segment_id: null, payload: { seconds: thinkingSeconds } });
-    add({ type: "mascot.state", at_seconds: thinkingStart, duration_seconds: 0, question_id: question.id, choice_id: null, segment_id: null, payload: { state: "thinking", phase: "thinking_start" } });
     const thinkingSegment = input.voicePlan.segments.find((segment) => segment.segment_id === question.id + ":thinking");
     const thinkingNarrationDuration = thinkingSegment ? scheduleNarration(thinkingSegment.segment_id, thinkingStart, thinkingSegment.text, question.id) : 0;
     const thinkingNarrationEnd = round(thinkingStart + thinkingNarrationDuration);
-    const countdownStart = round(Math.max(thinkingStart + thinkingSeconds - policy.countdown_seconds, thinkingNarrationEnd + policy.narration_gap_seconds));
+    const earliestCountdownStart = round(thinkingNarrationEnd + policy.post_prompt_thinking_seconds);
+    const minRequiredThinkingSeconds = round(earliestCountdownStart + policy.countdown_seconds - thinkingStart);
+    const thinkingSeconds = round(Math.min(policy.maximum_thinking_seconds, Math.max(policy.minimum_thinking_seconds, beat.thinking_seconds, minRequiredThinkingSeconds)));
+    add({ type: "countdown.start", at_seconds: thinkingStart, duration_seconds: thinkingSeconds, question_id: question.id, choice_id: null, segment_id: null, payload: { seconds: thinkingSeconds } });
+    add({ type: "mascot.state", at_seconds: thinkingStart, duration_seconds: 0, question_id: question.id, choice_id: null, segment_id: null, payload: { state: "thinking", phase: "thinking_start" } });
+    const countdownStart = round(Math.max(thinkingStart + thinkingSeconds - policy.countdown_seconds, earliestCountdownStart));
     const thinkingPulseAt = round(thinkingStart + Math.max(1.4, (countdownStart - thinkingStart) / 2));
     if (thinkingPulseAt < countdownStart - 0.18) add({ type: "mascot.state", at_seconds: thinkingPulseAt, duration_seconds: 0, question_id: question.id, choice_id: null, segment_id: null, payload: { state: "encourage", phase: "thinking_pulse" } });
     for (let tick = 0; tick < policy.countdown_seconds; tick += 1) {
@@ -80,7 +82,7 @@ export function compileQuizTimeline(input: TimelineCompileInput): QuizTimeline {
     const countdownSegment = input.voicePlan.segments.find((segment) => segment.segment_id === question.id + ":countdown");
     const countdownNarrationDuration = countdownSegment ? scheduleNarration(countdownSegment.segment_id, countdownStart, countdownSegment.text, question.id) : 0;
     const countdownNarrationEnd = round(countdownStart + countdownNarrationDuration);
-    const revealAt = round(Math.max(thinkingStart + thinkingSeconds + policy.reveal_delay_seconds, countdownNarrationEnd + policy.narration_gap_seconds));
+    const revealAt = round(Math.max(thinkingStart + thinkingSeconds + policy.reveal_delay_seconds, countdownNarrationEnd + policy.narration_gap_seconds, countdownStart + policy.countdown_seconds + policy.reveal_delay_seconds));
     const correctChoice = question.choices.find((choice) => choice.id === question.correct_choice_id);
     add({ type: "answer.reveal", at_seconds: revealAt, duration_seconds: policy.reveal_seconds, question_id: question.id, choice_id: question.correct_choice_id, segment_id: null, payload: { canonical_choice_id: question.correct_choice_id, answer_text: correctChoice?.text ?? "" } });
     add({ type: "answer.dim_wrong", at_seconds: revealAt, duration_seconds: policy.reveal_seconds, question_id: question.id, choice_id: null, segment_id: null, payload: { wrong_choice_ids: question.choices.filter((choice) => choice.id !== question.correct_choice_id).map((choice) => choice.id) } });

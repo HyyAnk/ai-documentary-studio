@@ -43,6 +43,9 @@ describe("Candy Arcade visual template", () => {
     const bundle = buildCandyArcadeCompositionBundle({ quiz, director, timeline, theme: "candy_arcade", audioPath: "./narration.wav", narrationDurationSeconds: timeline.duration_seconds });
 
     expect(bundle.html).toContain('data-composition-src="compositions/candy-intro.html"');
+    expect(bundle.html).toContain('class="clip sfx-clip"');
+    expect(bundle.html).toContain('ui_pop.wav');
+    expect(bundle.html).toContain('correct_ding.wav');
     expect(Object.keys(bundle.files)).toContain("compositions/candy-intro.html");
     expect(Object.values(bundle.files).every((file) => !file.includes('src="../'))).toBe(true);
     expect(Object.values(bundle.files).every((file) => !file.includes("data-start="))).toBe(true);
@@ -153,8 +156,8 @@ describe("Candy Arcade visual template", () => {
     expect(html).toContain("splash-brand");
     expect(html).toContain(".decor-7 { left: 30%; top: 8%;");
     expect(html).toContain("is-final-scene");
-    expect(html).not.toContain("is-final::after");
-    expect(html).toContain(".reward-fx { position: absolute; z-index: 4; inset: 0;");
+    expect(html).toContain(".game-stage { position: relative; z-index: 3;");
+    expect(html).toContain(".reward-fx { position: absolute; z-index: 7; inset: 0;");
   });
 
   it("keeps the 50-question maximum to one scene and one hero image per question", () => {

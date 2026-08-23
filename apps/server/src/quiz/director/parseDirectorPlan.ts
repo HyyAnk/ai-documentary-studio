@@ -12,7 +12,7 @@ export function parseDirectorPlanOutput(output: string, quiz: QuizV2): DirectorP
 }
 
 export function createDefaultDirectorPlan(quiz: QuizV2): DirectorPlan {
-  const minimumThinking: Record<QuizV2["age_band"], number> = { "4-6": 5.8, "7-9": 5.2, "10-12": 4.8, family: 5 };
+  const minimumThinking: Record<QuizV2["age_band"], number> = { "4-6": 7.5, "7-9": 7, "10-12": 6.8, family: 7 };
   const beats: DirectorPlan["beats"] = quiz.questions.map((question, index): DirectorPlan["beats"][number] => {
     const archetype = question.format === "image_guess" || question.format === "odd_one_out" ? "visual_multiple_choice" : question.format === "true_false" ? "true_false" : index % 3 === 1 ? "illustrated_multiple_choice" : "text_multiple_choice";
     const isFinal = index === quiz.questions.length - 1;

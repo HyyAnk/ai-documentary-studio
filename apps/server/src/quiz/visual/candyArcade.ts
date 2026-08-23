@@ -17,7 +17,7 @@ export const candyArcadeTokens: QuizVisualTemplate["tokens"] = {
   },
   shadow: { card: "0 18px 0 rgba(13, 35, 71, .18)", lift: "0 25px 36px rgba(13, 35, 71, .22)", sticker: "0 10px 0 rgba(13, 35, 71, .24)", glow: "0 0 0 8px rgba(255,255,255,.22), 0 0 42px rgba(255,255,255,.55)" },
   motion: { enterMs: 440, staggerMs: 120, revealMs: 550, transitionMs: 920, ambientSeconds: 14, easing: { pop: "cubic-bezier(.18,1.42,.34,1)", out: "cubic-bezier(.22,.8,.3,1)", soft: "cubic-bezier(.4,0,.2,1)", linear: "linear" } },
-  zIndex: { background: 0, ambient: 1, content: 3, mascot: 5, overlay: 8, transition: 10 },
+  zIndex: { background: 0, ambient: 1, decor: 2, content: 3, header: 4, phaseRegion: 5, statusBadge: 6, reward: 7, mascot: 4, overlay: 8, transition: 10 },
   safeArea: { top: 64, right: 96, bottom: 58, left: 96 },
 };
 

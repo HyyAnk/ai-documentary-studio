@@ -32,8 +32,10 @@ async function main() {
   log("INFO", `${reuseRoot ? "Re-rendering" : "Creating"} deterministic demo at ${root}`, "startup");
   log("INFO", "Mode=Fastify injection, renderer=HyperFrames, assets=ShopAIKey provider with template fallback, OS input=none", "startup");
   if (!reuseRoot) {
-    await mkdir(path.join(root, "templates"), { recursive: true });
+    await mkdir(path.join(root, "templates", "sfx"), { recursive: true });
     await Promise.all(["example_channel_dna.md", "quiz_channel_dna.md", "example_style_guide.md"].map((file) => copyFile(path.join(workspace, "templates", file), path.join(root, "templates", file))));
+    const sfxFiles = ["ui_pop.wav", "bubble_splash.wav", "lightning_brush.wav", "countdown_tick.wav", "countdown_final.wav", "correct_ding.wav", "correct_triumph.wav", "streak.wav"];
+    await Promise.all(sfxFiles.map((file) => copyFile(path.join(workspace, "templates", "sfx", file), path.join(root, "templates", "sfx", file))));
   }
   const app = await buildApp(root, { environmentRoot: workspace });
   await app.server.inject({ method: "POST", url: "/api/engine", payload: { active_engine: "antigravity" } });

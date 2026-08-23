@@ -5,7 +5,7 @@ import {
   type QuizV2,
 } from "@studio/shared";
 
-const minimumThinkingSeconds: Record<QuizV2["age_band"], number> = { "4-6": 5.8, "7-9": 5.2, "10-12": 4.8, family: 5 };
+const minimumThinkingSeconds: Record<QuizV2["age_band"], number> = { "4-6": 7.2, "7-9": 6.8, "10-12": 6.5, family: 6.8 };
 
 export function validateDirectorPlan(quiz: QuizV2, value: unknown): { plan: DirectorPlan | null; issues: QuizIssue[] } {
   const parsed = DirectorPlanSchema.safeParse(value);

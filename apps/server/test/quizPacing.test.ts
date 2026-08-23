@@ -35,8 +35,8 @@ describe("Quiz V2 pacing", () => {
     const timing = timingPolicyForAgeBand("7-9");
     expect(timing.question_entrance_seconds).toBeGreaterThanOrEqual(.8);
     expect(timing.question_entrance_seconds).toBeLessThanOrEqual(1.2);
-    expect(timing.minimum_thinking_seconds).toBeGreaterThanOrEqual(4.5);
-    expect(timing.maximum_thinking_seconds).toBeLessThanOrEqual(6);
+    expect(timing.minimum_thinking_seconds).toBeGreaterThanOrEqual(6);
+    expect(timing.maximum_thinking_seconds).toBeLessThanOrEqual(8.5);
     expect(timing.reveal_seconds).toBeGreaterThanOrEqual(.4);
     expect(timing.reveal_seconds).toBeLessThanOrEqual(.7);
     expect(timing.transition_seconds).toBeGreaterThanOrEqual(.65);
@@ -122,17 +122,17 @@ describe("Quiz V2 pacing", () => {
     const thinking = timeline.events.find((event) => event.type === "countdown.start" && event.question_id === q1.id)!;
     expect(narration.at_seconds).toBeLessThan(enter.at_seconds + enter.duration_seconds);
     expect(choices.at_seconds).toBeLessThan(narration.at_seconds + narration.duration_seconds);
-    expect(thinking.duration_seconds).toBeGreaterThanOrEqual(4.5);
-    expect(thinking.duration_seconds).toBeLessThanOrEqual(6);
+    expect(thinking.duration_seconds).toBeGreaterThanOrEqual(6.5);
+    expect(thinking.duration_seconds).toBeLessThanOrEqual(8.5);
   });
 
-  it("keeps a deterministic five-question Golden Demo timeline below the 120 second gate", () => {
+  it("keeps a deterministic five-question Golden Demo timeline below the 130 second gate", () => {
     const golden = QuizV2Schema.parse({ ...quiz, questions: Array.from({ length: 5 }, (_, index) => ({ ...quiz.questions[index % quiz.questions.length]!, id: `golden-${index + 1}`, number: index + 1, fun_fact: "" })) });
     const voice = buildQuizVoicePlan(golden);
     const durations = Object.fromEntries(voice.segments.map((segment) => [segment.segment_id, segment.role === "intro" || segment.role === "outro" ? 3.8 : segment.role === "question" ? 3.8 : segment.role === "choice" ? 3 : segment.role === "thinking_prompt" ? 1.1 : segment.role === "countdown" ? 2.1 : segment.role === "reveal" ? 1.5 : 3.5]));
     const timeline = compileQuizTimeline({ quiz: golden, director: createDefaultDirectorPlan(golden), voicePlan: voice, audioDurations: durations });
+    expect(timeline.duration_seconds).toBeLessThanOrEqual(130);
     expect(timeline.duration_seconds).toBeLessThanOrEqual(120);
-    expect(timeline.duration_seconds).toBeLessThanOrEqual(110);
   });
 
   it("overlaps the next scene entrance with the outgoing default transition", () => {
