@@ -28,15 +28,27 @@ export function parseHyperframesCheckReport(output: string | undefined): Hyperfr
   }
 }
 
+const DECORATIVE_GLYPH_PATTERN = /^[\s\u00A0\u2000-\u200B✦★•✓×?✧⚡○-]*$/u;
+
+export function isDecorativeContrastFinding(finding: HyperframesFinding): boolean {
+  if (!finding.text) return false;
+  return DECORATIVE_GLYPH_PATTERN.test(finding.text);
+}
+
+export function actionableContrastFindings(report: HyperframesCheckReport | null): HyperframesFinding[] {
+  return (report?.contrast?.findings ?? []).filter((finding) => !isDecorativeContrastFinding(finding));
+}
+
 export function hasHyperframesContrastIssue(report: HyperframesCheckReport | null): boolean {
-  return (report?.contrast?.findings?.length ?? 0) > 0;
+  return actionableContrastFindings(report).length > 0;
 }
 
 export function formatHyperframesCheckFailure(report: HyperframesCheckReport | null, fallback?: string): string {
   if (!report) return `HyperFrames composition check failed${fallback ? `: ${fallback}` : ""}`;
 
+  const contrastFindings = actionableContrastFindings(report);
   const categories = [
-    ["contrast", report.contrast?.findings],
+    ["contrast", contrastFindings.length > 0 ? contrastFindings : report.contrast?.findings],
     ["layout", report.layout?.findings],
     ["runtime", report.runtime?.findings],
     ["motion", report.motion?.findings],

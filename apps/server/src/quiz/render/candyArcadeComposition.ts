@@ -134,11 +134,11 @@ function subCompositionMount(scene: SubComposition): string {
 
 function introClip(end: number, count: number, copy: Copy): string {
   if (end < .08) return "";
-  return `<section id="candy-intro" class="clip candy-scene candy-intro" data-start="0" data-duration="${end.toFixed(3)}" data-track-index="0"><div class="intro-rays"></div><div class="intro-dot dot-a"></div><div class="intro-dot dot-b"></div><div class="intro-card"><span>QUIZ TIME</span><h1>${esc(copy.ready)}</h1><p>${count} ${esc(copy.questions(count))}</p><div class="intro-stars">✦&nbsp;&nbsp;★&nbsp;&nbsp;✦</div></div><div class="brand-mascot mascot-wave">✦</div></section>`;
+  return `<section id="candy-intro" class="clip candy-scene candy-intro" data-start="0" data-duration="${end.toFixed(3)}" data-track-index="0"><div class="intro-rays"></div><div class="intro-dot dot-a"></div><div class="intro-dot dot-b"></div><div class="intro-card"><span>QUIZ TIME</span><h1>${esc(copy.ready)}</h1><p>${count} ${esc(copy.questions(count))}</p><div class="intro-stars" data-layout-ignore aria-hidden="true">✦&nbsp;&nbsp;★&nbsp;&nbsp;✦</div></div><div class="brand-mascot mascot-wave" data-layout-ignore aria-hidden="true">✦</div></section>`;
 }
 
 function outroClip(start: number, end: number, count: number, copy: Copy): string {
-  return `<section id="candy-outro" class="clip candy-scene candy-outro" data-start="${start.toFixed(3)}" data-duration="${Math.max(.04, end - start).toFixed(3)}" data-track-index="0"><div class="intro-rays"></div><div class="outro-blob blob-a"></div><div class="outro-blob blob-b"></div><div class="outro-card"><span>${esc(copy.scorePrompt)}</span><h1>${esc(copy.playAgain)}</h1><p>${count} ${esc(copy.questions(count))}</p><div class="outro-stars">★&nbsp;&nbsp;✦&nbsp;&nbsp;★</div></div></section>`;
+  return `<section id="candy-outro" class="clip candy-scene candy-outro" data-start="${start.toFixed(3)}" data-duration="${Math.max(.04, end - start).toFixed(3)}" data-track-index="0"><div class="intro-rays"></div><div class="outro-blob blob-a"></div><div class="outro-blob blob-b"></div><div class="outro-card"><span>${esc(copy.scorePrompt)}</span><h1>${esc(copy.playAgain)}</h1><p>${count} ${esc(copy.questions(count))}</p><div class="outro-stars" data-layout-ignore aria-hidden="true">★&nbsp;&nbsp;✦&nbsp;&nbsp;★</div></div></section>`;
 }
 
 function questionClip(input: { start: number; choicesStart: number; revealStart: number; rewardStart: number; end: number; question: QuizV2["questions"][number]; questionIndex: number; count: number; visual: QuizTemplateScene; copy: Copy; assets: Record<string, string>; isFinal: boolean }): string {
@@ -153,7 +153,7 @@ function questionClip(input: { start: number; choicesStart: number; revealStart:
   const visualAnswers = visual.layoutId === "visual_choices_three" ? visualAnswerCards(question, input.assets, input.questionIndex) : "";
   const body = `<div class="game-stage" data-layout-allow-overflow><div class="question-title question-tier-${questionLayout.tier}" data-layout-allow-occlusion><h1>${highlightQuestionMarkup(question.question, question.visual_opportunity)}</h1></div>${hero}${visualAnswers || answers}<div class="phase-region">${thinkingBar({ start: input.start, end: input.revealStart })}${revealPanel(input, answer?.text ?? "")}</div></div>`;
   const streak = input.questionIndex >= 2 ? " streak" : "";
-  const streakCue = input.questionIndex >= 2 ? "<i aria-hidden=\"true\">✦</i>" : "";
+  const streakCue = input.questionIndex >= 2 ? "<i aria-hidden=\"true\" data-layout-ignore>✦</i>" : "";
   return `<section id="quiz-q${question.number}-${Math.round(input.start * 1000)}" class="${classNames}" ${config} data-start="${input.start.toFixed(3)}" data-duration="${Math.max(.04, input.end - input.start).toFixed(3)}" data-track-index="0"><div class="bg-gradient"></div><div class="bg-rays"></div><div class="bg-pattern pattern-circles"></div><div class="bg-pattern pattern-sprinkles"></div><div class="bg-shape shape-a" data-layout-allow-overflow></div>${sceneDecorations(input.questionIndex)}<header class="game-header" data-layout-allow-occlusion><div class="episode-progress${streak}" data-layout-allow-occlusion><span>${esc(input.copy.question)}</span><b>${question.number} / ${input.count}</b>${streakCue}</div></header>${body}${rewardFx(input.isFinal ? "big" : "small")}</section>`;
 }
 
@@ -161,14 +161,14 @@ function transitionClip(input: { start: number; end: number; visual: QuizTemplat
   if (input.end - input.start < .04) return "";
   const special = input.visual.transitionId === "lightning_brush";
   const body = special
-    ? `<div class="brush brush-one" data-layout-allow-occlusion data-layout-allow-overflow></div><div class="brush brush-two" data-layout-allow-occlusion data-layout-allow-overflow></div><div class="transition-mark" data-layout-ignore>✦</div>`
-    : `<div class="splash-bed" data-layout-allow-occlusion data-layout-allow-overflow></div><i class="splash-bubble splash-bubble-a" data-layout-allow-occlusion data-layout-allow-overflow></i><i class="splash-bubble splash-bubble-b" data-layout-allow-occlusion data-layout-allow-overflow></i><i class="splash-bubble splash-bubble-c" data-layout-allow-occlusion data-layout-allow-overflow></i><i class="splash-bubble splash-bubble-d" data-layout-allow-occlusion data-layout-allow-overflow></i><i class="splash-bubble splash-bubble-e" data-layout-allow-occlusion data-layout-allow-overflow></i><i class="splash-bubble splash-bubble-f" data-layout-allow-occlusion data-layout-allow-overflow></i><div class="splash-brand" data-layout-ignore>✦</div><div class="splash-particles" data-layout-ignore><i>✦</i><i>•</i><i>✦</i><i>•</i></div><div class="splash-release" data-layout-allow-occlusion data-layout-allow-overflow></div>`;
+    ? `<div class="brush brush-one" data-layout-allow-occlusion data-layout-allow-overflow></div><div class="brush brush-two" data-layout-allow-occlusion data-layout-allow-overflow></div><div class="transition-mark" data-layout-ignore aria-hidden="true">✦</div>`
+    : `<div class="splash-bed" data-layout-allow-occlusion data-layout-allow-overflow></div><i class="splash-bubble splash-bubble-a" data-layout-allow-occlusion data-layout-allow-overflow></i><i class="splash-bubble splash-bubble-b" data-layout-allow-occlusion data-layout-allow-overflow></i><i class="splash-bubble splash-bubble-c" data-layout-allow-occlusion data-layout-allow-overflow></i><i class="splash-bubble splash-bubble-d" data-layout-allow-occlusion data-layout-allow-overflow></i><i class="splash-bubble splash-bubble-e" data-layout-allow-occlusion data-layout-allow-overflow></i><i class="splash-bubble splash-bubble-f" data-layout-allow-occlusion data-layout-allow-overflow></i><div class="splash-brand" data-layout-ignore aria-hidden="true">✦</div><div class="splash-particles" data-layout-ignore aria-hidden="true"><i>✦</i><i>•</i><i>✦</i><i>•</i></div><div class="splash-release" data-layout-allow-occlusion data-layout-allow-overflow></div>`;
   return `<section id="candy-transition-${Math.round(input.start * 1000)}" class="clip candy-transition transition-${input.visual.transitionId}" data-layout-ignore data-layout-allow-occlusion data-layout-allow-overflow style="--from:${input.visual.palette.accent};--to:${input.nextPalette.backgroundPrimary};--ink:${input.visual.palette.text};--clip-start:${input.start.toFixed(3)}s" data-start="${input.start.toFixed(3)}" data-duration="${(input.end - input.start).toFixed(3)}" data-track-index="1">${body}</section>`;
 }
 
 function rewardFx(intensity: "small" | "big"): string {
   const particles = intensity === "big" ? ["★", "✦", "★", "✦", "★", "✦", "★", "✦", "★"] : ["✦", "★", "✦", "★", "✦", "★", "✦"];
-  return `<div class="reward-fx reward-${intensity}" data-layout-ignore>${particles.map((particle) => `<i>${particle}</i>`).join("")}</div>`;
+  return `<div class="reward-fx reward-${intensity}" data-layout-ignore aria-hidden="true">${particles.map((particle) => `<i>${particle}</i>`).join("")}</div>`;
 }
 
 function imageCard(asset: string | null, subject: string, className: string, seed: number): string {
@@ -213,11 +213,11 @@ function visualAnswerCards(question: QuizV2["questions"][number], assets: Record
 
 function thinkingBar(input: { start: number; end: number }): string {
   const style = `style="--timer-duration:${Math.max(.05, input.end - input.start).toFixed(3)}s"`;
-  return `<div class="thinking-bar" ${style}><div class="thinking-track" aria-label="Quiz timer" data-layout-allow-overflow><div class="timer-progress"></div><span class="timer-marker" data-layout-allow-occlusion>?</span><div class="timer-sparkles" data-layout-ignore><i>✦</i><i>•</i><i>✦</i></div></div></div>`;
+  return `<div class="thinking-bar" ${style}><div class="thinking-track" aria-label="Quiz timer" data-layout-allow-overflow><div class="timer-progress"></div><span class="timer-marker" data-layout-allow-occlusion>?</span><div class="timer-sparkles" data-layout-ignore aria-hidden="true"><i>✦</i><i>•</i><i>✦</i></div></div></div>`;
 }
 
 function revealPanel(input: { question: QuizV2["questions"][number]; copy: Copy; isFinal: boolean }, answer: string): string {
-  return `<div class="reveal-panel" aria-label="${escAttr(input.copy.correct)}" data-layout-allow-occlusion><div class="reveal-stamp">✓</div><strong>${esc(input.copy.correct)}</strong><span>${esc(answer)}</span><div class="reveal-sparkles" data-layout-ignore><i>✦</i><i>★</i><i>✦</i></div></div><div class="fact-card" data-layout-allow-occlusion><span>${esc(input.question.fun_fact ? input.copy.funFact : input.copy.why)}</span><p>${esc(input.question.fun_fact || input.question.explanation)}</p></div>`;
+  return `<div class="reveal-panel" aria-label="${escAttr(input.copy.correct)}" data-layout-allow-occlusion><div class="reveal-stamp">✓</div><strong>${esc(input.copy.correct)}</strong><span>${esc(answer)}</span><div class="reveal-sparkles" data-layout-ignore aria-hidden="true"><i>✦</i><i>★</i><i>✦</i></div></div><div class="fact-card" data-layout-allow-occlusion><span>${esc(input.question.fun_fact ? input.copy.funFact : input.copy.why)}</span><p>${esc(input.question.fun_fact || input.question.explanation)}</p></div>`;
 }
 
 function sceneDecorations(questionIndex: number): string {
