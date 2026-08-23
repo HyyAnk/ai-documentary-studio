@@ -89,6 +89,31 @@ if errorlevel 1 (
 for /f "delims=" %%V in ('pnpm --version 2^>nul') do set "PNPM_VERSION=%%V"
 call :log OK T:setup pnpm "pnpm !PNPM_VERSION! ready"
 
+call :log STEP T:setup ffmpeg "Checking FFmpeg installation"
+where ffmpeg >nul 2>nul
+if errorlevel 1 goto install_ffmpeg
+goto ffmpeg_ready
+
+:install_ffmpeg
+call :log WARN T:setup ffmpeg "FFmpeg was not found; trying winget"
+where winget >nul 2>nul
+if errorlevel 1 (
+  call :log WARN T:setup ffmpeg "winget is unavailable. Install FFmpeg manually or add it to PATH"
+  goto ffmpeg_done
+)
+winget install --id Gyan.FFmpeg -e --accept-source-agreements --accept-package-agreements >nul
+set "PATH=%LOCALAPPDATA%\Microsoft\WinGet\Links;%ProgramFiles%\ffmpeg\bin;%PATH%"
+where ffmpeg >nul 2>nul
+if errorlevel 1 (
+  call :log WARN T:setup ffmpeg "FFmpeg was installed but may require restarting or adding to PATH"
+  goto ffmpeg_done
+)
+
+:ffmpeg_ready
+call :log OK T:setup ffmpeg "FFmpeg ready"
+
+:ffmpeg_done
+
 call :log STEP T:setup antigravity "Checking Google Antigravity active session and CLI"
 if not defined ANTIGRAVITY_LS_ADDRESS (
   for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$p = Get-Process -Name 'language_server' -ErrorAction SilentlyContinue; if ($p) { (Get-NetTCPConnection -OwningProcess $p.Id -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalAddress -in @('127.0.0.1','0.0.0.0') } | Select-Object -First 1).LocalPort }"` ) do (
