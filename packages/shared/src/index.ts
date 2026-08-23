@@ -372,7 +372,7 @@ export const VoiceSegmentRoleSchema = z.enum(["intro", "question", "choice", "th
 export type VoiceSegmentRole = z.infer<typeof VoiceSegmentRoleSchema>;
 export const VoicePhraseDeliverySchema = z.enum(["normal", "emphasis", "question_end", "playful", "warm"]);
 export type VoicePhraseDelivery = z.infer<typeof VoicePhraseDeliverySchema>;
-export const VoicePauseClassSchema = z.enum(["micro", "phrase", "anticipation", "none"]);
+export const VoicePauseClassSchema = z.enum(["micro", "phrase", "anticipation", "long", "none"]);
 export type VoicePauseClass = z.infer<typeof VoicePauseClassSchema>;
 export const VoicePhraseSchema = z.object({
   text: z.string().trim().min(1),

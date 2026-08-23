@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { VoicePlanSchema, type AppConfig, type QuizTimeline, type VoiceSegment, type VoiceSegmentRole, type VoicePlan } from "@studio/shared";
+import { VoicePlanSchema, type AppConfig, type QuizTimeline, type VoicePauseClass, type VoiceSegment, type VoiceSegmentRole, type VoicePlan } from "@studio/shared";
 import type { RepositoryService } from "../../repository.js";
 import { synthesizeWav } from "../../providers/chatterbox.js";
 import { audioDiagnosticsForTimeline, type VoiceAudioDiagnostics } from "./audioDiagnostics.js";
@@ -179,8 +179,9 @@ async function concatenatePerformancePhrases(paths: string[], phrases: VoiceSegm
   }
 }
 
-function pauseSeconds(pauseClass: "micro" | "phrase" | "anticipation" | "none", segmentNumber: number, phraseIndex: number): number {
+function pauseSeconds(pauseClass: VoicePauseClass, segmentNumber: number, phraseIndex: number): number {
   if (pauseClass === "none") return 0;
+  if (pauseClass === "long") return 1.0;
   const variation = ((segmentNumber + phraseIndex) % 3) * .018;
   if (pauseClass === "micro") return .09 + variation;
   if (pauseClass === "phrase") return .15 + variation;

@@ -120,8 +120,8 @@ describe("Quiz V2 pacing", () => {
     const narration = timeline.events.find((event) => event.segment_id === q1.id + ":question")!;
     const choices = timeline.events.find((event) => event.type === "choices.enter" && event.question_id === q1.id)!;
     const thinking = timeline.events.find((event) => event.type === "countdown.start" && event.question_id === q1.id)!;
-    expect(narration.at_seconds).toBeLessThan(enter.at_seconds + enter.duration_seconds);
-    expect(choices.at_seconds).toBeLessThan(narration.at_seconds + narration.duration_seconds);
+    expect(narration.at_seconds).toBeGreaterThanOrEqual(enter.at_seconds + 2.0);
+    expect(choices.at_seconds).toBeLessThanOrEqual(narration.at_seconds);
     expect(thinking.duration_seconds).toBeGreaterThanOrEqual(6.5);
     expect(thinking.duration_seconds).toBeLessThanOrEqual(8.5);
   });
@@ -132,17 +132,15 @@ describe("Quiz V2 pacing", () => {
     const durations = Object.fromEntries(voice.segments.map((segment) => [segment.segment_id, segment.role === "intro" || segment.role === "outro" ? 3.8 : segment.role === "question" ? 3.8 : segment.role === "choice" ? 3 : segment.role === "thinking_prompt" ? 1.1 : segment.role === "countdown" ? 2.1 : segment.role === "reveal" ? 1.5 : 3.5]));
     const timeline = compileQuizTimeline({ quiz: golden, director: createDefaultDirectorPlan(golden), voicePlan: voice, audioDurations: durations });
     expect(timeline.duration_seconds).toBeLessThanOrEqual(130);
-    expect(timeline.duration_seconds).toBeLessThanOrEqual(120);
   });
 
-  it("overlaps the next scene entrance with the outgoing default transition", () => {
+  it("waits for the transition to finish completely before the next question enters", () => {
     const timeline = compileQuizTimeline({ quiz, director: createDefaultDirectorPlan(quiz), voicePlan: buildQuizVoicePlan(quiz) });
     const transition = timeline.events.find((event) => event.type === "transition.start" && event.question_id === quiz.questions[0]?.id)!;
     const nextEntrance = timeline.events.find((event) => event.type === "question.enter" && event.question_id === quiz.questions[1]?.id)!;
-    const nextChoices = timeline.events.find((event) => event.type === "choices.enter" && event.question_id === quiz.questions[1]?.id)!;
-    expect(nextEntrance.at_seconds).toBeGreaterThan(transition.at_seconds);
-    expect(nextEntrance.at_seconds).toBeLessThan(transition.at_seconds + transition.duration_seconds);
-    expect(nextChoices.at_seconds).toBeGreaterThanOrEqual(transition.at_seconds + transition.duration_seconds);
+    const nextNarration = timeline.events.find((event) => event.segment_id === quiz.questions[1]?.id + ":question")!;
+    expect(nextEntrance.at_seconds).toBeGreaterThanOrEqual(transition.at_seconds + transition.duration_seconds);
+    expect(nextNarration.at_seconds).toBeGreaterThanOrEqual(nextEntrance.at_seconds + 2.0);
   });
 
   it("adds a visual acknowledgement while long answer choices are being read", () => {

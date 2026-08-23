@@ -149,7 +149,7 @@ function introClip(end: number, count: number, copy: Copy): string {
 }
 
 function outroClip(start: number, end: number, count: number, copy: Copy): string {
-  return `<section id="candy-outro" class="clip candy-scene candy-outro" data-start="${start.toFixed(3)}" data-duration="${Math.max(.04, end - start).toFixed(3)}" data-track-index="0"><div class="intro-rays"></div><div class="outro-blob blob-a"></div><div class="outro-blob blob-b"></div><div class="outro-card"><span>${esc(copy.scorePrompt)}</span><h1>${esc(copy.playAgain)}</h1><p>${count} ${esc(copy.questions(count))}</p><div class="outro-stars" data-layout-ignore aria-hidden="true">★&nbsp;&nbsp;✦&nbsp;&nbsp;★</div></div></section>`;
+  return `<section id="candy-outro" class="clip candy-scene candy-outro" data-start="${start.toFixed(3)}" data-duration="${Math.max(.04, end - start).toFixed(3)}" data-track-index="0"><div class="intro-rays"></div><div class="outro-blob blob-a"></div><div class="outro-blob blob-b"></div><div class="outro-card"><span>${esc(copy.scorePrompt)}</span><h1>${esc(copy.playAgain)}</h1><p>${esc(copy.exploreMore)}</p><div class="outro-stars" data-layout-ignore aria-hidden="true">★&nbsp;&nbsp;✦&nbsp;&nbsp;★</div></div></section>`;
 }
 
 function questionClip(input: { start: number; choicesStart: number; thinkingStart: number; revealStart: number; rewardStart: number; end: number; question: QuizV2["questions"][number]; questionIndex: number; count: number; visual: QuizTemplateScene; copy: Copy; assets: Record<string, string>; isFinal: boolean }): string {
@@ -162,7 +162,7 @@ function questionClip(input: { start: number; choicesStart: number; thinkingStar
   const answers = answerCards(question, input.assets);
   const hero = visual.layoutId === "visual_choices_three" ? "" : imageCard(questionAsset, question.visual_opportunity || question.question, "hero-image", question.number);
   const visualAnswers = visual.layoutId === "visual_choices_three" ? visualAnswerCards(question, input.assets, input.questionIndex) : "";
-  const body = `<div class="game-stage" data-layout-allow-overflow><div class="question-title question-tier-${questionLayout.tier}" data-layout-allow-occlusion><h1>${highlightQuestionMarkup(question.question, question.visual_opportunity)}</h1></div>${hero}${visualAnswers || answers}<div class="phase-region">${thinkingBar({ clipStart: input.start, thinkingStart: input.thinkingStart, revealStart: input.revealStart })}${revealPanel(input, answer?.text ?? "")}</div></div>`;
+  const body = `<div class="game-stage" data-layout-allow-overflow><div class="question-title question-tier-${questionLayout.tier}" data-layout-allow-occlusion><h1>${highlightQuestionMarkup(question.question, question.visual_opportunity)}</h1></div>${hero}${visualAnswers || answers}<div class="phase-region">${thinkingBar({ clipStart: input.start, thinkingStart: input.thinkingStart, revealStart: input.revealStart })}${revealPanel(input)}</div></div>`;
   const streak = input.questionIndex >= 2 ? " streak" : "";
   const streakCue = input.questionIndex >= 2 ? "<i aria-hidden=\"true\" data-layout-ignore>✦</i>" : "";
   return `<section id="quiz-q${question.number}-${Math.round(input.start * 1000)}" class="${classNames}" ${config} data-start="${input.start.toFixed(3)}" data-duration="${Math.max(.04, input.end - input.start).toFixed(3)}" data-track-index="0"><div class="bg-gradient"></div><div class="bg-rays"></div><div class="bg-pattern pattern-circles"></div><div class="bg-pattern pattern-sprinkles"></div><div class="bg-shape shape-a" data-layout-allow-overflow></div>${sceneDecorations(input.questionIndex)}<header class="game-header" data-layout-allow-occlusion><div class="episode-progress${streak}" data-layout-allow-occlusion><span>${esc(input.copy.question)}</span><b>${question.number} / ${input.count}</b>${streakCue}</div></header>${body}${rewardFx(input.isFinal ? "big" : "small")}</section>`;
@@ -235,8 +235,8 @@ function thinkingBar(input: { clipStart: number; thinkingStart: number; revealSt
   return `<div class="thinking-bar" ${style}><div class="thinking-track" aria-label="Quiz timer" data-layout-allow-overflow><div class="timer-progress"></div><span class="timer-marker" data-layout-allow-occlusion><b class="marker-val val-query">?</b><b class="marker-val val-5">5</b><b class="marker-val val-4">4</b><b class="marker-val val-3">3</b><b class="marker-val val-2">2</b><b class="marker-val val-1">1</b></span><div class="timer-sparkles" data-layout-ignore aria-hidden="true"><i>✦</i><i>•</i><i>✦</i></div></div></div>`;
 }
 
-function revealPanel(input: { question: QuizV2["questions"][number]; copy: Copy; isFinal: boolean }, answer: string): string {
-  return `<div class="reveal-panel" aria-label="${escAttr(input.copy.correct)}" data-layout-allow-occlusion><span class="reveal-stamp" data-layout-ignore aria-hidden="true">✓</span><strong class="reveal-title">${esc(input.copy.correct)}</strong><span class="reveal-answer">${esc(answer)}</span><div class="reveal-sparkles" data-layout-ignore aria-hidden="true"><i>✦</i><i>★</i><i>✦</i></div></div><div class="fact-card" data-layout-allow-occlusion><span>${esc(input.question.fun_fact ? input.copy.funFact : input.copy.why)}</span><p>${esc(input.question.fun_fact || input.question.explanation)}</p></div>`;
+function revealPanel(input: { question: QuizV2["questions"][number]; copy: Copy; isFinal: boolean }): string {
+  return `<div class="fact-card" data-layout-allow-occlusion><span>${esc(input.question.fun_fact ? input.copy.funFact : input.copy.why)}</span><p>${esc(input.question.fun_fact || input.question.explanation)}</p></div>`;
 }
 
 function sceneDecorations(questionIndex: number): string {
@@ -313,8 +313,8 @@ function sfxSource(filename: string, assets?: Record<string, string>): string {
 function quizCopy(language: string) {
   const vietnamese = /^(vi|vietnamese|tiếng việt)/i.test(language.trim());
   return vietnamese
-    ? { ready: "Sẵn sàng chơi chưa?", questions: (count: number) => count === 1 ? "câu hỏi" : "câu hỏi đầy bất ngờ", question: "Câu", getReady: "Quan sát thật kỹ nhé!", choose: "Chọn một đáp án", time: "Sắp hết giờ!", correct: "Đúng rồi!", why: "Chính xác!", funFact: "Bạn có biết?", final: "Thử thách cuối", scorePrompt: "Bạn đúng được mấy câu?", playAgain: "Chơi lại nhé" }
-    : { ready: "Ready to play?", questions: (count: number) => count === 1 ? "question" : "questions to explore", question: "Question", getReady: "Look closely and get ready!", choose: "Choose one", time: "Final seconds!", correct: "Correct answer!", why: "That's right!", funFact: "Did you know?", final: "Final challenge", scorePrompt: "How many did you get right?", playAgain: "Play again soon" };
+    ? { ready: "Sẵn sàng chơi chưa?", questions: (count: number) => count === 1 ? "câu hỏi" : "câu hỏi đầy bất ngờ", question: "Câu", getReady: "Quan sát thật kỹ nhé!", choose: "Chọn một đáp án", time: "Sắp hết giờ!", correct: "Đúng rồi!", why: "Chính xác!", funFact: "Bạn có biết?", final: "Thử thách cuối", scorePrompt: "Bạn đúng được mấy câu?", playAgain: "Chơi lại nhé", exploreMore: "Còn nhiều câu hỏi thú vị phía trước" }
+    : { ready: "Ready to play?", questions: (count: number) => count === 1 ? "question" : "questions to explore", question: "Question", getReady: "Look closely and get ready!", choose: "Choose one", time: "Final seconds!", correct: "Correct answer!", why: "That's right!", funFact: "Did you know?", final: "Final challenge", scorePrompt: "How many did you get right?", playAgain: "Play again soon", exploreMore: "Many more questions to explore" };
 }
 
 function illustrationDataUri(subject: string, seed: number): string {
@@ -391,14 +391,8 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .layout-visual_choices_three .question-title { grid-area: title; width: 100%; }
 .layout-visual_choices_three .visual-answer-grid { grid-area: answers; width: 1540px; margin-top: 0; gap: 24px; }
 .phase-region { position: absolute; z-index: 5; left: 50%; bottom: 24px; width: 100%; height: 130px; transform: translateX(-50%); }
-.phase-region > .thinking-bar, .phase-region > .reveal-panel, .phase-region > .fact-card { position: absolute; z-index: 5; top: 0; left: 50%; margin-top: 0; transform: translateX(-50%); }
+.phase-region > .thinking-bar, .phase-region > .fact-card { position: absolute; z-index: 5; top: 0; left: 50%; margin-top: 0; transform: translateX(-50%); }
 .phase-region > .thinking-bar { width: min(1380px, 100%); min-height: 80px; }
-.phase-region > .reveal-panel { display: inline-flex; align-items: center; justify-content: center; gap: 18px; min-width: 560px; max-width: 1200px; padding: 14px 36px; border: 5px solid rgba(255,255,255,.92); border-radius: 999px; background: var(--surface); box-shadow: 0 14px 0 var(--depth-shadow), inset 0 3px 0 rgba(255,255,255,.8); color: var(--ink); opacity: 0; animation: phase-hold var(--reveal-duration) steps(1,end) calc(var(--clip-start) + var(--reveal-at)) both, reveal-enter-smooth .35s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--reveal-at)) both; }
-.reveal-stamp { display: grid; flex: 0 0 auto; place-items: center; width: 50px; height: 50px; border-radius: 50%; background: var(--correct); color: #fff; font-size: 30px; font-weight: 900; box-shadow: 0 4px 0 rgba(13,35,71,.18); animation: stamp-pop .42s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--reveal-at) + .1s) both; }
-.reveal-title { color: var(--correct); font-size: 32px; font-weight: 900; letter-spacing: -.5px; }
-.reveal-answer { color: var(--ink); font-size: 32px; font-weight: 900; letter-spacing: -.5px; }
-.reveal-sparkles { position: absolute; inset: -14px -28px; pointer-events: none; display: flex; justify-content: space-between; align-items: center; color: #ffd34d; font-size: 32px; }
-.reveal-sparkles i { font-style: normal; animation: star-burst .6s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--reveal-at) + .14s) both; }
 .phase-region > .fact-card { width: min(1220px, 100%); }
 .answer-grid { position: relative; z-index: 3; display: grid; gap: 24px; width: 1540px; margin-top: 25px; opacity: 0; animation: phase-enter .01s steps(1,end) calc(var(--clip-start) + var(--choices-at)) both; }
 .answer-count-2 { grid-template-columns: repeat(2, 1fr); }

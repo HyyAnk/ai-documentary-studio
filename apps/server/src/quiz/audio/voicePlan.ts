@@ -30,7 +30,7 @@ export function performancePhrases(text: string, role: VoiceSegmentRole): VoiceP
   return chunks.map((phrase, index) => ({
     text: phrase,
     delivery: role === "reveal" ? "emphasis" : role === "fun_fact" || role === "explanation" ? "warm" : role === "outro" || role === "intro" ? "playful" : role === "question" && index === chunks.length - 1 ? "question_end" : index === 1 ? "emphasis" : "normal",
-    pause_after: index === chunks.length - 1 ? "none" : role === "question" ? "phrase" : role === "reveal" ? "anticipation" : "micro",
+    pause_after: index === chunks.length - 1 ? "none" : role === "outro" && index === 0 ? "long" : role === "question" ? "phrase" : role === "reveal" ? "anticipation" : "micro",
   }));
 }
 
@@ -64,7 +64,7 @@ export function splitChoicePhrases(text: string): string[] {
 }
 
 function splitPunctuationPhrases(text: string): string[] {
-  const parts = text.split(/(?<=[,;:])\s+/).map((part) => part.trim()).filter(Boolean);
+  const parts = text.split(/(?<=[.?!,;:])\s+/).map((part) => part.trim()).filter(Boolean);
   return parts.length > 1 ? parts : [text];
 }
 

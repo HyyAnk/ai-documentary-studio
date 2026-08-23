@@ -133,7 +133,8 @@ describe("Candy Arcade visual template", () => {
     const voice = buildQuizVoicePlan(quiz);
     const timeline = compileQuizTimeline({ quiz, director, voicePlan: voice });
     const html = compositionSources({ quiz, director, timeline, theme: "candy_arcade", audioPath: "./narration.wav", narrationDurationSeconds: timeline.duration_seconds });
-    expect(html).toContain("reveal-sparkles");
+    expect(html).not.toContain("reveal-panel");
+    expect(html).toContain("Many more questions to explore");
     expect(html).toContain("--surface-accent:");
     expect(html).toContain("--on-accent:");
     expect(html).toContain(".fact-card span { color: var(--surface-accent);");
@@ -190,6 +191,48 @@ describe("Candy Arcade visual template", () => {
     expect(plan.assets.filter((asset) => asset.consistency_group_id === group.group_id)).toHaveLength(3);
     const broken = { ...plan, assets: plan.assets.map((asset) => asset.consistency_group_id ? { ...asset, consistency_group_id: null } : asset) };
     expect(assessQuizVisualLayout({ quiz, director, assetPlan: broken }).some((issue) => issue.code === "VISUAL_ANSWER_LEAKAGE" && issue.severity === "blocker")).toBe(true);
+  });
+
+  it("applies the improved pacing, removes redundant reveal-panel, and sets outro pause and copy", () => {
+    const director = createDefaultDirectorPlan(quiz);
+    const voicePlan = buildQuizVoicePlan(quiz);
+    const timeline = compileQuizTimeline({ quiz, director, voicePlan });
+    const bundle = buildCandyArcadeCompositionBundle({ quiz, director, timeline, theme: "candy_arcade", audioPath: "./narration.wav", narrationDurationSeconds: timeline.duration_seconds });
+    const sources = [bundle.html, ...Object.values(bundle.files)].join("\n");
+
+    // Requirement 1: No reveal-panel badge at bottom, fact-card is preserved
+    expect(sources).not.toContain("reveal-panel");
+    expect(sources).not.toContain("reveal-stamp");
+    expect(sources).toContain("fact-card");
+
+    // Requirement 2: Timing pacing - 2s lead before narration, 2s hold after explanation before transition
+    const q1Enter = timeline.events.find((e) => e.type === "question.enter" && e.question_id === "question-01")!;
+    const q1Narration = timeline.events.find((e) => e.segment_id === "question-01:question")!;
+    expect(q1Narration.at_seconds - q1Enter.at_seconds).toBeGreaterThanOrEqual(2.0);
+
+    const q1Explain = timeline.events.find((e) => e.segment_id === "question-01:explanation")!;
+    const q1Transition = timeline.events.find((e) => e.type === "transition.start" && e.question_id === "question-01")!;
+    expect(q1Transition.at_seconds - (q1Explain.at_seconds + q1Explain.duration_seconds)).toBeGreaterThanOrEqual(2.0);
+
+    const q2Enter = timeline.events.find((e) => e.type === "question.enter" && e.question_id === "question-02")!;
+    expect(q2Enter.at_seconds).toBeGreaterThanOrEqual(q1Transition.at_seconds + q1Transition.duration_seconds);
+
+    // Requirement 3: Outro phrases have 1s pause after score prompt & copy is 'Many more questions to explore'
+    const outroSegment = voicePlan.segments.find((s) => s.role === "outro")!;
+    expect(outroSegment.phrases[0]?.text).toBe("How many did you get right?");
+    expect(outroSegment.phrases[0]?.pause_after).toBe("long");
+    expect(bundle.files["compositions/candy-outro.html"]).toContain("Many more questions to explore");
+    expect(bundle.files["compositions/candy-outro.html"]).not.toContain("2 questions to explore");
+
+    // Vietnamese outro copy check
+    const vietnameseQuiz = { ...quiz, language: "Vietnamese" };
+    const viVoice = buildQuizVoicePlan(vietnameseQuiz);
+    const viOutro = viVoice.segments.find((s) => s.role === "outro")!;
+    expect(viOutro.phrases[0]?.text).toBe("Bạn đúng được mấy câu?");
+    expect(viOutro.phrases[0]?.pause_after).toBe("long");
+    const viTimeline = compileQuizTimeline({ quiz: vietnameseQuiz, director, voicePlan: viVoice });
+    const viBundle = buildCandyArcadeCompositionBundle({ quiz: vietnameseQuiz, director, timeline: viTimeline, theme: "candy_arcade", audioPath: "./narration.wav", narrationDurationSeconds: viTimeline.duration_seconds });
+    expect(viBundle.files["compositions/candy-outro.html"]).toContain("Còn nhiều câu hỏi thú vị phía trước");
   });
 });
 
