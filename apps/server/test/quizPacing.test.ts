@@ -44,11 +44,11 @@ describe("Quiz V2 pacing", () => {
   });
 
   it("centralizes age-band voice targets and leaves a rounding safety margin", () => {
-    expect(quizVoiceTargetWordsPerSecond("4-6")).toBe(1.9);
-    expect(quizVoiceTargetWordsPerSecond("7-9")).toBe(2.1);
-    expect(quizVoiceTargetWordsPerSecond("10-12")).toBe(2.25);
-    expect(quizVoiceTargetWordsPerSecond("family")).toBe(2.2);
-    expect(quizVoicePacingLimit(quizVoiceTargetWordsPerSecond("4-6"))).toBeLessThan(1.9);
+    expect(quizVoiceTargetWordsPerSecond("4-6")).toBe(2.4);
+    expect(quizVoiceTargetWordsPerSecond("7-9")).toBe(2.5);
+    expect(quizVoiceTargetWordsPerSecond("10-12")).toBe(2.6);
+    expect(quizVoiceTargetWordsPerSecond("family")).toBe(2.5);
+    expect(quizVoicePacingLimit(quizVoiceTargetWordsPerSecond("4-6"))).toBeLessThan(2.4);
   });
 
   it("writes conversational child-friendly prompts and slows narrative roles", () => {

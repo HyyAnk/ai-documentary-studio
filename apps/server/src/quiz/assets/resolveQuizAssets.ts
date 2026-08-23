@@ -98,8 +98,8 @@ export async function resolveQuizAssets(input: {
         );
         let currentPrompt = compiled.prompt;
         let generated: { path: string } | null = null;
-        const maxAttempts = 2;
-        for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+        const maxAttempts = 3;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
           try {
             generated = await provider.generateAsset({
               assetId: request.asset_id,
@@ -122,6 +122,11 @@ export async function resolveQuizAssets(input: {
                 currentPrompt = rephrased;
                 continue;
               }
+            }
+            if (attempt < maxAttempts) {
+              logger.warn(`Quiz asset ${request.asset_id} generation attempt ${attempt} failed (${err instanceof Error ? err.message : String(err)}). Retrying in ${attempt * 500}ms...`, { profileId: input.channelId, workerId: input.episodeId });
+              await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+              continue;
             }
             throw err;
           }
@@ -146,7 +151,22 @@ export async function resolveQuizAssets(input: {
           fingerprint,
           theme: episode.quiz_config.visual_theme,
         }, input.antigravityClient, { allowTier3Fallback: false });
-        const result = await chainProvider.generateReference(compiled.prompt);
+        let result: Awaited<ReturnType<typeof chainProvider.generateReference>> | null = null;
+        const maxAttempts = 3;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          try {
+            result = await chainProvider.generateReference(compiled.prompt);
+            break;
+          } catch (err) {
+            if (attempt < maxAttempts) {
+              logger.warn(`Quiz asset ${request.asset_id} Antigravity generation attempt ${attempt} failed (${err instanceof Error ? err.message : String(err)}). Retrying in ${attempt * 500}ms...`, { profileId: input.channelId, workerId: input.episodeId });
+              await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+              continue;
+            }
+            throw err;
+          }
+        }
+        if (!result) throw new Error(`Failed to generate Antigravity asset ${request.asset_id}`);
         assets.push({
           ...request,
           fingerprint,
@@ -172,7 +192,22 @@ export async function resolveQuizAssets(input: {
         }
       } else {
         const provider = new ShopAiKeyQuizImageProvider(input.repository, { channelId: input.channelId, episodeId: input.episodeId });
-        const generated = await provider.generateAsset({ assetId: request.asset_id, fingerprint, prompt: compiled.prompt });
+        let generated: Awaited<ReturnType<typeof provider.generateAsset>> | null = null;
+        const maxAttempts = 3;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          try {
+            generated = await provider.generateAsset({ assetId: request.asset_id, fingerprint, prompt: compiled.prompt });
+            break;
+          } catch (err) {
+            if (attempt < maxAttempts) {
+              logger.warn(`Quiz asset ${request.asset_id} ShopAiKey generation attempt ${attempt} failed (${err instanceof Error ? err.message : String(err)}). Retrying in ${attempt * 500}ms...`, { profileId: input.channelId, workerId: input.episodeId });
+              await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+              continue;
+            }
+            throw err;
+          }
+        }
+        if (!generated) throw new Error(`Failed to generate ShopAiKey asset ${request.asset_id}`);
         assets.push({ ...request, fingerprint, path: generated.path, source: "provider" });
         if (request.purpose === "hero_question_image" && bundleNumber > 0) {
           try {

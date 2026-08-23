@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { Broadcast, CaretDown, Gear, GitBranch, House, Image, ListChecks, MoonStars, Power, Sun, TerminalWindow, X, CheckCircle, Sparkle, WarningCircle } from "@phosphor-icons/react";
 import type { Channel, CodexSettingsResponse } from "@studio/shared";
 import type { GitInfo, Notice, Page, Theme } from "./types";
@@ -252,4 +253,80 @@ export function PageTitle({ eyebrow, title, copy, action }: { eyebrow: string; t
 export function StatusLine({ label, value }: { label: string; value: string }) { return <div className="status-line"><span>{label}</span><strong>{value}</strong></div>; }
 export function StatusBadge({ status }: { status: string }) { return <span className={`status-badge ${status.toLowerCase()}`}>{status.toLowerCase()}</span>; }
 export function StageBadge({ stage }: { stage: string }) { return <span className="stage-badge">{stage.replaceAll("_", " ").toLowerCase()}</span>; }
-export function NoticeBanner({ notice, onClose }: { notice: NonNullable<Notice>; onClose: () => void }) { return <div className={`notice-banner ${notice.tone}`} role={notice.tone === "bad" ? "alert" : "status"} aria-live={notice.tone === "bad" ? "assertive" : "polite"}><span>{notice.tone === "good" ? <CheckCircle size={18} /> : notice.tone === "bad" ? <WarningCircle size={18} /> : <Sparkle size={18} />}</span><span>{notice.message}</span><button aria-label="Close notification" onClick={onClose}><X size={15} /></button></div>; }
+export function NoticeBanner({ notice, onClose }: { notice: NonNullable<Notice>; onClose: () => void }) {
+  const duration = notice.duration ?? 4200;
+  const [isPaused, setIsPaused] = useState(false);
+  const remainingRef = useRef(duration);
+  const startTimeRef = useRef(Date.now());
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    remainingRef.current = duration;
+    startTimeRef.current = Date.now();
+
+    timerRef.current = setTimeout(() => {
+      onClose();
+    }, duration);
+
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [notice, onClose, duration]);
+
+  const handleMouseEnter = () => {
+    setIsPaused(true);
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      const elapsed = Date.now() - startTimeRef.current;
+      remainingRef.current = Math.max(0, remainingRef.current - elapsed);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    setIsPaused(false);
+    startTimeRef.current = Date.now();
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      onClose();
+    }, remainingRef.current);
+  };
+
+  const title = notice.title ?? (notice.tone === "bad" ? "Error" : undefined);
+
+  return (
+    <div
+      className={`notice-banner ${notice.tone} ${isPaused ? "is-paused" : ""}`}
+      role={notice.tone === "bad" ? "alert" : "status"}
+      aria-live={notice.tone === "bad" ? "assertive" : "polite"}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
+      <div className="notice-icon-badge">
+        {notice.tone === "good" ? (
+          <CheckCircle size={18} weight="fill" />
+        ) : notice.tone === "bad" ? (
+          <WarningCircle size={18} weight="fill" />
+        ) : (
+          <Sparkle size={18} weight="fill" />
+        )}
+      </div>
+      <div className="notice-content">
+        {title ? <span className="notice-title">{title}</span> : null}
+        <span className="notice-message">{notice.message}</span>
+      </div>
+      <button className="notice-close-btn" aria-label="Close notification" onClick={onClose}>
+        <X size={14} weight="bold" />
+      </button>
+      <div className="notice-progress">
+        <div
+          key={notice.message}
+          className="notice-progress-fill"
+          style={{
+            animationDuration: `${duration}ms`,
+            animationPlayState: isPaused ? "paused" : "running",
+          }}
+        />
+      </div>
+    </div>
+  );
+}

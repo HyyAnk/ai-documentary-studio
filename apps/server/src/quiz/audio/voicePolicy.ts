@@ -6,7 +6,7 @@ import type { QuizV2, VoicePlan } from "@studio/shared";
  * age-band contract.
  */
 export function quizVoiceTargetWordsPerSecond(ageBand: QuizV2["age_band"]): number {
-  return { "4-6": 1.9, "7-9": 2.1, "10-12": 2.25, family: 2.2 }[ageBand];
+  return { "4-6": 2.4, "7-9": 2.5, "10-12": 2.6, family: 2.5 }[ageBand];
 }
 
 /** Leave a small measurement/rounding margin below the hard QA target. */

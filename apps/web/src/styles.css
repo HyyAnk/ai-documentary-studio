@@ -3567,68 +3567,183 @@ h3 {
   cursor: pointer;
 }
 
-/* Notice / Toast Banner */
+/* Notice / Toast Banner - Modern Bottom-Right Floating Card */
 .notice-banner {
   position: fixed;
-  z-index: 60;
-  left: 36px;
-  bottom: 36px;
-  max-width: min(440px, calc(100% - 72px));
+  z-index: 1000;
+  right: 24px;
+  bottom: 24px;
+  left: auto;
+  min-width: 300px;
+  max-width: min(440px, calc(100vw - 32px));
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
-  padding: 14px 18px;
-  border: 1px solid var(--line-dark);
+  padding: 12px 14px 14px 14px;
   border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--line-dark);
+  background: color-mix(in srgb, var(--surface-strong) 88%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255, 255, 255, 0.04);
   color: var(--ink);
-  font-size: 12.5px;
-  font-weight: 600;
-  animation: noticeSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+  animation: noticeSlideInRight 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
-@keyframes noticeSlideUp {
-  from { opacity: 0; transform: translateY(12px) scale(0.95); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+:root[data-theme="light"] .notice-banner {
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: 0 12px 32px -4px rgba(15, 23, 42, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+
+@keyframes noticeSlideInRight {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.notice-icon-badge {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  margin-top: 1px;
 }
 
 .notice-banner.good {
-  border-color: color-mix(in srgb, var(--green) 50%, var(--line));
-  background: color-mix(in srgb, var(--green) 12%, var(--surface));
-  color: var(--ink);
+  border-color: color-mix(in srgb, var(--green) 35%, var(--line-dark));
 }
 
-.notice-banner.good > span:first-child {
+.notice-banner.good .notice-icon-badge {
+  background: var(--soft-green);
   color: var(--green);
 }
 
 .notice-banner.bad {
-  border-color: color-mix(in srgb, var(--notice-error) 50%, var(--line));
-  background: color-mix(in srgb, var(--notice-error) 12%, var(--surface));
-  color: var(--ink);
+  border-color: color-mix(in srgb, var(--notice-error) 35%, var(--line-dark));
 }
 
-.notice-banner.bad > span:first-child {
+.notice-banner.bad .notice-icon-badge {
+  background: var(--danger-surface);
   color: var(--notice-error);
 }
 
-.notice-banner > span:nth-child(2) {
-  flex: 1;
+.notice-banner.neutral .notice-icon-badge {
+  background: var(--soft-accent);
+  color: var(--accent-deep);
 }
 
-.notice-banner button {
+.notice-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 2px;
+}
+
+.notice-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.25;
+}
+
+.notice-message {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-secondary);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.notice-banner.good .notice-message {
+  color: var(--ink);
+}
+
+.notice-close-btn {
+  flex-shrink: 0;
   display: grid;
   place-items: center;
+  width: 26px;
+  height: 26px;
   padding: 0;
   border: 0;
+  border-radius: 6px;
   background: transparent;
   color: var(--muted);
-  transition: color 0.15s ease;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-top: 2px;
 }
 
-.notice-banner button:hover {
+.notice-close-btn:hover {
+  background: var(--soft-muted);
   color: var(--ink);
+}
+
+:root[data-theme="light"] .notice-close-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+/* Progress bar timer */
+.notice-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2.5px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+:root[data-theme="light"] .notice-progress {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.notice-progress-fill {
+  height: 100%;
+  width: 100%;
+  transform-origin: left;
+  animation: noticeProgress linear forwards;
+}
+
+@keyframes noticeProgress {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.notice-banner.good .notice-progress-fill {
+  background: var(--green);
+}
+
+.notice-banner.bad .notice-progress-fill {
+  background: var(--notice-error);
+}
+
+.notice-banner.neutral .notice-progress-fill {
+  background: var(--accent);
+}
+
+@media (max-width: 640px) {
+  .notice-banner {
+    right: 16px;
+    bottom: 16px;
+    left: 16px;
+    max-width: none;
+    min-width: 0;
+  }
 }
 
 .shutdown-screen {

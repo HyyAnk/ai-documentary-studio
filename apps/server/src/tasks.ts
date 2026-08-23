@@ -45,7 +45,8 @@ import { inspectRenderedVideo } from "./quiz/qa/postRenderQa.js";
 import { formatHyperframesCheckFailure, hasHyperframesContrastIssue, parseHyperframesCheckReport } from "./quiz/qa/hyperframesQuality.js";
 import { isQuizAssetResolutionComplete, resolveQuizAssets } from "./quiz/assets/resolveQuizAssets.js";
 import { compileTimeline, generateDirector, generateQuiz, generateVoice, planAssets, readQuizArtifacts, resolveAssets, runQa } from "./quiz/pipeline/orchestrator.js";
-import { quizVoicePlanNeedsRegeneration } from "./quiz/audio/voicePolicy.js";
+import { quizVoicePlanNeedsRegeneration, quizVoiceTargetWordsPerSecond } from "./quiz/audio/voicePolicy.js";
+import { healQuizVoicePacingWithLLM } from "./quiz/audio/voicePacingHealer.js";
 import type { QuizVoicePacingClamp } from "./quiz/audio/voiceSynthesis.js";
 import { canonicalizeVisibleQuizAnswer, resolveVisibleQuizChoice, stripQuizChoiceLabel } from "./quiz/domain/quiz.js";
 
@@ -1049,13 +1050,60 @@ export class TaskManager extends EventEmitter {
       await compileTimeline(input);
       artifacts = await readQuizArtifacts(input);
     }
-    if (!artifacts.assessment) {
-      await this.update(task.task_id, { progress_message: "Quiz · running pre-render QA", progress_percent: 89 });
-      await runQa(input);
-      artifacts = await readQuizArtifacts(input);
+    const maxHealingCycles = 3;
+    for (let cycle = 1; cycle <= maxHealingCycles; cycle++) {
+      if (!artifacts.assessment) {
+        await this.update(task.task_id, { progress_message: "Quiz · running pre-render QA", progress_percent: 89 });
+        await runQa(input);
+        artifacts = await readQuizArtifacts(input);
+      }
+      const blockers = artifacts.assessment?.issues.filter((issue) => issue.severity === "blocker") ?? [];
+      if (blockers.length === 0) {
+        break;
+      }
+
+      const hasUnresolvedAssetBlockers = blockers.some((issue) => issue.code === "asset_required_unresolved" || issue.code === "asset_generation_failed");
+      const hasVoicePaceBlockers = blockers.some((issue) => issue.code === "voice_pace_unsafe" || issue.code === "voice_pace_fast");
+
+      if (cycle < maxHealingCycles && (hasUnresolvedAssetBlockers || hasVoicePaceBlockers)) {
+        if (hasUnresolvedAssetBlockers) {
+          this.logger.warn(`Auto-healing unresolved visual assets (attempt ${cycle}/${maxHealingCycles})...`, { profileId: task.channel_id, workerId: task.task_id, step: "auto_heal_assets" });
+          await this.update(task.task_id, { progress_message: `Quiz · auto-retrying unresolved assets (${cycle}/${maxHealingCycles})`, progress_percent: 80 });
+          await resolveAssets(input);
+          await this.repository.invalidateQuizArtifacts(task.channel_id, task.episode_id!, ["assessment"]);
+          artifacts = await readQuizArtifacts(input);
+        }
+
+        if (hasVoicePaceBlockers && artifacts.quiz && artifacts.voice_plan) {
+          this.logger.warn(`Auto-healing voice pacing with LLM (attempt ${cycle}/${maxHealingCycles})...`, { profileId: task.channel_id, workerId: task.task_id, step: "auto_heal_voice" });
+          await this.update(task.task_id, { progress_message: `Quiz · auto-adjusting voice pacing with AI (${cycle}/${maxHealingCycles})`, progress_percent: 84 });
+          const client = this.antigravity ?? (this.activeEngine === "codex" ? this.codex : undefined);
+          const healResult = await healQuizVoicePacingWithLLM({
+            voicePlan: artifacts.voice_plan,
+            ageBand: artifacts.quiz.age_band,
+            targetWordsPerSecond: quizVoiceTargetWordsPerSecond(artifacts.quiz.age_band),
+            client,
+            logger: this.logger,
+            channelId: task.channel_id,
+            episodeId: task.episode_id!,
+          });
+          if (healResult.healed) {
+            await this.repository.writeVoicePlan(task.channel_id, task.episode_id!, healResult.voicePlan);
+            await this.repository.invalidateQuizArtifacts(task.channel_id, task.episode_id!, ["timeline", "assessment"]);
+            await generateVoice(input);
+            artifacts = await readQuizArtifacts(input);
+            episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
+          }
+        }
+
+        await runQa(input);
+        artifacts = await readQuizArtifacts(input);
+        continue;
+      }
+
+      const blocker = blockers[0]!;
+      throw new RepositoryError(`Quiz V2 QA blocked production: ${blocker.message}`, "QUIZ_QA_BLOCKED");
     }
-    const blocker = artifacts.assessment?.issues.find((issue) => issue.severity === "blocker");
-    if (blocker) throw new RepositoryError(`Quiz V2 QA blocked production: ${blocker.message}`, "QUIZ_QA_BLOCKED");
   }
 
   private async attachPipelineBundleImages(channelId: string, episodeId: string): Promise<void> {
