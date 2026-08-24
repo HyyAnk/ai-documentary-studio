@@ -254,7 +254,7 @@ export class ContextEngine {
       episodeLine,
       taskType === "GENERATE_RESEARCH"
         ? "Use read-only web research to verify this confirmed topic. Prefer primary records, government/university archives, standards bodies, museums, and contemporary reporting. Never invent a source or inaccessible quotation."
-        : "Use only the scoped context below. Treat the research claim ledger as the factual boundary and never invent facts, quotes, people, programs, figures, or sources.",
+        : "Use only the scoped context below. Treat the research claim ledger as the factual boundary and never invent facts, quotes, people, programs, figures, or sources. DO NOT USE ANY WORKSPACE/CODE SEARCH OR EDITING TOOLS; output the final response text or JSON directly.",
       `Task instructions: ${JSON.stringify(extra)}`,
       context,
     ].join("\n");

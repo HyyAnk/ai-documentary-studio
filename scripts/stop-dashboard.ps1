@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = "SilentlyContinue"
 $worker = "stop-dashboard"
-$ports = @(4310, 2233, 8890)
+$ports = @(4310, 2244, 2233, 8890)
 $resolvedRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path.TrimEnd("\").ToLowerInvariant()
 $startedAt = Get-Date
 $stopped = 0
@@ -55,8 +55,21 @@ foreach ($port in $ports) {
     }
 
     Write-Log "STEP" "stop" ("Stopping {0} (PID {1}) for port {2}" -f $process.ProcessName, $processId, $port) ([ConsoleColor]::Blue)
-    Stop-Process -Id $processId -Force
-    if (Get-Process -Id $processId) {
+    & taskkill.exe /PID $processId /T /F >$null 2>&1
+    if ($LASTEXITCODE -ne 0) {
+      Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+    }
+    
+    $terminated = $false
+    for ($i = 0; $i -lt 10; $i++) {
+      if (-not (Get-Process -Id $processId -ErrorAction SilentlyContinue)) {
+        $terminated = $true
+        break
+      }
+      Start-Sleep -Milliseconds 200
+    }
+
+    if (-not $terminated) {
       $failed++
       Write-Log "ERROR" "stop" ("Could not stop PID {0}; close the local service manually if it remains" -f $processId) ([ConsoleColor]::Red)
     } else {

@@ -42,6 +42,11 @@ describe("deterministic Quiz timeline compiler", () => {
       expect(reveal?.at_seconds ?? 0).toBeGreaterThanOrEqual((thinking?.at_seconds ?? 0) + (thinking?.duration_seconds ?? 0));
       expect(reward?.at_seconds ?? 0).toBeGreaterThanOrEqual(reveal?.at_seconds ?? 0);
       expect(reveal?.payload.canonical_choice_id).toBe(question.correct_choice_id);
+      const questionNarration = timeline.events.find((event) => event.segment_id === question.id + ":question");
+      const choiceNarration = timeline.events.find((event) => event.segment_id === question.id + ":choice");
+      if (questionNarration && choiceNarration) {
+        expect(Number((choiceNarration.at_seconds - (questionNarration.at_seconds + questionNarration.duration_seconds)).toFixed(3))).toBeGreaterThanOrEqual(1.0);
+      }
     }
     expect(validateQuizTimeline(value, timeline)).toEqual([]);
   });

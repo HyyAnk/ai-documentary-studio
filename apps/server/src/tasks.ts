@@ -2082,7 +2082,10 @@ export function isSequenceOutputFailure(message: string): boolean {
     || message.startsWith("Quiz scene quality gate failed")
     || message.startsWith("Shot-plan JSON output malformed")
     || message === "Codex output did not contain JSON"
-    || message.startsWith("Codex beat ");
+    || message.startsWith("Codex beat ")
+    || message.includes("timed out")
+    || message.includes("inactivity")
+    || message.includes("stream was interrupted");
 }
 
 export function normalizeQuizBeatMetadata(beats: Beat[]): Beat[] {

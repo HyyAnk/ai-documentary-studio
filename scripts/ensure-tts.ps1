@@ -55,10 +55,20 @@ function Invoke-Checked {
   return $true
 }
 
+function Refresh-EnvironmentPath {
+  try {
+    $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+    $userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
+    $env:PATH = "$userPath;$machinePath;$env:PATH"
+  } catch { }
+}
+
 function Find-PythonLauncher {
+  Refresh-EnvironmentPath
+
   $py = Get-Command py.exe -ErrorAction SilentlyContinue
   if ($null -ne $py) {
-    foreach ($version in @("3.11", "3.10", "3.13")) {
+    foreach ($version in @("3.11", "3.12", "3.10", "3.13")) {
       try { & $py.Source "-$version" "--version" > $null 2> $null } catch { $global:LASTEXITCODE = 1 }
       if ($LASTEXITCODE -eq 0) {
         return @{ Executable = $py.Source; Arguments = @("-$version") }
@@ -69,10 +79,34 @@ function Find-PythonLauncher {
   $python = Get-Command python.exe -ErrorAction SilentlyContinue
   if ($null -ne $python) {
     $versionText = (& $python.Source "--version" 2>&1 | Out-String).Trim()
-    if ($versionText -match "Python\s+3\.(10|11|13)(\.|$)") {
+    if ($versionText -match "Python\s+3\.(10|11|12|13)(\.|$)") {
       return @{ Executable = $python.Source; Arguments = @() }
     }
   }
+
+  # Check standard installation directories on Windows
+  $candidatePaths = @(
+    "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
+    "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
+    "$env:LOCALAPPDATA\Programs\Python\Python310\python.exe",
+    "$env:LOCALAPPDATA\Programs\Python\Python313\python.exe",
+    "$env:ProgramFiles\Python311\python.exe",
+    "$env:ProgramFiles\Python312\python.exe",
+    "$env:ProgramFiles\Python310\python.exe",
+    "$env:ProgramFiles\Python313\python.exe",
+    "C:\Python311\python.exe",
+    "C:\Python312\python.exe",
+    "C:\Python310\python.exe"
+  )
+  foreach ($candidate in $candidatePaths) {
+    if (Test-Path -LiteralPath $candidate) {
+      $versionText = (& $candidate "--version" 2>&1 | Out-String).Trim()
+      if ($versionText -match "Python\s+3\.(10|11|12|13)(\.|$)") {
+        return @{ Executable = $candidate; Arguments = @() }
+      }
+    }
+  }
+
   return $null
 }
 
@@ -82,7 +116,7 @@ function Ensure-Python {
 
   $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
   if ($null -eq $winget) {
-    Write-Log "ERROR" "python" "Python 3.10, 3.11, or 3.13 was not found and winget is unavailable"
+    Write-Log "ERROR" "python" "Python 3.10, 3.11, 3.12, or 3.13 was not found and winget is unavailable"
     return $null
   }
 
@@ -92,6 +126,7 @@ function Ensure-Python {
     Write-Log "ERROR" "python" "Python installation failed"
     return $null
   }
+  Refresh-EnvironmentPath
   $launcher = Find-PythonLauncher
   if ($null -eq $launcher) { Write-Log "ERROR" "python" "Python was installed but could not be located in this shell" }
   return $launcher

@@ -126,12 +126,12 @@ describe("Quiz V2 pacing", () => {
     expect(thinking.duration_seconds).toBeLessThanOrEqual(8.5);
   });
 
-  it("keeps a deterministic five-question Golden Demo timeline below the 130 second gate", () => {
+  it("keeps a deterministic five-question Golden Demo timeline below the 140 second gate", () => {
     const golden = QuizV2Schema.parse({ ...quiz, questions: Array.from({ length: 5 }, (_, index) => ({ ...quiz.questions[index % quiz.questions.length]!, id: `golden-${index + 1}`, number: index + 1, fun_fact: "" })) });
     const voice = buildQuizVoicePlan(golden);
     const durations = Object.fromEntries(voice.segments.map((segment) => [segment.segment_id, segment.role === "intro" || segment.role === "outro" ? 3.8 : segment.role === "question" ? 3.8 : segment.role === "choice" ? 3 : segment.role === "thinking_prompt" ? 1.1 : segment.role === "countdown" ? 2.1 : segment.role === "reveal" ? 1.5 : 3.5]));
     const timeline = compileQuizTimeline({ quiz: golden, director: createDefaultDirectorPlan(golden), voicePlan: voice, audioDurations: durations });
-    expect(timeline.duration_seconds).toBeLessThanOrEqual(130);
+    expect(timeline.duration_seconds).toBeLessThanOrEqual(140);
   });
 
   it("waits for the transition to finish completely before the next question enters", () => {

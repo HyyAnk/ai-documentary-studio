@@ -540,7 +540,7 @@ export class AntigravityClient extends EventEmitter {
         promptFile = path.join(promptDir, `task_prompt_${threadId}.md`);
         await writeFile(promptFile, prompt, "utf8");
         const promptFileUrl = `file:///${promptFile.replace(/\\/g, "/")}`;
-        effectivePrompt = `Please read the complete task instructions and context from ${promptFileUrl} and execute the task strictly following those instructions. Produce the output directly.`;
+        effectivePrompt = `Please read the complete task instructions and context from ${promptFileUrl} using view_file and execute the task strictly following those instructions. Do NOT run any other tools, codebase searches, or command executions. Produce the final output directly in your response.`;
       }
 
       // MODE 1: Native Antigravity IDE AgentAPI (Direct session, ZERO API Key required)
@@ -597,8 +597,8 @@ export class AntigravityClient extends EventEmitter {
 
         const startTime = Date.now();
         let lastActivityTime = Date.now();
-        const maxWaitMs = 900_000; // 15 minutes overall ceiling for deep multi-source research & large scripts
-        const maxIdleWaitMs = 300_000; // 5 minutes inactivity timeout
+        const maxWaitMs = 1_800_000; // 30 minutes overall ceiling for deep multi-source research & large scripts
+        const maxIdleWaitMs = 1_200_000; // 20 minutes inactivity timeout
         let lastSeenLineCount = 0;
         let lastDelivered = "";
         let isDone = false;
@@ -607,7 +607,7 @@ export class AntigravityClient extends EventEmitter {
 
         while (Date.now() - startTime < maxWaitMs) {
           if (Date.now() - lastActivityTime > maxIdleWaitMs) {
-            throw new Error("Antigravity turn timed out due to 5 minutes of inactivity from IDE session");
+            throw new Error("Antigravity turn timed out due to 20 minutes of inactivity from IDE session");
           }
 
           if (controller.signal.aborted) {

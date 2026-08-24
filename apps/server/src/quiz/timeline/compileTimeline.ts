@@ -59,7 +59,7 @@ export function compileQuizTimeline(input: TimelineCompileInput): QuizTimeline {
     const choiceSegment = input.voicePlan.segments.find((segment) => segment.segment_id === question.id + ":choice");
     let choiceNarrationEnd = round(choicesStart + policy.choice_settle_seconds);
     if (choiceSegment) {
-      const choiceAt = round(Math.max(choicesStart + policy.choice_settle_seconds, questionNarrationEnd + policy.narration_gap_seconds));
+      const choiceAt = round(Math.max(choicesStart + policy.choice_settle_seconds, questionNarrationEnd + policy.question_to_choices_pause_seconds));
       const choiceDuration = scheduleNarration(choiceSegment.segment_id, choiceAt, choiceSegment.text, question.id);
       if (choiceDuration >= 4) add({ type: "mascot.state", at_seconds: round(choiceAt + choiceDuration / 2), duration_seconds: 0, question_id: question.id, choice_id: null, segment_id: null, payload: { state: "curious", phase: "choices_pulse" } });
       choiceNarrationEnd = round(choiceAt + choiceDuration);

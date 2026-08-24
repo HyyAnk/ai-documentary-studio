@@ -9,6 +9,7 @@ export type QuizTimingPolicy = {
   choice_stagger_seconds: number;
   choice_settle_seconds: number;
   narration_gap_seconds: number;
+  question_to_choices_pause_seconds: number;
   thinking_settle_seconds: number;
   post_prompt_thinking_seconds: number;
   reveal_delay_seconds: number;
@@ -37,6 +38,7 @@ export function timingPolicyForAgeBand(ageBand: QuizAgeBand): QuizTimingPolicy {
     choice_stagger_seconds: 0.14,
     choice_settle_seconds: 0.08,
     narration_gap_seconds: 0.08,
+    question_to_choices_pause_seconds: 1.0,
     thinking_settle_seconds: 0.1,
     post_prompt_thinking_seconds: 3,
     reveal_delay_seconds: 0.05,
