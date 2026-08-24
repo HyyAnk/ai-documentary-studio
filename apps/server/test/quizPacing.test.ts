@@ -72,8 +72,8 @@ describe("Quiz V2 pacing", () => {
     expect(choice?.phrases[0]?.text).toContain("Tiger, Dolphin, or Rabbit?");
     expect(splitChoicePhrases("Elephant, Giraffe, or Tiger?")).toEqual(["Elephant, Giraffe, or Tiger?"]);
     expect(splitChoicePhrases("Choose the best answer, then explain why it fits.")).toEqual(["Choose the best answer,", "then explain why it fits."]);
-    expect(voice.segments.find((segment) => segment.role === "reveal")?.text).toBe("Tiger!");
-    expect(voicePerformanceConfig(DEFAULT_CONFIG.audio_generation, "reveal").exaggeration).toBe(.66);
+    expect(voice.segments.find((segment) => segment.role === "reveal")?.text).toBe("Tadaaa! It's Tiger!");
+    expect(voicePerformanceConfig(DEFAULT_CONFIG.audio_generation, "reveal").exaggeration).toBe(.78);
   });
 
   it("never slows a voice segment below the audible correction floor", () => {

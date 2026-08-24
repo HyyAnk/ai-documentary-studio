@@ -1,14 +1,14 @@
 import type { QuizLayoutId, QuizMotionId, QuizPaletteId, QuizTransitionId } from "@studio/shared";
 import type { QuizPalette, QuizTemplateContext, QuizTemplateScene, QuizVisualTemplate, TextLayout, TextTier } from "./types.js";
 
-const roundedFont = '"Arial Rounded MT Bold", "Nunito", "Trebuchet MS", sans-serif';
-const headlineFont = '"Fredoka", "SVN-Hello Headline", "Baloo 2", "Nunito", "Arial Rounded MT Bold", "Trebuchet MS", sans-serif';
+const roundedFont = '"Nunito", "Trebuchet MS", sans-serif';
+const headlineFont = '"Fredoka", "SVN-Hello Headline", "Baloo 2", "Nunito", "Trebuchet MS", sans-serif';
 
 export const candyArcadeTokens: QuizVisualTemplate["tokens"] = {
   spacing: { xs: 12, sm: 20, md: 32, lg: 48, xl: 72, xxl: 104 },
   radius: { card: 38, pill: 999, media: 42, badge: 25 },
   typography: {
-    question: { family: headlineFont, weight: 800, size: 48, lineHeight: 1.16, letterSpacing: -0.5, shadow: "0 2px 0 rgba(255, 255, 255, .8), 0 3px 0 rgba(16, 35, 75, .08)" },
+    question: { family: headlineFont, weight: 800, size: 58, lineHeight: 1.18, letterSpacing: -0.5, shadow: "0 2px 0 rgba(255, 255, 255, .8), 0 3px 0 rgba(16, 35, 75, .08)" },
     answer: { family: roundedFont, weight: 900, size: 34, lineHeight: 1.1, letterSpacing: -0.6, shadow: "none" },
     badge: { family: roundedFont, weight: 900, size: 36, lineHeight: 1, letterSpacing: 0, shadow: "none" },
     label: { family: roundedFont, weight: 900, size: 23, lineHeight: 1.1, letterSpacing: 0.4, shadow: "none" },
@@ -101,7 +101,7 @@ export function textTier(value: string, role: "question" | "choice"): TextTier {
 export function textLayout(value: string, role: "question" | "choice"): TextLayout {
   const tier = textTier(value, role);
   const options = role === "question"
-    ? { short: [48, 1.15, 2], medium: [44, 1.18, 2], long: [38, 1.2, 3], very_long: [34, 1.22, 3], overflow: [32, 1.24, 4] }
+    ? { short: [58, 1.18, 2], medium: [52, 1.2, 2], long: [46, 1.22, 3], very_long: [40, 1.24, 3], overflow: [36, 1.25, 4] }
     : { short: [34, 1.1, 2], medium: [30, 1.12, 2], long: [26, 1.15, 3], very_long: [24, 1.16, 3], overflow: [24, 1.16, 3] };
   const [fontSize, lineHeight, maxLines] = options[tier];
   return { tier, fontSize, lineHeight, maxLines, fits: tier !== "overflow" };

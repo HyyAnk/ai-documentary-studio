@@ -33,7 +33,7 @@ describe("Candy Arcade visual template", () => {
   it("uses reusable tokens and never auto-repeats a palette", () => {
     expect(candyArcadeTemplate.tokens.safeArea.left).toBeGreaterThan(0);
     expect(candyArcadeTemplate.tokens.typography.question.family).toContain("SVN-Hello Headline");
-    expect(candyArcadeTemplate.tokens.typography.question.family).toContain("Arial Rounded");
+    expect(candyArcadeTemplate.tokens.typography.question.family).toContain("Fredoka");
     const first = resolvePalette("auto", 0);
     expect(resolvePalette("auto", 0, first.id).id).not.toBe(first.id);
   });
@@ -140,13 +140,14 @@ describe("Candy Arcade visual template", () => {
     expect(html).toContain("--on-accent:");
     expect(html).toContain(".fact-card span { color: var(--surface-accent);");
     expect(html).toContain(".timer-marker { position: absolute;");
-    expect(html).toContain("background: linear-gradient(145deg, #54e4df 0%, #19bfc4 100%);");
+    expect(html).toContain(".marker-star-svg {");
     expect(html).toContain(".intro-card > span, .outro-card > span { display: inline-flex; padding: 15px 23px; border-radius: 999px; background: #FF6277; color: #172A59;");
     expect(html).toContain(".intro-stars, .outro-stars { margin-top: 35px; color: #172A59;");
     expect(html).toContain("background: #29B9A8; color: #172A59;");
     expect(html).not.toContain("reveal-lockup");
     expect(html).toContain("timer-marker");
-    expect(html).toContain('<div class="timer-progress"></div><span class="timer-marker" data-layout-allow-occlusion><b class="marker-val val-query">?</b><b class="marker-val val-5">5</b>');
+    expect(html).toContain('<div class="timer-progress"></div><span class="timer-marker" data-layout-allow-occlusion>');
+    expect(html).toContain('<b class="marker-val val-query">?</b><b class="marker-val val-5">5</b>');
     expect(html).not.toContain('<div class="timer-progress"><span class="timer-marker');
     expect(html).toContain("@keyframes quiz-timer-marker-slide");
     expect(html).toContain("layout-media_left_choices_right .game-stage");

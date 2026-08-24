@@ -29,7 +29,7 @@ export function performancePhrases(text: string, role: VoiceSegmentRole): VoiceP
   const chunks = role === "question" ? splitQuestionPhrases(normalized) : role === "choice" ? splitChoicePhrases(normalized) : splitPunctuationPhrases(normalized);
   return chunks.map((phrase, index) => ({
     text: phrase,
-    delivery: role === "reveal" ? "emphasis" : role === "fun_fact" || role === "explanation" ? "warm" : role === "outro" || role === "intro" ? "playful" : role === "question" && index === chunks.length - 1 ? "question_end" : index === 1 ? "emphasis" : "normal",
+    delivery: role === "reveal" ? "emphasis" : role === "fun_fact" || role === "explanation" ? "warm" : role === "outro" || role === "intro" || role === "thinking_prompt" ? "playful" : role === "question" && index === chunks.length - 1 ? "question_end" : index === 1 ? "emphasis" : "normal",
     pause_after: index === chunks.length - 1 ? "none" : role === "outro" && index === 0 ? "long" : role === "question" ? "phrase" : role === "reveal" ? "anticipation" : "micro",
   }));
 }
@@ -71,26 +71,26 @@ function splitPunctuationPhrases(text: string): string[] {
 function voiceCopy(language: string) {
   if (/^(vi|vietnamese|tiếng việt)/i.test(language.trim())) {
     return {
-      intro: "Sẵn sàng cho một quiz thật vui chưa?",
+      intro: "Chào mừng các bạn! Cùng chơi một quiz thật vui nào!",
       question: (_number: number, text: string) => text,
       choices: (choices: string[]) => choices.length < 2 ? choices[0] : `${choices.slice(0, -1).join(", ")} hay ${choices.at(-1)}?`,
-      thinking: ["Bạn sẵn sàng chưa? Chọn đáp án nào!", "Suy nghĩ nhanh nhé!", "Giữ đáp án trong đầu nào!", "Chốt đáp án thôi!"],
-      reveal: (answer: string) => `${answer}!`,
+      thinking: ["Chọn nhanh nào!", "Đáp án là gì nhỉ?", "Nhanh tay nào!", "Bạn chọn cái nào?"],
+      reveal: (answer: string) => `Tadaaa! Chính là ${answer}!`,
       explanation: (text: string) => text,
       fact: (text: string) => text,
       midpoint: "",
-      outro: "Bạn đúng được mấy câu? Tuyệt lắm! Chơi lại sớm nhé!",
+      outro: "Bạn đúng được mấy câu? Giỏi quá đi thôi! Chơi lại sớm nhé!",
     };
   }
   return {
-    intro: "Ready for a bright quiz? Here we go!",
+    intro: "Welcome, friends! Ready for a super fun quiz?",
     question: (_number: number, text: string) => text,
     choices: (choices: string[]) => choices.length < 2 ? choices[0] : `${choices.slice(0, -1).join(", ")}, or ${choices.at(-1)}?`,
-    thinking: ["Ready? Pick your answer!", "Think fast!", "Keep your answer in mind!", "Lock it in!"],
-    reveal: (answer: string) => `${answer}!`,
+    thinking: ["Pick fast!", "Which one?", "What's your guess?", "Choose now!"],
+    reveal: (answer: string) => `Tadaaa! It's ${answer}!`,
     explanation: (text: string) => text,
     fact: (text: string) => text,
     midpoint: "",
-    outro: "How many did you get right? Great game! Play again soon!",
+    outro: "How many did you get right? You did amazing! Play again soon!",
   };
 }

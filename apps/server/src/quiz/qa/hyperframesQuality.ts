@@ -1,4 +1,4 @@
-type HyperframesFinding = {
+export type HyperframesFinding = {
   severity?: string;
   message?: string;
   text?: string;
@@ -7,7 +7,7 @@ type HyperframesFinding = {
   time?: number;
 };
 
-type HyperframesCheckReport = {
+export type HyperframesCheckReport = {
   ok?: boolean;
   contrast?: { findings?: HyperframesFinding[] };
   lint?: { findings?: HyperframesFinding[] };

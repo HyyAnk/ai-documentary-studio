@@ -27,10 +27,11 @@ Rotate formats across a five-topic suggestion run:
 
 - Default episode size: 8 questions. Allow 3–30 questions.
 - Multiple-choice and option-based questions must strictly have a maximum of 3 choices (A, B, or C only). Never generate more than 3 options to prevent viewer fatigue and maintain a clean, uncluttered layout.
-- One idea per question. Use concrete nouns and short sentences.
+- Ultra-concise question phrasing: keep questions under 8–10 words (strictly under 60 characters). One idea per question. Use concrete nouns and direct, single-clause sentences without preamble or compound clauses.
+- Ultra-concise post-answer explanation: exactly one friendly, punchy sentence (under 15–18 words, strictly under 120 characters) highlighting one surprising fun fact. Never write lengthy academic paragraphs.
 - Give children enough time to think before the reveal.
 - Never trick the viewer with ambiguous wording, obscure edge cases, or two defensible answers.
-- Every answer must be supported by research. Explain why it is correct in one friendly sentence.
+- Every answer must be supported by research.
 - Use age-appropriate vocabulary for the selected age band: 4–6, 7–9, 10–12, or family.
 
 ## Voice and pacing

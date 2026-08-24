@@ -47,7 +47,8 @@ describe("Candy Arcade visual regression contract", () => {
     const height = Number(markerCss.match(/height: ([\d.]+)px/)?.[1]);
     expect(width / height).toBeGreaterThanOrEqual(.92);
     expect(width / height).toBeLessThanOrEqual(1.08);
-    expect(html).toContain('<div class="timer-progress"></div><span class="timer-marker" data-layout-allow-occlusion><b class="marker-val val-query">?</b><b class="marker-val val-5">5</b>');
+    expect(html).toContain('<div class="timer-progress"></div><span class="timer-marker" data-layout-allow-occlusion>');
+    expect(html).toContain('<b class="marker-val val-query">?</b><b class="marker-val val-5">5</b>');
     expect(html).not.toContain('<div class="timer-progress"><span class="timer-marker');
     expect(html).toContain("@keyframes quiz-timer-marker-slide { from { left: 100%; } to { left: 0%; } }");
     expect(thinkingBarCss).toContain("animation: phase-hold var(--timer-duration) steps(1,end)");
@@ -100,7 +101,7 @@ describe("Candy Arcade visual regression contract", () => {
     expect(html).toContain("@keyframes ray-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }");
     expect(html).not.toContain("translate(-50%,-50%) rotate(360deg)");
     expect(phaseCss).toContain("position: absolute");
-    expect(phaseCss).toContain("bottom: 24px");
+    expect(phaseCss).toContain("bottom: 20px");
     expect(html).not.toContain("grid-area: phase");
     expect(html).not.toContain("Think it through!");
     expect(html).not.toContain("Lock in your answer!");

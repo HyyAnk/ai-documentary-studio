@@ -44,6 +44,7 @@ import { HyperframesRenderer } from "./quiz/render/hyperframesRenderer.js";
 import { preflightQuizRender } from "./quiz/qa/preflight.js";
 import { inspectRenderedVideo } from "./quiz/qa/postRenderQa.js";
 import { formatHyperframesCheckFailure, hasHyperframesContrastIssue, parseHyperframesCheckReport } from "./quiz/qa/hyperframesQuality.js";
+import { healCompositionContrast } from "./quiz/qa/contrastHealer.js";
 import { isQuizAssetResolutionComplete, resolveQuizAssets } from "./quiz/assets/resolveQuizAssets.js";
 import { compileTimeline, generateDirector, generateQuiz, generateVoice, planAssets, readQuizArtifacts, resolveAssets, runQa } from "./quiz/pipeline/orchestrator.js";
 import { quizVoicePlanNeedsRegeneration, quizVoiceTargetWordsPerSecond } from "./quiz/audio/voicePolicy.js";
@@ -847,7 +848,12 @@ export class TaskManager extends EventEmitter {
       }
       const fontTargetDir = path.join(renderRoot, "fonts");
       await mkdir(fontTargetDir, { recursive: true });
-      const fontFiles = ["SVN-Hello Headline.otf"];
+      const fontFiles = [
+        "SVN-Hello Headline.otf",
+        "Fredoka-VariableFont_wdth,wght.ttf",
+        "Baloo2-VariableFont_wght.ttf",
+        "Nunito-VariableFont_wght.ttf",
+      ];
       const fontCandidates = [
         path.join(this.repository.rootDirectory, "assets", "fonts"),
         path.join(this.repository.rootDirectory, "templates", "fonts"),
@@ -875,16 +881,34 @@ export class TaskManager extends EventEmitter {
         await this.update(task.task_id, { progress_message: "Video · layout and media checks already passed", progress_percent: 20 });
       } else {
         await this.update(task.task_id, { progress_message: "Video · checking layout and media", progress_percent: 20 });
-        let checkOutput: string;
-        try {
-          ({ stdout: checkOutput } = await execFileAsync(npxCommand, hyperframesArgs("check", renderRoot, "--json", "--samples", "5", "--timeout", "60000"), { cwd: this.repository.rootDirectory, timeout: 600_000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 }));
-        } catch (error) {
-          const failure = error as Error & { stdout?: string };
-          throw new RepositoryError(formatHyperframesCheckFailure(parseHyperframesCheckReport(failure.stdout), failure.message), "QUIZ_COMPOSITION_CHECK_FAILED");
-        }
-        const checkReport = parseHyperframesCheckReport(checkOutput);
-        if (hasHyperframesContrastIssue(checkReport)) {
-          throw new RepositoryError(formatHyperframesCheckFailure(checkReport), "QUIZ_COMPOSITION_CONTRAST_FAILED");
+        let checkOutput: string = "";
+        const maxCheckAttempts = 2;
+
+        for (let attempt = 1; attempt <= maxCheckAttempts; attempt++) {
+          try {
+            ({ stdout: checkOutput } = await execFileAsync(npxCommand, hyperframesArgs("check", renderRoot, "--json", "--samples", "5", "--timeout", "60000"), { cwd: this.repository.rootDirectory, timeout: 600_000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 }));
+          } catch (error) {
+            const failure = error as Error & { stdout?: string };
+            const errorReport = parseHyperframesCheckReport(failure.stdout);
+            if (attempt < maxCheckAttempts && hasHyperframesContrastIssue(errorReport)) {
+              await this.update(task.task_id, { progress_message: "Video · auto-healing contrast issues...", progress_percent: 22 });
+              await healCompositionContrast(renderRoot, errorReport);
+              continue;
+            }
+            throw new RepositoryError(formatHyperframesCheckFailure(errorReport, failure.message), "QUIZ_COMPOSITION_CHECK_FAILED");
+          }
+
+          const checkReport = parseHyperframesCheckReport(checkOutput);
+          if (hasHyperframesContrastIssue(checkReport)) {
+            if (attempt < maxCheckAttempts) {
+              await this.update(task.task_id, { progress_message: "Video · auto-healing contrast issues...", progress_percent: 22 });
+              await healCompositionContrast(renderRoot, checkReport);
+              continue;
+            }
+            throw new RepositoryError(formatHyperframesCheckFailure(checkReport), "QUIZ_COMPOSITION_CONTRAST_FAILED");
+          }
+
+          break;
         }
         await writeRenderCheckpoint(checkpointPath, { schema_version: 2, source_fingerprint: sourceFingerprint, check: { status: "passed" } });
       }

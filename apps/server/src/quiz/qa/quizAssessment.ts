@@ -36,7 +36,8 @@ export function assessQuiz(input: QuizAssessmentInput): QuizAssessment {
         stage: "semantic",
       });
     }
-    if (question.question.length > 220) result.push({ code: "layout_question_long", severity: "warning", message: "Question " + question.number + " is longer than the safe card limit.", next_action: "Shorten the question or use a layout variant with more breathing room.", question_ids: [question.id], stage: "layout" });
+    if (question.question.length > 100) result.push({ code: "layout_question_long", severity: "warning", message: "Question " + question.number + " exceeds the recommended child-friendly limit (100 characters).", next_action: "Shorten the question to be direct, punchy, and under 10 words.", question_ids: [question.id], stage: "layout" });
+    if (question.explanation.length > 150) result.push({ code: "layout_explanation_long", severity: "warning", message: "Question " + question.number + " explanation exceeds the recommended child-friendly limit (150 characters).", next_action: "Shorten the explanation to strictly 1 punchy sentence under 18 words with a fun fact.", question_ids: [question.id], stage: "layout" });
     if (question.choices.some((choice) => choice.text.length > 100)) result.push({ code: "layout_choice_long", severity: "warning", message: "Question " + question.number + " contains a long answer choice.", next_action: "Shorten the choice text so it remains readable on a 16:9 card.", question_ids: [question.id], stage: "layout" });
     return result;
   });
@@ -150,7 +151,7 @@ function candyArcadeVisualScore(issues: QuizIssue[]) {
     return Math.max(0, maximum - related.reduce((sum, issue) => sum + (issue.severity === "blocker" ? blocker : issue.severity === "warning" ? warning : 0), 0));
   };
   const pacing = penalty(["pacing_question_cycle_outside_target", "voice_pace_fast", "voice_pace_unsafe"], 20, 2, 10);
-  const hierarchy = penalty(["layout_question_overflow", "layout_choice_overflow", "layout_question_long", "layout_choice_long"], 15, 3, 15);
+  const hierarchy = penalty(["layout_question_overflow", "layout_choice_overflow", "layout_question_long", "layout_choice_long", "layout_explanation_long"], 15, 3, 15);
   const assetConsistency = penalty(["VISUAL_ANSWER_LEAKAGE", "needs_visual_review"], 15, 1, 15);
   const motion = penalty(["visual_motion_budget", "visual_static_interval"], 15, 3, 15);
   const reveal = penalty(["timeline_canonical_answer_mismatch", "timeline_reveal_before_thinking", "timeline_reward_before_reveal"], 10, 3, 10);

@@ -11,7 +11,7 @@ import { audioDiagnosticsForTimeline, type VoiceAudioDiagnostics } from "./audio
 import { countQuizVoiceWords, quizVoicePacingLimit } from "./voicePolicy.js";
 
 const execFileAsync = promisify(execFile);
-export const QUIZ_VOICE_PACING_VERSION = "paced-v12-age-targeted-performance";
+export const QUIZ_VOICE_PACING_VERSION = "paced-v13-expressive-playful";
 
 export type MeasuredQuizVoice = {
   voicePlan: VoicePlan;
@@ -58,7 +58,7 @@ export async function synthesizeQuizVoiceSegments(input: {
     const tempo = quizVoiceTempo(segment.role);
     const fingerprint = quizVoiceFingerprint(segment, tempo, voice, input.config, input.targetWordsPerSecond);
     const key = fingerprint;
-    const pacingVersion = `${segment.role === "outro" ? "paced-v12-outro" : "paced-v12"}-${fingerprint.slice(0, 20)}`;
+    const pacingVersion = `${segment.role === "outro" ? "paced-v13-outro" : "paced-v13"}-${fingerprint.slice(0, 20)}`;
     let rendered = cache.get(key);
     let reused = Boolean(rendered);
     if (!rendered) {
@@ -132,16 +132,16 @@ export function quizVoiceFingerprint(segment: VoiceSegment, tempo: number, voice
 /** Only controls supported by the local Chatterbox adapter are used here. */
 export function voicePerformanceConfig(config: AppConfig["audio_generation"], role: VoiceSegmentRole): AppConfig["audio_generation"] {
   const settings: Record<VoiceSegmentRole, { exaggeration: number; cfg_weight: number }> = {
-    intro: { exaggeration: .58, cfg_weight: .48 },
-    question: { exaggeration: .54, cfg_weight: .5 },
-    choice: { exaggeration: .48, cfg_weight: .52 },
-    thinking_prompt: { exaggeration: .62, cfg_weight: .44 },
-    countdown: { exaggeration: .5, cfg_weight: .5 },
-    reveal: { exaggeration: .66, cfg_weight: .38 },
-    explanation: { exaggeration: .42, cfg_weight: .56 },
-    fun_fact: { exaggeration: .4, cfg_weight: .58 },
-    midpoint: { exaggeration: .55, cfg_weight: .48 },
-    outro: { exaggeration: .56, cfg_weight: .48 },
+    intro: { exaggeration: .70, cfg_weight: .45 },
+    question: { exaggeration: .62, cfg_weight: .48 },
+    choice: { exaggeration: .56, cfg_weight: .50 },
+    thinking_prompt: { exaggeration: .75, cfg_weight: .42 },
+    countdown: { exaggeration: .60, cfg_weight: .48 },
+    reveal: { exaggeration: .78, cfg_weight: .36 },
+    explanation: { exaggeration: .58, cfg_weight: .52 },
+    fun_fact: { exaggeration: .62, cfg_weight: .50 },
+    midpoint: { exaggeration: .70, cfg_weight: .45 },
+    outro: { exaggeration: .72, cfg_weight: .45 },
   };
   return { ...config, ...settings[role] };
 }
