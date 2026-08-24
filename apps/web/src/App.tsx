@@ -35,6 +35,9 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [stopped, setStopped] = useState(false);
   const [theme, setTheme] = useState<Theme>(() => window.localStorage.getItem("studio-theme") === "light" ? "light" : "dark");
+  const [imageBalance, setImageBalance] = useState<{ balance_vnd: number; rpm?: number } | null>(null);
+  const [loadingBalance, setLoadingBalance] = useState(false);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
   const { channels, setChannels, refresh: refreshChannels } = useChannels();
   const handleTerminalTask = useCallback((task: Task) => {
     if (task.status === "COMPLETED") setNotice({ tone: "good", message: `${formatTaskType(task.task_type)} completed` });
@@ -42,6 +45,28 @@ export function App() {
   }, []);
   const taskStore = useTasks(handleTerminalTask);
   const { tasks, activeTasks, now: taskClock, codexStatus, realtimeStatus, upsertTask, setCodexStatus, refresh: refreshTasks } = taskStore;
+
+  const fetchBalance = useCallback(async () => {
+    try {
+      setLoadingBalance(true);
+      const res = await api.imageBalance();
+      setImageBalance(res);
+      setBalanceError(null);
+    } catch (err) {
+      setImageBalance(null);
+      setBalanceError(err instanceof Error ? err.message : "Failed to load balance");
+    } finally {
+      setLoadingBalance(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchBalance();
+    const interval = setInterval(() => {
+      void fetchBalance();
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchBalance]);
 
   const loadModelsForEngine = useCallback(async (engine: "codex" | "antigravity") => {
     setLoadingModels(true);
@@ -181,7 +206,19 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar page={page} setPage={navigate} activeTaskCount={activeTasks.length} />
+      <Sidebar
+        page={page}
+        setPage={navigate}
+        activeTaskCount={activeTasks.length}
+        balanceInfo={imageBalance}
+        loadingBalance={loadingBalance}
+        balanceError={balanceError}
+        onRefreshBalance={fetchBalance}
+        onOpenSettings={() => {
+          openPage("settings");
+          setQueryParam("tab", "media");
+        }}
+      />
       <main className="main-column">
         <Topbar
           channel={selectedChannel}
@@ -276,7 +313,10 @@ export function App() {
             onAntigravitySaved={setAntigravity}
             onAudioSaved={(audio) => setAppConfig((current) => current ? { ...current, audio_generation: audio } : current)}
             onVideoSaved={(video) => setAppConfig((current) => current ? { ...current, video_generation: video } : current)}
-            onImageSaved={(image) => setAppConfig((current) => current ? { ...current, image_generation: image } : current)}
+            onImageSaved={(image) => {
+              setAppConfig((current) => current ? { ...current, image_generation: image } : current);
+              void fetchBalance();
+            }}
             onChannelUpdated={(channel) => setChannels((current) => current.map((item) => item.channel_id === channel.channel_id ? channel : item))}
             onNotice={setNotice}
           />

@@ -243,8 +243,8 @@ export class RepositoryService {
       created_at: timestamp,
       updated_at: timestamp,
       episode_count: 0,
-      group_id: input.group_id === "quiz" ? "quiz" : "documentary",
-      engine: input.group_id === "quiz" ? "quiz" : "documentary",
+      group_id: "quiz",
+      engine: "quiz",
     });
     await this.writeJsonAtomic(path.join(directory, "channel.json"), channel);
     return channel;

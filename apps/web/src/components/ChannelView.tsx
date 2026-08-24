@@ -54,17 +54,15 @@ export function ChannelsView({
   imageGenerationEnabled: boolean;
   imagesPerBundle: number;
 }) {
-  const initialGroup: ChannelGroupId = (activeGroupQuery === "quiz" || activeGroupQuery === "documentary") ? activeGroupQuery : "quiz";
+  const initialGroup: ChannelGroupId = "quiz";
   const [activeGroup, setActiveGroup] = useState<ChannelGroupId>(initialGroup);
 
   useEffect(() => {
-    if (activeGroupQuery === "quiz" || activeGroupQuery === "documentary") {
-      setActiveGroup(activeGroupQuery);
-    }
+    setActiveGroup("quiz");
   }, [activeGroupQuery]);
 
   useEffect(() => {
-    if (selectedChannel) setActiveGroup(selectedChannel.engine === "quiz" ? "quiz" : "documentary");
+    if (selectedChannel) setActiveGroup("quiz");
   }, [selectedChannel]);
 
   const handleGroupChange = (group: ChannelGroupId) => {
@@ -517,7 +515,7 @@ export function ChannelDetail({
 
         <div className="detail-header">
           <div>
-            <p className="eyebrow">{channel.engine === "quiz" ? "Quiz Engine Channel" : "Documentary Channel"}</p>
+            <p className="eyebrow">Quiz Engine Channel</p>
             <h1>{channel.display_name}</h1>
             <p className="detail-copy">{channel.description || "No description yet. Your DNA is the source of truth for this channel."}</p>
           </div>
@@ -786,7 +784,7 @@ export function ChannelDetail({
                 </div>
               </div>
               <div className="status-stack">
-                <StatusLine label="Engine" value={channel.engine === "quiz" ? "Quiz Engine" : "Documentary"} />
+                <StatusLine label="Engine" value="Quiz Engine" />
                 <StatusLine label="Channel Status" value={channel.status} />
                 <StatusLine label="Total Episodes" value={String(episodes.length)} />
                 <StatusLine label="Target Audience" value={channel.target_audience || "General Audience"} />
@@ -851,11 +849,11 @@ function ChannelLoadingState({
 type CreateChannelForm = { name: string; description: string; target_audience: string; language: string; market: string; group_id: ChannelGroupId; dna_mode: "example" | "ai" | "upload"; dna_content: string };
 
 export function CreateChannelModal({ initialGroupId = "quiz", onClose, onCreated, onError }: { initialGroupId?: ChannelGroupId; onClose: () => void; onCreated: (channelId: string, message: string, task: Task | null) => Promise<void>; onError: (error: unknown) => void }) {
-  const [form, setForm] = useState<CreateChannelForm>({ name: "", description: "", target_audience: initialGroupId === "quiz" ? "Children and families" : "Curious viewers", language: "English", market: "Global", group_id: initialGroupId, dna_mode: "example", dna_content: "" });
+  const [form, setForm] = useState<CreateChannelForm>({ name: "", description: "", target_audience: "Children and families", language: "English", market: "Global", group_id: initialGroupId, dna_mode: "example", dna_content: "" });
   const [dnaFileName, setDnaFileName] = useState("");
   const [busy, setBusy] = useState(false);
   const handleDnaUpload = async (event: React.ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; if (!file.name.toLowerCase().endsWith(".md")) { event.target.value = ""; onError(new Error("Choose a Markdown file (.md) for channel DNA.")); return; } try { const content = await file.text(); if (!content.trim()) throw new Error("The selected channel DNA file is empty."); setForm((current) => ({ ...current, dna_mode: "upload", dna_content: content })); setDnaFileName(file.name); } catch (error) { event.target.value = ""; onError(error); } };
   const submit = async (event: React.FormEvent) => { event.preventDefault(); if (form.dna_mode === "upload" && !form.dna_content.trim()) { onError(new Error("Choose a channel_dna.md file before creating the channel.")); return; } setBusy(true); try { const result = await api.createChannel(form); const message = result.task ? "Channel created and DNA generation queued" : form.dna_mode === "upload" ? "Channel created from uploaded DNA" : "Channel created with example DNA"; await onCreated(result.channel.channel_id, message, result.task); } catch (error) { onError(error); } finally { setBusy(false); } };
-  const quiz = form.group_id === "quiz";
-  return <div className="modal-backdrop" role="presentation"><form className="modal" onSubmit={(event) => void submit(event)}><div className="modal-heading"><div><p className="eyebrow">{quiz ? "Quiz Channels" : "Documentary Channels"}</p><h2>Create channel</h2></div><button type="button" className="icon-button" onClick={onClose}><X size={18} /></button></div><div className="selected-group-field"><span>Channel group</span><div className="group-picker" role="group" aria-label="Channel group"><button type="button" className={`group-picker-option ${quiz ? "is-selected" : ""}`} onClick={() => setForm((current) => ({ ...current, group_id: "quiz", target_audience: current.target_audience === "Curious viewers" ? "Children and families" : current.target_audience }))}>Quiz Channels</button><button type="button" className={`group-picker-option ${!quiz ? "is-selected" : ""}`} onClick={() => setForm((current) => ({ ...current, group_id: "documentary", target_audience: current.target_audience === "Children and families" ? "Curious viewers" : current.target_audience }))}>Documentary Channels</button></div><small>{quiz ? "Quiz Engine is the active production template" : "Documentary Engine keeps the existing research-to-video workflow"}</small></div><label>Channel name<input required autoFocus value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder={quiz ? "World Wonder Quiz" : "Future Systems"} /></label><label>Concept or description<textarea value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} placeholder={quiz ? "What should children discover?" : "What should this documentary channel explore?"} /></label><div className="form-grid"><label>Audience<input value={form.target_audience} onChange={(event) => setForm((current) => ({ ...current, target_audience: event.target.value }))} placeholder={quiz ? "Children and families" : "Curious viewers"} /></label><label>Market<input value={form.market} onChange={(event) => setForm((current) => ({ ...current, market: event.target.value }))} placeholder="Global" /></label></div><div className="dna-choice"><span className="field-label">Starting DNA</span><div className="choice-row dna-choice-row">{(["example", "ai", "upload"] as const).map((value) => <button type="button" key={value} className={`choice ${form.dna_mode === value ? "is-selected" : ""}`} onClick={() => setForm((current) => ({ ...current, dna_mode: value }))}><span className="choice-radio" />{value === "example" ? quiz ? "Use Quiz DNA" : "Use Documentary DNA" : value === "ai" ? "Create with AI" : "Upload DNA"}</button>)}</div>{form.dna_mode === "upload" ? <div className="dna-upload"><label className="dna-upload-button"><FileText size={15} />{dnaFileName || "Choose channel_dna.md"}<input aria-label="Channel DNA file" type="file" accept=".md,text/markdown" onChange={(event) => void handleDnaUpload(event)} /></label>{dnaFileName ? <span className="dna-file-name">{dnaFileName}</span> : <span className="dna-upload-hint">Markdown only</span>}</div> : null}</div><div className="modal-actions"><button type="button" className="quiet-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy || (form.dna_mode === "upload" && !form.dna_content.trim())}>{busy ? <CircleNotch className="spin" size={16} /> : <Plus size={16} />}Create channel</button></div></form></div>;
+  return <div className="modal-backdrop" role="presentation"><form className="modal" onSubmit={(event) => void submit(event)}><div className="modal-heading"><div><p className="eyebrow">Quiz Channels</p><h2>Create channel</h2></div><button type="button" className="icon-button" onClick={onClose}><X size={18} /></button></div><label>Channel name<input required autoFocus value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} placeholder="World Wonder Quiz" /></label><label>Concept or description<textarea value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} placeholder="What should children discover?" /></label><div className="form-grid"><label>Audience<input value={form.target_audience} onChange={(event) => setForm((current) => ({ ...current, target_audience: event.target.value }))} placeholder="Children and families" /></label><label>Market<input value={form.market} onChange={(event) => setForm((current) => ({ ...current, market: event.target.value }))} placeholder="Global" /></label></div><div className="dna-choice"><span className="field-label">Starting DNA</span><div className="choice-row dna-choice-row">{(["example", "ai", "upload"] as const).map((value) => <button type="button" key={value} className={`choice ${form.dna_mode === value ? "is-selected" : ""}`} onClick={() => setForm((current) => ({ ...current, dna_mode: value }))}><span className="choice-radio" />{value === "example" ? "Use Quiz DNA" : value === "ai" ? "Create with AI" : "Upload DNA"}</button>)}</div>{form.dna_mode === "upload" ? <div className="dna-upload"><label className="dna-upload-button"><FileText size={15} />{dnaFileName || "Choose channel_dna.md"}<input aria-label="Channel DNA file" type="file" accept=".md,text/markdown" onChange={(event) => void handleDnaUpload(event)} /></label>{dnaFileName ? <span className="dna-file-name">{dnaFileName}</span> : <span className="dna-upload-hint">Markdown only</span>}</div> : null}</div><div className="modal-actions"><button type="button" className="quiet-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy || (form.dna_mode === "upload" && !form.dna_content.trim())}>{busy ? <CircleNotch className="spin" size={16} /> : <Plus size={16} />}Create channel</button></div></form></div>;
 }
+

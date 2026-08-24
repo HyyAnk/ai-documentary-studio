@@ -111,16 +111,16 @@ describe("Candy Arcade visual template", () => {
     expect(heroPrompt.prompt).toContain("3D Pixar Animation");
     expect(heroPrompt.prompt).toContain("soft cinematic studio lighting");
     expect(heroPrompt.prompt).toContain("Face policy: natural_only");
-    expect(heroPrompt.prompt).toContain("soft-focus pastel environment");
+    expect(heroPrompt.prompt).toContain("cinematic 3D environment");
 
     // Test other visual styles
     const vectorPrompt = compileQuizAssetPrompt(hero, undefined, "flat_vector");
     expect(vectorPrompt.prompt).toContain("2D Flat Vector");
-    expect(vectorPrompt.prompt).toContain("geometric or nature backdrop");
+    expect(vectorPrompt.prompt).toContain("vibrant modern vector landscape");
 
     const voxelPrompt = compileQuizAssetPrompt(hero, undefined, "voxel_lowpoly");
     expect(voxelPrompt.prompt).toContain("3D Voxel / Low-Poly");
-    expect(voxelPrompt.prompt).toContain("voxel grid landscape");
+    expect(voxelPrompt.prompt).toContain("3D voxel blocky environment");
 
     expect(assessQuizVisualLayout({ quiz, director }).filter((issue) => issue.severity === "blocker")).toEqual([]);
     const fairnessIssues = assessQuizVisualLayout({ quiz, director, assetPlan });

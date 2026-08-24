@@ -1,9 +1,27 @@
 import { useEffect, useRef, useState } from "react";
-import { Broadcast, CaretDown, Check, CheckCircle, CircleNotch, FileText, Gear, GitBranch, House, Image, ListChecks, MoonStars, Power, SpeakerHigh, Sparkle, Sun, TerminalWindow, VideoCamera, WarningCircle, X } from "@phosphor-icons/react";
+import { ArrowClockwise, Broadcast, CaretDown, Check, CheckCircle, CircleNotch, FileText, Gear, House, Image, ListChecks, MoonStars, SpeakerHigh, Sparkle, Sun, TerminalWindow, VideoCamera, Wallet, WarningCircle, X } from "@phosphor-icons/react";
 import type { Channel, CodexSettingsResponse } from "@studio/shared";
 import type { GitInfo, Notice, Page, Theme } from "./types";
 
-export function Sidebar({ page, setPage, activeTaskCount }: { page: Page; setPage: (page: Page) => void; activeTaskCount: number }) {
+export function Sidebar({
+  page,
+  setPage,
+  activeTaskCount,
+  balanceInfo,
+  loadingBalance = false,
+  balanceError = null,
+  onRefreshBalance,
+  onOpenSettings,
+}: {
+  page: Page;
+  setPage: (page: Page) => void;
+  activeTaskCount: number;
+  balanceInfo?: { balance_vnd: number; rpm?: number } | null;
+  loadingBalance?: boolean;
+  balanceError?: string | null;
+  onRefreshBalance?: () => void;
+  onOpenSettings?: () => void;
+}) {
   const items: Array<{ page: Page; label: string; icon: typeof House }> = [
     { page: "dashboard", label: "Dashboard", icon: House },
     { page: "channels", label: "Channels", icon: Broadcast },
@@ -12,12 +30,12 @@ export function Sidebar({ page, setPage, activeTaskCount }: { page: Page; setPag
   return (
     <aside className="sidebar">
       <div className="brand-lockup">
-        <div className="brand-mark" title="AI Documentary & Quiz Studio">
+        <div className="brand-mark" title="AI Quiz Studio">
           <Sparkle size={18} weight="fill" />
         </div>
         <div>
-          <span className="brand-name">Studio</span>
-          <span className="brand-subtitle">Doc & Quiz AI</span>
+          <span className="brand-name">Quiz Studio</span>
+          <span className="brand-subtitle">AI Video Engine</span>
         </div>
       </div>
       <div className="sidebar-rule" />
@@ -45,6 +63,52 @@ export function Sidebar({ page, setPage, activeTaskCount }: { page: Page; setPag
         </button>
       </nav>
       <div className="sidebar-bottom">
+        <div
+          className="sidebar-balance-widget"
+          title="gpti2.store Image API balance (Tự động cập nhật mỗi 30s)"
+          style={{ cursor: !balanceInfo && onOpenSettings ? "pointer" : "default" }}
+          onClick={() => {
+            if (!balanceInfo && onOpenSettings) onOpenSettings();
+          }}
+        >
+          <div className="sidebar-balance-header">
+            <div className="sidebar-balance-title">
+              <Wallet size={14} weight="duotone" />
+              <span>API Balance</span>
+            </div>
+            <button
+              type="button"
+              className="sidebar-balance-refresh-btn"
+              title="Cập nhật số dư API (Tự động mỗi 30s)"
+              aria-label="Cập nhật số dư API"
+              disabled={loadingBalance}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRefreshBalance?.();
+              }}
+            >
+              <ArrowClockwise size={12} className={loadingBalance ? "spin" : ""} />
+            </button>
+          </div>
+          <div className="sidebar-balance-amount">
+            {balanceInfo !== null && balanceInfo !== undefined ? (
+              <>
+                <strong>{balanceInfo.balance_vnd.toLocaleString("vi-VN")}</strong>
+                <span className="sidebar-balance-unit">đ</span>
+              </>
+            ) : balanceError ? (
+              <span className="sidebar-balance-error" title={balanceError}>Chưa có Key</span>
+            ) : (
+              <span className="sidebar-balance-loading">Đang tải…</span>
+            )}
+          </div>
+          {balanceInfo?.rpm ? (
+            <div className="sidebar-balance-rpm">
+              <span>RPM: {balanceInfo.rpm}</span>
+            </div>
+          ) : null}
+        </div>
+
         <button
           className={`nav-item ${page === "settings" ? "is-active" : ""}`}
           onClick={() => setPage("settings")}
@@ -223,11 +287,6 @@ export function Topbar({
             Reconnect
           </button>
         ) : null}
-        <span className="git-readout">
-          <GitBranch size={14} />
-          {git.branch ?? "No Git"}
-          {git.dirty ? <span className="dirty-dot" title={`${git.changed_files} changed files`} /> : null}
-        </span>
         <button
           className="icon-button theme-toggle"
           title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
@@ -235,14 +294,6 @@ export function Topbar({
           onClick={onThemeToggle}
         >
           {theme === "dark" ? <Sun size={16} /> : <MoonStars size={16} />}
-        </button>
-        <button
-          className="icon-button danger shutdown-button"
-          title="Stop dashboard"
-          aria-label="Stop dashboard"
-          onClick={onShutdown}
-        >
-          <Power size={16} />
         </button>
       </div>
     </header>

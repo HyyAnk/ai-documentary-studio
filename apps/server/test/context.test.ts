@@ -76,16 +76,14 @@ describe("ContextEngine", () => {
     await logger.init();
     const engine = new ContextEngine(repository, logger);
 
-    for (const minutes of [3, 4, 5, 6, 7, 8]) {
-      const configured = await repository.updateEpisodeSettings(channel.channel_id, episode.episode_id, { target_duration_minutes: minutes }, 2.3);
-      const target = calibratedScriptTargetWords(configured, 2.3);
-      const bounds = scriptWordBounds(target);
+    for (const minutes of [3, 4, 5]) {
+      await repository.updateEpisodeSettings(channel.channel_id, episode.episode_id, { target_duration_minutes: minutes }, 2.3);
       const context = await engine.build("GENERATE_SCRIPT", channel.channel_id, episode.episode_id);
-      expect(context.prompt).toContain(`Target approximately ${target} spoken words for ${minutes} minutes`);
-      expect(context.prompt).toContain(`hard acceptable range is ${bounds.lower}–${bounds.upper}`);
-      expect(context.prompt).toContain(minutes <= 3 ? "1–2 dry" : minutes <= 5 ? "2–3 dry" : "2–4 dry");
+      expect(context.prompt).toContain("Return only one completed Markdown quiz narration script");
+      expect(context.prompt).toContain("Question");
+      expect(context.prompt).toContain("maximum 3 options");
       const treatmentContext = await engine.build("GENERATE_TREATMENT", channel.channel_id, episode.episode_id);
-      expect(treatmentContext.prompt).toContain(minutes <= 3 ? "5–6 numbered sequences" : minutes <= 5 ? "6–8 numbered sequences" : "7–10 numbered sequences");
+      expect(treatmentContext.prompt).toContain("question blocks");
     }
   });
 
@@ -139,7 +137,7 @@ describe("ContextEngine", () => {
 
     expect(context.prompt).toContain("visual bible fallback for requested section 6");
     expect(context.prompt).toContain("CB-05");
-    expect(context.prompt).toContain('continuity_bundle_id \\"CB-06\\"');
+    expect(context.prompt).toContain("CB-06");
   });
 
   it("scopes research dossier to only the requested sequence claim in long dossiers", async () => {

@@ -49,6 +49,9 @@ export class AntigravityNativeImageProvider implements ImageProvider {
       : `bundle_cb_${String(this.target.bundleNumber ?? 1).padStart(2, "0")}`;
 
     const cleanPrompt = this.extractCleanVisualPrompt(prompt);
+    const ratioMatch = prompt.match(/Output framing:\s*(1:1|16:9|9:16|4:3|3:4|2:3|3:2)/i)
+      || prompt.match(/Composition:\s*(1:1|16:9|9:16|4:3|3:4|2:3|3:2)/i);
+    const targetAspectRatio = ratioMatch ? ratioMatch[1] : "16:9";
 
     const maxAttempts = 5;
     let lastError: Error | null = null;
@@ -64,7 +67,7 @@ export class AntigravityNativeImageProvider implements ImageProvider {
       try {
         const turnPrompt = [
           `You are an AI illustrator. Call the generate_image tool immediately:`,
-          `- AspectRatio: "16:9"`,
+          `- AspectRatio: "${targetAspectRatio}"`,
           `- ImageName: "${imageName}"`,
           `- Prompt: "${cleanPrompt}"`,
           ``,
@@ -153,38 +156,43 @@ export class AntigravityNativeImageProvider implements ImageProvider {
         .replace(/[`"]/g, "")
         .replace(/\s+/g, " ")
         .trim();
-      return (cleanedAnchor || anchorMatch[1].replace(/[`"]/g, "").replace(/\s+/g, " ").trim()).slice(0, 450);
+      return (cleanedAnchor || anchorMatch[1].replace(/[`"]/g, "").replace(/\s+/g, " ").trim()).slice(0, 600);
     }
 
     // 2. If prompt is compiled quiz asset prompt (e.g. Subject: ..., Purpose: ..., Solo hero art contract: ...)
-    if (rawPrompt.includes("Subject:") || rawPrompt.includes("Visual Style Bible:") || rawPrompt.includes("Solo hero art contract:")) {
-      const subjectMatch = rawPrompt.match(/Subject\s*:\s*([^\n\r.]+)/i);
-      const subject = subjectMatch ? subjectMatch[1].trim() : "";
-      const artStyleMatch = rawPrompt.match(/(?:Solo hero art contract|Consistency group)[^:]*:\s*([^\n\r.]+)/i);
-      const artStyle = artStyleMatch ? artStyleMatch[1].trim() : "polished 3D clay-like illustration";
-      const lightingMatch = rawPrompt.match(/Lighting\s*:\s*([^\n\r.]+)/i);
-      const lighting = lightingMatch ? lightingMatch[1].trim() : "soft clean lighting";
+    if (rawPrompt.includes("Subject:") || rawPrompt.includes("Visual Style:") || rawPrompt.includes("Solo hero art contract:")) {
+      const subjectMatch = rawPrompt.match(/Subject\s*:\s*([^\n\r]+)/i);
+      const subject = subjectMatch ? subjectMatch[1].replace(/\.$/, "").trim() : "";
+      const visualStyleMatch = rawPrompt.match(/Visual Style\s*:\s*([^\n\r]+)/i);
+      const visualStyle = visualStyleMatch ? visualStyleMatch[1].replace(/\.$/, "").trim() : "";
+      const artContractMatch = rawPrompt.match(/(?:Solo hero art contract|Every option in this set must share this exact art direction)\s*:\s*([^\n\r]+)/i);
+      const artContract = artContractMatch ? artContractMatch[1].replace(/\.$/, "").trim() : "";
+      const lightingMatch = rawPrompt.match(/Lighting\s*:\s*([^\n\r]+)/i);
+      const lighting = lightingMatch ? lightingMatch[1].replace(/\.$/, "").trim() : "";
+      const backgroundMatch = rawPrompt.match(/Background\s*:\s*([^\n\r]+)/i);
+      const background = backgroundMatch ? backgroundMatch[1].replace(/\.$/, "").trim() : "";
 
       const parts = [
-        subject ? `${subject}` : "",
-        artStyle,
-        lighting,
-        "clean composition, vibrant colors, child-friendly high quality 16:9 visual illustration",
-        "no text, no watermark, no split panels, no labels",
+        subject ? `Subject: ${subject}.` : "",
+        visualStyle ? `Style: ${visualStyle}.` : "",
+        artContract ? `Art Direction: ${artContract}.` : "",
+        lighting ? `Lighting: ${lighting}.` : "",
+        background ? `Background: ${background}.` : "",
+        "High quality, vibrant colors, child-friendly, clear focal subject, no text, no letters, no logos, no watermark, no split screen.",
       ].filter(Boolean);
 
-      return parts.join(", ").slice(0, 450);
+      return parts.join(" ").slice(0, 900);
     }
 
     // 3. If prompt is structured manifest, extract core visual instructions
     if (rawPrompt.includes("Task type:") || rawPrompt.includes("Channel DNA") || rawPrompt.includes("--- FILE:")) {
       const visualMatch = rawPrompt.match(/Generate exactly one reference image for continuity bundle [^.]*\.\s*([^\n\r]+)/i);
       if (visualMatch && visualMatch[1].trim()) {
-        return visualMatch[1].replace(/[`"]/g, "").replace(/\s+/g, " ").trim().slice(0, 450);
+        return visualMatch[1].replace(/[`"]/g, "").replace(/\s+/g, " ").trim().slice(0, 600);
       }
     }
 
-    // 4. Fallback: clean raw prompt, remove markdown tags, clamp to max 400 chars
+    // 4. Fallback: clean raw prompt, remove markdown tags, clamp to max 600 chars
     const cleaned = rawPrompt
       .replace(/--- FILE:[\s\S]*$/i, "")
       .replace(/#+ [^\n\r]+/g, " ")
@@ -192,7 +200,7 @@ export class AntigravityNativeImageProvider implements ImageProvider {
       .replace(/\s+/g, " ")
       .trim();
 
-    return cleaned.slice(0, 400);
+    return cleaned.slice(0, 600);
   }
 
   private async findGeneratedImage(imageNamePrefix: string, turnStartTime?: number, specificConvId?: string | null): Promise<Uint8Array | null> {

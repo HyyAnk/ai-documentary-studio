@@ -38,6 +38,7 @@ import { stripEditorialOverlayInstructions } from "./visualPrompt.js";
 import { parseContinuityBundles, replaceBundleAnchorPrompt } from "./visualBundles.js";
 import { isContentFilterError, extractFilterReason, sanitizeImagePromptWithLLM } from "./utils/promptSanitizer.js";
 import { extractArtifactSectionNumbers, formatArtifactSectionNumbers, missingArtifactSectionNumbers, contiguousArtifactNumbers } from "./artifactSections.js";
+import { runConcurrent } from "./utils/concurrency.js";
 import { buildQuizComposition } from "./quiz/render/buildComposition.js";
 import { HyperframesRenderer } from "./quiz/render/hyperframesRenderer.js";
 import { preflightQuizRender } from "./quiz/qa/preflight.js";
@@ -659,8 +660,6 @@ export class TaskManager extends EventEmitter {
       const visualBibleChanged = await step("Visual bible · locking continuity", 50, "GENERATE_VISUAL_BIBLE", async () => !(await this.hasReadyArtifact(task.channel_id, episodeId, "visual_bible.md")));
       const upstreamChanged = researchChanged || treatmentChanged || scriptChanged || visualBibleChanged;
 
-      await this.generatePipelineBundleImages(task, run);
-
       const scenes = await this.repository.readScenes(task.channel_id, episodeId);
       if (run.cancelled) throw new Error("Pipeline cancelled");
       const shotPlanFresh = await this.isShotPlanFresh(task.channel_id, episodeId);
@@ -695,39 +694,21 @@ export class TaskManager extends EventEmitter {
         }
       }
 
-      await this.attachPipelineBundleImages(task.channel_id, episodeId);
       const balancedScenes = rebalanceEditorialOverlays(await this.repository.readScenes(task.channel_id, episodeId));
       await this.repository.saveScenes(task.channel_id, episodeId, balancedScenes);
 
       if (run.cancelled) throw new Error("Pipeline cancelled");
-      const channel = await this.repository.getChannel(task.channel_id);
-      if (channel.engine === "quiz") {
-        await this.runQuizV2Pipeline(task);
-      } else {
-        await this.update(task.task_id, { progress_message: "Narration · generating the master voice track", progress_percent: 88 });
-        const episode = await this.repository.getEpisode(task.channel_id, episodeId);
-        if (upstreamChanged || !(await this.hasValidNarrationAsset(task.channel_id, episodeId, episode.narration_asset_path))) {
-          const child = this.submit("GENERATE_NARRATION", task.channel_id, episodeId);
-          run.children.add(child.task_id);
-          try {
-            const completed = await this.waitForTaskTerminal(child.task_id, run);
-            if (completed.status !== "COMPLETED") throw new Error(`Narration failed: ${completed.error ?? completed.status}`);
-          } finally {
-            run.children.delete(child.task_id);
-          }
-        }
-      }
-      if (channel.engine === "quiz") {
-        if (run.cancelled) throw new Error("Pipeline cancelled");
-        await this.update(task.task_id, { progress_message: "Video · linting Quiz composition", progress_percent: 92 });
-        const videoChild = this.submit("GENERATE_VIDEO", task.channel_id, episodeId);
-        run.children.add(videoChild.task_id);
-        try {
-          const completed = await this.waitForTaskTerminal(videoChild.task_id, run);
-          if (completed.status !== "COMPLETED") throw new Error(`Video render failed: ${completed.error ?? completed.status}`);
-        } finally {
-          run.children.delete(videoChild.task_id);
-        }
+      await this.runQuizV2Pipeline(task);
+
+      if (run.cancelled) throw new Error("Pipeline cancelled");
+      await this.update(task.task_id, { progress_message: "Video · linting Quiz composition", progress_percent: 92 });
+      const videoChild = this.submit("GENERATE_VIDEO", task.channel_id, episodeId);
+      run.children.add(videoChild.task_id);
+      try {
+        const completed = await this.waitForTaskTerminal(videoChild.task_id, run);
+        if (completed.status !== "COMPLETED") throw new Error(`Video render failed: ${completed.error ?? completed.status}`);
+      } finally {
+        run.children.delete(videoChild.task_id);
       }
       await this.finish(task.task_id, "COMPLETED", null, []);
     } catch (error) {
@@ -833,7 +814,7 @@ export class TaskManager extends EventEmitter {
         path.resolve("templates", "sfx"),
         path.resolve("assets", "audio", "sfx"),
       ];
-      for (const file of sfxFiles) {
+      await Promise.all(sfxFiles.map(async (file) => {
         for (const candidateDir of sfxCandidates) {
           const candidateFile = path.join(candidateDir, file);
           try {
@@ -843,7 +824,7 @@ export class TaskManager extends EventEmitter {
             // try next candidate
           }
         }
-      }
+      }));
       const bgmTargetDir = path.join(renderRoot, "bgm");
       await mkdir(bgmTargetDir, { recursive: true });
       const bgmCandidates = [
@@ -855,12 +836,11 @@ export class TaskManager extends EventEmitter {
       for (const candidateDir of bgmCandidates) {
         try {
           const entries = await readdir(candidateDir);
-          for (const entry of entries) {
-            if (entry.endsWith(".mp3")) {
-              await copyFile(path.join(candidateDir, entry), path.join(bgmTargetDir, entry));
-            }
+          const mp3s = entries.filter((entry) => entry.endsWith(".mp3"));
+          if (mp3s.length > 0) {
+            await Promise.all(mp3s.map((entry) => copyFile(path.join(candidateDir, entry), path.join(bgmTargetDir, entry))));
+            break;
           }
-          break;
         } catch {
           // try next candidate
         }
@@ -1190,56 +1170,79 @@ export class TaskManager extends EventEmitter {
 
   private async runNarrationTask(task: Task): Promise<void> {
     if (!task.episode_id) throw new RepositoryError("Episode is required", "EPISODE_REQUIRED");
-    const script = await this.repository.getEpisodeFile(task.channel_id, task.episode_id, "script.md");
+    const episodeId = task.episode_id;
+    const channelId = task.channel_id;
+    const script = await this.repository.getEpisodeFile(channelId, episodeId, "script.md");
     const sections = extractNarrationChunks(script.content, 60, true).filter((section) => countWords(section.text) >= 3);
     if (sections.length === 0) throw new RepositoryError("A completed script is required before narration", "SCRIPT_REQUIRED");
-    const channel = await this.repository.getChannel(task.channel_id);
-    const episode = await this.repository.getEpisode(task.channel_id, task.episode_id);
+    const channel = await this.repository.getChannel(channelId);
+    const episode = await this.repository.getEpisode(channelId, episodeId);
     const voice = channel.voice_reference_path ? this.repository.resolveContextPath(channel.voice_reference_path) : "default";
-    const checkpointPath = this.repository.resolvePath("runtime", "narration-checkpoints", task.episode_id, "segments.json");
+    const checkpointPath = this.repository.resolvePath("runtime", "narration-checkpoints", episodeId, "segments.json");
     const checkpoint = await readNarrationCheckpoint(checkpointPath);
     const nextCheckpoint: NarrationCheckpoint = { schema_version: 1, script_modified_at: script.modified_at, segments: {} };
     const segmentPaths: string[] = [];
-    for (const [index, section] of sections.entries()) {
+    const concurrency = Math.max(1, Math.min(3, this.audioConfig.max_concurrent_tasks || 2));
+    let completed = 0;
+    const segmentResults = await runConcurrent(sections, concurrency, async (section, index) => {
       const segmentNumber = index + 1;
       const fingerprint = narrationSegmentFingerprint(section.text, voice, script.modified_at, this.audioConfig, this.videoConfig.narration_words_per_second);
       let audio: Uint8Array | null = null;
       let assetPath: string | null = null;
+      let isReused = false;
       const saved = checkpoint?.script_modified_at === script.modified_at ? checkpoint.segments[String(segmentNumber)] : undefined;
       if (saved?.fingerprint === fingerprint) {
         try {
-          const existing = await this.repository.getEpisodeAudioFile(task.channel_id, task.episode_id, path.basename(saved.asset_path));
+          const existing = await this.repository.getEpisodeAudioFile(channelId, episodeId, path.basename(saved.asset_path));
           const existingAudio = new Uint8Array(await readFile(existing.absolutePath));
           const existingDuration = parseWavDuration(existingAudio);
           validateNarrationSegmentDuration(existingDuration, section.text, this.videoConfig.narration_words_per_second, segmentNumber);
           audio = existingAudio;
           assetPath = existing.path;
+          isReused = true;
         } catch {
           // A checkpoint is advisory; missing, stale, or corrupt audio is regenerated below.
         }
       }
       if (!audio || !assetPath) {
-        await this.update(task.task_id, { progress_message: `Narration · generating ${section.title} (${segmentNumber}/${sections.length})`, progress_percent: Math.round((index / sections.length) * 78) });
         audio = await synthesizeWav(this.audioConfig, section.text, voice);
         const audioDuration = parseWavDuration(audio);
         validateNarrationSegmentDuration(audioDuration, section.text, this.videoConfig.narration_words_per_second, segmentNumber);
-        assetPath = await this.repository.writeNarrationAudio(task.channel_id, task.episode_id, audio, segmentNumber);
-      } else {
-        await this.update(task.task_id, { progress_message: `Narration · reusing ${section.title} (${segmentNumber}/${sections.length})`, progress_percent: Math.round((index / sections.length) * 78) });
+        assetPath = await this.repository.writeNarrationAudio(channelId, episodeId, audio, segmentNumber);
       }
+      completed++;
+      await this.update(task.task_id, {
+        progress_message: `Narration · ${isReused ? "reusing" : "generating"} ${section.title} (${completed}/${sections.length})`,
+        progress_percent: Math.round((completed / sections.length) * 78),
+      });
       const audioDuration = parseWavDuration(audio);
-      nextCheckpoint.segments[String(segmentNumber)] = { fingerprint, asset_path: assetPath, duration_seconds: audioDuration };
-      await writeNarrationCheckpoint(checkpointPath, nextCheckpoint);
-      segmentPaths.push((await this.repository.getEpisodeAudioFile(task.channel_id, task.episode_id, path.basename(assetPath))).absolutePath);
+      const audioFile = await this.repository.getEpisodeAudioFile(channelId, episodeId, path.basename(assetPath));
+      return {
+        segmentNumber,
+        fingerprint,
+        assetPath,
+        durationSeconds: audioDuration,
+        absolutePath: audioFile.absolutePath,
+      };
+    });
+
+    for (const result of segmentResults) {
+      nextCheckpoint.segments[String(result.segmentNumber)] = {
+        fingerprint: result.fingerprint,
+        asset_path: result.assetPath,
+        duration_seconds: result.durationSeconds,
+      };
+      segmentPaths.push(result.absolutePath);
     }
+    await writeNarrationCheckpoint(checkpointPath, nextCheckpoint);
     await this.update(task.task_id, { progress_message: "Assembling narration", progress_percent: 82 });
     const merged = sections.length === 1 && !this.audioConfig.match_target_duration
       ? await readFile(segmentPaths[0])
       : await this.mergeNarrationSegments(segmentPaths, this.audioConfig.match_target_duration ? episode.target_duration_minutes * 60 : undefined);
-    const assetPath = await this.repository.writeNarrationAudio(task.channel_id, task.episode_id, merged);
+    const assetPath = await this.repository.writeNarrationAudio(channelId, episodeId, merged);
     const duration = parseWavDuration(merged);
     const narrationWordCount = countWords(extractNarration(script.content));
-    await this.repository.saveNarrationMetadata(task.channel_id, task.episode_id, assetPath, duration, sections.length, narrationWordCount);
+    await this.repository.saveNarrationMetadata(channelId, episodeId, assetPath, duration, sections.length, narrationWordCount);
     await this.update(task.task_id, { progress_message: "Narration ready", progress_percent: 100 });
     await this.finish(task.task_id, "COMPLETED", null, [assetPath]);
   }

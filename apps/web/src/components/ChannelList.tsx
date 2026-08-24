@@ -4,14 +4,13 @@ import { formatTaskElapsed, formatTaskStatus, formatTaskType, isTaskActive } fro
 import { EmptyState } from "./EmptyState";
 import { PageTitle } from "./AppChrome";
 
-export type ChannelGroupId = "quiz" | "documentary";
+export type ChannelGroupId = "quiz";
 
 export function ChannelCard({ channel, index, onOpen, onDelete }: { channel: Channel; index: number; onOpen: () => void; onDelete: (channel: Channel) => void }) {
-  const quiz = channel.engine === "quiz";
   return (
-    <article className={`channel-card ${quiz ? "quiz-channel-card" : ""}`}>
+    <article className="channel-card quiz-channel-card">
       <div className="card-top">
-        <span className="channel-kind">{quiz ? "Quiz Engine" : "Documentary"}</span>
+        <span className="channel-kind">Quiz Engine</span>
         <span className={`status-badge ${channel.status.toLowerCase()}`}>{channel.status.toLowerCase()}</span>
         <button
           type="button"
@@ -33,7 +32,7 @@ export function ChannelCard({ channel, index, onOpen, onDelete }: { channel: Cha
         <div className="card-bottom">
           <span>
             {channel.episode_count}{" "}
-            {quiz ? (channel.episode_count === 1 ? "video" : "videos") : channel.episode_count === 1 ? "episode" : "episodes"}
+            {channel.episode_count === 1 ? "video" : "videos"}
           </span>
           <ArrowUpRight size={17} />
         </div>
@@ -112,17 +111,13 @@ export function DashboardView({
             Studio <em>Dashboard</em>
           </h1>
           <p className="hero-copy">
-            Produce, monitor, and scale AI-driven documentary and quiz video channels with high-fidelity automation.
+            Produce, monitor, and scale AI-driven children's quiz video channels with high-fidelity automation.
           </p>
         </div>
         <div className="hero-actions-group" style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
           <button className="primary-button hero-action" onClick={() => onCreate("quiz")}>
             <Plus size={16} weight="bold" />
             <span>New Quiz Channel</span>
-          </button>
-          <button className="quiet-button hero-action" onClick={() => onCreate("documentary")}>
-            <FilmSlate size={16} />
-            <span>New Documentary</span>
           </button>
         </div>
       </div>
@@ -204,110 +199,62 @@ export function DashboardView({
 
 export function ChannelsListView({
   channels,
-  activeGroup,
-  onActiveGroupChange,
   onCreate,
   openChannel,
   onDelete,
 }: {
   channels: Channel[];
-  activeGroup: ChannelGroupId;
-  onActiveGroupChange: (groupId: ChannelGroupId) => void;
-  onCreate: (groupId: ChannelGroupId) => void;
+  activeGroup?: ChannelGroupId;
+  onActiveGroupChange?: (groupId: ChannelGroupId) => void;
+  onCreate: (groupId?: ChannelGroupId) => void;
   openChannel: (id: string) => void;
   onDelete: (channel: Channel) => void;
 }) {
-  const quizChannels = channels.filter((channel) => channel.engine === "quiz");
-  const documentaryChannels = channels.filter((channel) => channel.engine !== "quiz");
-  const groups: Record<
-    ChannelGroupId,
-    { title: string; items: Channel[]; formats: string[]; emptyTitle: string; createLabel: string }
-  > = {
-    quiz: {
-      title: "Quiz Channels",
-      items: quizChannels,
-      formats: ["Knowledge", "Image guess", "A/B/C"],
-      emptyTitle: "No Quiz channels",
-      createLabel: "New Quiz channel",
-    },
-    documentary: {
-      title: "Documentary Channels",
-      items: documentaryChannels,
-      formats: ["Research", "Script", "Video"],
-      emptyTitle: "No Documentary channels",
-      createLabel: "New Documentary channel",
-    },
-  };
-  const group = groups[activeGroup];
+  const quizChannels = channels;
 
   return (
     <section className="page-wrap">
-      <PageTitle eyebrow="Channel groups" title="Channels" />
-      <div className="channel-group-tabs" role="tablist" aria-label="Channel groups">
-        {(Object.keys(groups) as ChannelGroupId[]).map((groupId) => {
-          const item = groups[groupId];
-          return (
-            <button
-              key={groupId}
-              id={`${groupId}-channels-tab`}
-              type="button"
-              role="tab"
-              aria-label={item.title}
-              aria-selected={activeGroup === groupId}
-              aria-controls={`${groupId}-channels-panel`}
-              className={`channel-group-tab ${groupId === "documentary" ? "documentary-group-tab" : ""} ${
-                activeGroup === groupId ? "is-selected" : ""
-              }`}
-              onClick={() => onActiveGroupChange(groupId)}
-            >
-              <FolderOpen size={18} weight={activeGroup === groupId ? "duotone" : "regular"} />
-              <span>{item.title}</span>
-              <small>{item.items.length}</small>
-            </button>
-          );
-        })}
-      </div>
+      <PageTitle eyebrow="Quiz Studio" title="Channels" />
       <div
-        id={`${activeGroup}-channels-panel`}
-        className={`channel-group-panel ${activeGroup === "documentary" ? "documentary-group-panel" : ""}`}
-        role="tabpanel"
-        aria-labelledby={`${activeGroup}-channels-tab`}
+        id="quiz-channels-panel"
+        className="channel-group-panel"
+        role="region"
+        aria-label="Quiz Channels"
       >
-        <div
-          className={`channel-group-card ${activeGroup === "documentary" ? "documentary-group-card" : ""}`}
-          aria-labelledby={`${activeGroup}-channels-title`}
-        >
+        <div className="channel-group-card" aria-labelledby="quiz-channels-title">
           <div className="channel-group-icon">
             <FolderOpen size={24} weight="duotone" />
           </div>
           <div className="channel-group-heading">
-            <strong id={`${activeGroup}-channels-title`}>{group.title}</strong>
+            <strong id="quiz-channels-title">Quiz Channels</strong>
             <span>
-              {group.items.length} {group.items.length === 1 ? "channel" : "channels"}
+              {quizChannels.length} {quizChannels.length === 1 ? "channel" : "channels"}
             </span>
           </div>
           <div className="group-format-list">
-            {group.formats.map((format) => (
-              <span key={format}>{format}</span>
-            ))}
+            <span>Knowledge</span>
+            <span>Image guess</span>
+            <span>Multiple choice</span>
+            <span>True/False</span>
+            <span>Odd one out</span>
           </div>
-          <button className="quiet-button group-create-button" onClick={() => onCreate(activeGroup)}>
+          <button className="quiet-button group-create-button" onClick={() => onCreate("quiz")}>
             <Plus size={15} />
-            <span>{group.createLabel}</span>
+            <span>New Quiz Channel</span>
           </button>
         </div>
-        {group.items.length === 0 ? (
+        {quizChannels.length === 0 ? (
           <EmptyState
             compact
             icon={<Broadcast size={26} />}
-            title={group.emptyTitle}
-            copy="Create the first channel inside this group to begin producing episodes."
-            action={group.createLabel}
-            onAction={() => onCreate(activeGroup)}
+            title="No Quiz channels"
+            copy="Create the first channel inside this group to begin producing quiz episodes."
+            action="New Quiz Channel"
+            onAction={() => onCreate("quiz")}
           />
         ) : (
           <div className="channel-grid channel-grid-wide">
-            {group.items.map((channel, index) => (
+            {quizChannels.map((channel, index) => (
               <ChannelCard
                 key={channel.channel_id}
                 index={index + 1}

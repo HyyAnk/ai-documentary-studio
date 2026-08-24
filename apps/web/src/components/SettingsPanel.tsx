@@ -1,4 +1,4 @@
-import { CircleNotch, Eye, EyeSlash, FileText, FloppyDisk, GitBranch, HardDrives, Info, Play, Plus, SlidersHorizontal, Sparkle, SpeakerHigh, TerminalWindow, Trash, VideoCamera } from "@phosphor-icons/react";
+import { CircleNotch, Eye, EyeSlash, FileText, FloppyDisk, HardDrives, Info, Play, Plus, SlidersHorizontal, Sparkle, SpeakerHigh, TerminalWindow, Trash, VideoCamera } from "@phosphor-icons/react";
 import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import type { AppConfig, Channel, CodexSettingsResponse, AntigravitySettingsResponse, StorageInfo, VoiceProfile } from "@studio/shared";
 import { api } from "../api";
@@ -655,7 +655,6 @@ export function SettingsView({
               label="Mode"
               value={antigravity?.settings.has_api_key ? "Google AI API (Custom Key)" : "Native AgentAPI (Zero API Key)"}
             />
-            <StatusLine label="CLI Command" value={agyCommand} />
             <StatusLine
               label="Selected model"
               value={antigravity?.settings.model || appConfig?.antigravity.model || "gemini-3.7-flash-high"}
@@ -671,32 +670,6 @@ export function SettingsView({
               }
             />
             <form className="codex-form" onSubmit={(event) => void saveAntigravity(event)}>
-              <label>
-                CLI Command
-                <input
-                  value={agyCommand}
-                  onChange={(event) => setAgyCommand(event.target.value)}
-                  placeholder="agy"
-                />
-                <small className="field-help">
-                  Google Antigravity CLI binary name or executable path. Uses active IDE session with zero API key.
-                </small>
-              </label>
-              <label>
-                Gemini API key (Optional)
-                <input
-                  type="password"
-                  value={agyApiKey}
-                  onChange={(event) => setAgyApiKey(event.target.value)}
-                  placeholder={
-                    antigravity?.settings.has_api_key ? "Saved locally - leave blank to keep" : "Paste Google Gemini API key"
-                  }
-                  autoComplete="off"
-                />
-                <small className="field-help">
-                  Optional: Use dedicated API Key quota for direct Google Generative AI image generation.
-                </small>
-              </label>
               <SessionCleanupToggle
                 engine="Antigravity"
                 enabled={agyAutoDeleteThreads}
@@ -1214,18 +1187,6 @@ export function SettingsView({
               </button>
             </form>
             <p className="storage-hint">Channel and episode media files stay here and are excluded from Git repository.</p>
-          </section>
-
-          <section className="panel">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Version Control</p>
-                <h2>Git Workspace</h2>
-              </div>
-              <GitBranch size={22} />
-            </div>
-            <StatusLine label="Branch" value={git.branch ?? "Not a Git repository"} />
-            <StatusLine label="Working tree" value={git.dirty ? `${git.changed_files} changed files` : "Clean"} />
           </section>
         </div>
       ) : null}

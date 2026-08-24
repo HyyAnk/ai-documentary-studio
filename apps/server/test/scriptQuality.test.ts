@@ -92,7 +92,7 @@ describe("script task output isolation and retry", () => {
 
     const persisted = await repository.getEpisodeFile(channel.channel_id, episode.episode_id, "script.md");
     expect(manager.get(task.task_id).error).toBeNull();
-    expect(countWords(extractNarration(persisted.content))).toBe(690);
+    expect(persisted.content).toContain("## Question 8");
     expect(persisted.content).not.toContain("reasoning payload");
     expect(codex.prompts).toHaveLength(2);
     expect(codex.prompts[1]).toContain("STRICT RETRY");
@@ -104,6 +104,11 @@ function scriptWithWordCount(wordCount: number, title: string): string {
   const anchorWords = anchors.match(/\S+/g) ?? [];
   const words = anchorWords.concat(Array.from({ length: Math.max(0, wordCount - anchorWords.length) }, (_, index) => `evidence${index + 1}`)).slice(0, wordCount);
   return `# ${title}\n\n<!-- HUMOR_POLICY: v1 -->\n\n${words.join(" ")}\n\n<!-- AUDIO_CUE: chuckle -->`;
+}
+
+function quizScriptWithQuestions(questionCount: number, title: string): string {
+  const sections = Array.from({ length: questionCount }, (_, index) => `## Question ${index + 1} — Question ${index + 1}\nWhich planet is red?\n\nA. Mars\nB. Venus\nC. Jupiter\n\nGuess now!\n\nThe answer is A — Mars.\n\nMars is covered in iron oxide.`);
+  return `# ${title}\n\n<!-- HUMOR_POLICY: v1 -->\n\n${sections.join("\n\n")}`;
 }
 
 class ScriptCodex extends EventEmitter {
@@ -122,8 +127,8 @@ class ScriptCodex extends EventEmitter {
     const turnId = `turn_${++this.turnNumber}`;
     this.prompts.push(prompt);
     const output = this.turnNumber === 1
-      ? scriptWithWordCount(13_579, "The Internet Before Google")
-      : scriptWithWordCount(690, "The Internet Before Google");
+      ? quizScriptWithQuestions(1, "The Internet Before Google")
+      : quizScriptWithQuestions(8, "The Internet Before Google");
     setTimeout(() => {
       this.emit("notification", { method: "item/userMessage", params: { threadId, turnId, delta: "reasoning payload " + "context ".repeat(100) } });
       this.emit("notification", { method: "item/reasoning", params: { threadId, turnId, delta: "tool payload " + "context ".repeat(100) } });

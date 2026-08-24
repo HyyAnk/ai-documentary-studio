@@ -1,107 +1,72 @@
-# Channel DNA
+# Quiz Channel DNA
 
-## Channel Identity
+## Channel identity
 
 - Channel name: 
-- One-line promise: 
-
-## Core Concept
-
-Describe the channel's documentary territory in one clear paragraph.
-
-## Core Question
-
-What question should every episode help the viewer think about?
-
-## Audience
-
+- Channel group: Quiz Channels
+- Engine: Quiz Engine
 - Primary audience: 
-- Viewer knowledge level: 
-
-## Geographic Market
-
 - Market: 
 - Language: 
 
-## Content Pillars
+## Audience promise
 
-1. 
-2. 
-3. 
+Make children and families feel clever, curious, and ready for one more question. Every episode is a short game with a fair answer, a clear reveal, and a memorable fact.
 
-## Topic Selection Rules
+## Quiz formats
 
-- Prefer topics with a clear tension, overlooked cause, or surprising consequence.
-- Prefer stories that can be explained with concrete evidence and vivid reconstruction.
-- Reject topics that require speculation to carry the narrative.
+Rotate formats across a five-topic suggestion run:
 
-## Topics That Fit
+- Knowledge quiz: one question, three answer choices, one explainable answer.
+- Image guess: show a friendly visual clue before revealing the subject.
+- Multiple choice: A/B/C with a spoken pause and a visual countdown.
+- True or false: one simple claim, then a playful correction.
+- Odd one out: three items (A, B, C), one does not belong, followed by the rule.
 
-- 
+## Question design
 
-## Topics That Do Not Fit
+- Default episode size: 8 questions. Allow 3–30 questions.
+- Multiple-choice and option-based questions must strictly have a maximum of 3 choices (A, B, or C only). Never generate more than 3 options to prevent viewer fatigue and maintain a clean, uncluttered layout.
+- One idea per question. Use concrete nouns and short sentences.
+- Give children enough time to think before the reveal.
+- Never trick the viewer with ambiguous wording, obscure edge cases, or two defensible answers.
+- Every answer must be supported by research. Explain why it is correct in one friendly sentence.
+- Use age-appropriate vocabulary for the selected age band: 4–6, 7–9, 10–12, or family.
 
-- 
+## Voice and pacing
 
-## Story Structure
+- Warm, energetic, encouraging, and never shouty.
+- Read the question, pause, invite a guess, reveal the answer, then add one surprising fact.
+- Keep each question block between 12 and 25 seconds unless the format needs a longer image clue.
+- Use short Chatterbox-friendly lines and explicit pause cues in comments, never in visible copy.
 
-1. Cold open with the central mystery.
-2. Establish the promise and the stakes.
-3. Trace the decisions, evidence, and turning points.
-4. Land on the durable lesson and the unresolved question.
+## Visual language
 
-## Narrative Style
+- Use vibrant, cheerful, high-contrast palettes tailored to children: sunny yellows, energetic corals, rich mints, sky blues, bright lilacs, and warm berry tones. Never use dull, washed-out, dark ink, or gloomy backgrounds.
+- Art direction must be dynamic, playful, and visually engaging for children: highly polished 3D claymation, storybook 3D renders, lively cartoon diorama, or colorful dimensional stylized art. Avoid flat 2D monochrome, dull sketches, or corporate minimalist graphics.
+- Keep lighting bright, warm, and inviting with soft studio shadows and specular highlights that make subjects pop with depth.
+- Show one clear, captivating focal subject at a time. Avoid visual clutter, scary/creepy imagery, flashing strobes, or overwhelming noise.
+- Visual style should adapt flexibly to each episode topic (e.g. glowing cosmic adventures for Space, lush emerald tones for Nature, juicy candy colors for Food & Games) while strictly maintaining child appeal, high saturation, and cheerful warmth.
+- Keep text inside safe margins and at least 56 px at 1920×1080 composition size.
+- Use visual countdowns, answer cards, correct/try-again states, and a final score moment.
 
-Calm, specific, curious, and paced for comprehension. Make the viewer feel the shape of the story before adding detail.
+## Safety and trust
 
-## Tone
+- No unsafe challenges, personal data, stereotypes, frightening thumbnails, or manipulative urgency.
+- Do not reveal a wrong answer as a joke. Encourage every attempt.
+- Distinguish facts from playful framing. Cite source IDs in research artifacts, not on the child-facing frame.
 
-Measured, intelligent, human, and never sensational for its own sake.
+## Episode structure
 
-## Visual Language
+1. Five-second welcome and the quiz promise.
+2. Question blocks with consistent read → think → reveal → explain rhythm.
+3. A short midpoint celebration without interrupting the game.
+4. Final score invitation and one-line recap.
 
-Use restrained documentary reconstruction, archival textures, purposeful maps or diagrams, and coherent visual motifs. Every image should clarify the narration.
+## Quality gate
 
-## AI Reconstruction Rules
-
-- Label reconstructed moments internally and keep them visually plausible.
-- Never invent a quote, source, person, statistic, or event as fact.
-- Prefer observable actions and environments over abstract spectacle.
-
-## Fact Accuracy Rules
-
-- Separate confirmed facts, reasonable inference, and open uncertainty.
-- Keep a source trail for claims that drive the story.
-
-## Title Patterns
-
-- Why [system] Could Not [expected outcome]
-- The [technology/decision] That Arrived Too Early
-- How [ordinary thing] Quietly Changed [larger system]
-
-## Thumbnail Principles
-
-One visual tension, one readable focal object, high contrast, and no more than a few words when text is necessary.
-
-## Episode Length
-
-Target 8 to 14 minutes unless the topic requires a shorter treatment.
-
-## Scene Rules
-
-- One coherent visual shot per scene.
-- Dialogue and prompt must describe the same moment.
-- Respect the configured maximum scene duration.
-- Preserve continuity of people, place, time, and visual motif.
-
-## Voice/Narration Rules
-
-Write for spoken clarity. Use short sentences at turning points and let important facts breathe.
-
-## Quality Checklist
-
-- Is the premise clear in one sentence?
-- Does each section earn its place?
-- Are claims traceable or explicitly marked uncertain?
-- Does every scene have one visual idea?
-- Does the ending answer the core question without flattening the nuance?
+- Exactly the requested number of questions.
+- Every question has one canonical answer and a source-backed explanation.
+- The script contains no visible production notes.
+- Audio duration matches the visual timeline within 0.5 seconds per question.
+- The rendered video includes the Chatterbox audio track and is playable as MP4.

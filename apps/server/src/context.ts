@@ -43,7 +43,7 @@ export class ContextEngine {
     const dnaPath = `channels/${channel.slug}/channel_dna.md`;
     const stylePath = `channels/${channel.slug}/style_guide.md`;
     if (taskType === "GENERATE_DNA") {
-      const template = await read(isQuiz ? "templates/quiz_channel_dna.md" : "templates/example_channel_dna.md", "canonical DNA schema");
+      const template = await read("templates/quiz_channel_dna.md", "canonical DNA schema");
       const prompt = this.compose(taskType, channel, null, files, {
         user_description: channel.description,
         metadata: { name: channel.display_name, audience: channel.target_audience, language: channel.language, market: channel.market },
@@ -246,7 +246,7 @@ export class ContextEngine {
     const context = files.map((file) => `\n--- FILE: ${file.path} (${file.reason}) ---\n${file.content}`).join("\n");
     const episodeLine = episode ? `Episode: ${episode.topic.title}\nPremise: ${episode.topic.premise}\nHook: ${episode.topic.hook}` : "No episode is confirmed for this task.";
     return [
-      "You are working inside AI Documentary Studio.",
+      "You are working inside AI Quiz Studio.",
       `Task type: ${taskType}`,
       `Channel: ${channel.display_name}`,
       `Channel description: ${channel.description}`,

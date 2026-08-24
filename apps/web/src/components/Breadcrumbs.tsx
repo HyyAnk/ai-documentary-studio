@@ -69,7 +69,7 @@ export function Breadcrumbs({
 
 export function ChannelBreadcrumb({
   channelName,
-  engine = "documentary",
+  engine = "quiz",
   onNavigateHome,
   onNavigateChannels,
 }: {
@@ -93,7 +93,7 @@ export function ChannelBreadcrumb({
     },
     {
       label: channelName,
-      icon: <span style={{ fontSize: "13px" }}>{engine === "quiz" ? "🎯" : "🎬"}</span>,
+      icon: <span style={{ fontSize: "13px" }}>🎯</span>,
       isCurrent: true,
     },
   ];
@@ -104,7 +104,7 @@ export function ChannelBreadcrumb({
 export function EpisodeBreadcrumb({
   channelName,
   episodeTitle,
-  engine = "documentary",
+  engine = "quiz",
   onNavigateHome,
   onNavigateChannels,
   onNavigateChannel,

@@ -86,8 +86,8 @@ export const ChannelSchema = z.object({
   updated_at: IsoDate,
   episode_count: z.number().int().nonnegative().default(0),
   voice_reference_path: z.string().nullable().default(null),
-  group_id: z.enum(["documentary", "quiz"]).default("documentary"),
-  engine: z.enum(["documentary", "quiz"]).default("documentary"),
+  group_id: z.enum(["quiz", "documentary"]).default("quiz"),
+  engine: z.enum(["quiz", "documentary"]).default("quiz"),
   selected_styles: z.array(QuizImageStyleSchema).default(["pixar_3d", "flat_vector", "kawaii_chibi", "voxel_lowpoly", "plastic_toy"]),
 });
 export type Channel = z.infer<typeof ChannelSchema>;
@@ -294,16 +294,16 @@ export const AssetConsistencyGroupSchema = z.object({
   group_id: z.string().min(1).max(120),
   question_id: z.string().min(1),
   purpose: z.literal("visual_answer_set"),
-  style_family: z.string().min(1).max(120),
-  rendering_medium: z.string().min(1).max(120),
-  lighting: z.string().min(1).max(160),
-  framing: z.string().min(1).max(160),
-  background_treatment: z.string().min(1).max(160),
-  subject_scale: z.string().min(1).max(120),
-  contrast: z.string().min(1).max(120),
-  saturation: z.string().min(1).max(120),
-  edge_treatment: z.string().min(1).max(120),
-  detail_level: z.string().min(1).max(120).default("medium, simplified child-friendly detail"),
+  style_family: z.string().min(1).max(240),
+  rendering_medium: z.string().min(1).max(240),
+  lighting: z.string().min(1).max(240),
+  framing: z.string().min(1).max(240),
+  background_treatment: z.string().min(1).max(240),
+  subject_scale: z.string().min(1).max(240),
+  contrast: z.string().min(1).max(240),
+  saturation: z.string().min(1).max(240),
+  edge_treatment: z.string().min(1).max(240),
+  detail_level: z.string().min(1).max(240).default("medium, simplified child-friendly detail"),
   face_policy: z.enum(["none", "all", "natural_only"]).default("natural_only"),
   asset_ids: z.string().min(1).array().min(2),
 });
@@ -837,7 +837,7 @@ export const CreateChannelInputSchema = z.object({
   market: z.string().trim().max(120).default(""),
   dna_mode: z.enum(["example", "ai", "upload"]).default("example"),
   dna_content: z.string().optional(),
-  group_id: z.enum(["documentary", "quiz"]).default("documentary"),
+  group_id: z.enum(["quiz", "documentary"]).default("quiz"),
 });
 export type CreateChannelInput = z.infer<typeof CreateChannelInputSchema>;
 

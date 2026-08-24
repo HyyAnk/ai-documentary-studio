@@ -8,6 +8,7 @@ import { AntigravityImageChainProvider } from "../../providers/antigravityImageC
 import { assetFingerprint } from "./assetFingerprint.js";
 import { compileQuizAssetPrompt } from "./promptCompiler.js";
 import { isContentFilterError, extractFilterReason, sanitizeImagePromptWithLLM } from "../../utils/promptSanitizer.js";
+import { runConcurrent } from "../../utils/concurrency.js";
 
 import type { AntigravityClient } from "../../antigravity.js";
 
@@ -54,27 +55,30 @@ export async function resolveQuizAssets(input: {
     await input.repository.writeQuizAssetResolution(input.channelId, input.episodeId, partialResolution);
   };
 
+  const ASSET_CONCURRENCY = 4;
+
   for (let round = 1; round <= maxRounds; round++) {
-    const missingCount = input.plan.assets.length - resolvedMap.size;
-    if (missingCount === 0) break;
+    const pendingRequests = input.plan.assets.filter((req) => !resolvedMap.has(req.asset_id));
+    if (pendingRequests.length === 0) break;
 
     if (round > 1) {
-      logger.warn(`Quiz assets retry round ${round}/${maxRounds}: regenerating ${missingCount} missing assets...`, {
+      logger.warn(`Quiz assets retry round ${round}/${maxRounds}: regenerating ${pendingRequests.length} missing assets...`, {
         profileId: input.channelId,
         workerId: input.episodeId,
         step: "retry_quiz_assets",
       });
       await new Promise((resolve) => setTimeout(resolve, round * 500));
+    } else if (resolvedMap.size > 0) {
+      await input.onProgress?.({ completed: resolvedMap.size, total: input.plan.assets.length, reused: true });
     }
 
-    for (const [index, request] of input.plan.assets.entries()) {
-      if (resolvedMap.has(request.asset_id)) {
-        if (round === 1) {
-          await input.onProgress?.({ completed: resolvedMap.size, total: input.plan.assets.length, reused: true });
-        }
-        continue;
-      }
+    let persistQueue = Promise.resolve();
+    const safePersistIncrementalResolution = () => {
+      persistQueue = persistQueue.then(() => persistIncrementalResolution()).catch(() => undefined);
+      return persistQueue;
+    };
 
+    await runConcurrent(pendingRequests, ASSET_CONCURRENCY, async (request) => {
       let reused = false;
       const compiled = compileQuizAssetPrompt(
         request,
@@ -276,11 +280,13 @@ export async function resolveQuizAssets(input: {
         }
       } finally {
         if (resolvedMap.has(request.asset_id)) {
-          await persistIncrementalResolution();
+          void safePersistIncrementalResolution();
         }
         await input.onProgress?.({ completed: resolvedMap.size, total: input.plan.assets.length, reused });
       }
-    }
+    });
+
+    await safePersistIncrementalResolution();
   }
 
   const assets = input.plan.assets

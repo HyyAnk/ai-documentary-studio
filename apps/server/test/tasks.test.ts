@@ -123,7 +123,7 @@ class FakeCodex extends EventEmitter {
       const safeMotionSection = "\n## Safe motion\n\n- Allowed motion: gentle fades, slow scale changes, and calm card slides.\n- Prohibited motion: strobing, flashing, seizure-triggering patterns, and unsafe rapid camera movement.\n- Reduced-motion fallback: hold still frames and use opacity changes only.\n";
       const validVisualBible = "# Episode Visual Bible\n\n- Palette: Warm candy colors\n- Countdown: A clear, calm countdown\n- Answer reveal: One focused reveal state\n" + safeMotionSection + Array.from({ length: Math.max(5, quizVisualBibleCount) }, (_, index) => `## Continuity bundle CB-${String(index + 1).padStart(2, "0")} — Bundle ${index + 1}\n\n- Era: 1950s\n- Location: Test location\n- Subjects: Test subject\n- Palette: Warm neutral\n- Lighting: Soft side light\n- Anchor-frame prompt: A coherent documentary environment for bundle ${index + 1}.\n- Reference asset slots: anchor`).join("\n\n");
       const invalidSequenceBeats = Array.from({ length: 5 }, (_, index) => ({ dialogue: index === 0 ? "Opening narration." : `Additional beat ${index + 1}.`, sequence_id: "sequence-1", sequence_title: "Opening", shot_id: `shot-${index + 1}`, visual_prompt: `Unstructured shot ${index + 1}`, asset_type: "ai_reconstruction", continuity_key: "opening", continuity_bundle_id: "", reference_asset_ids: [], source_ids: ["C01"], reconstruction: true, sound_cue: "", transition_note: "", continuity_note: "", editorial_overlay: { kind: "none" } }));
-      const validSequenceBeat = [{ dialogue: "Opening narration.", sequence_id: "sequence-1", sequence_title: "Opening", shot_id: "shot-1", visual_prompt: "CAMERA\nWide 35mm locked shot.\nACTION\nThe subject enters and pauses.\nLIGHTING\nSoft 5600K window light.\nATMOSPHERE\nCalm air with 10% haze.\nCONTINUITY\nCB-01 palette and subject identity remain fixed.", asset_type: "ai_reconstruction", continuity_key: "opening", continuity_bundle_id: "CB-01", reference_asset_ids: [], source_ids: ["C01"], reconstruction: true, sound_cue: "", transition_note: "", continuity_note: "Keep CB-01 palette, location, and subject identity.", editorial_overlay: { kind: "none" } }];
+      const validSequenceBeat = [{ dialogue: "Opening narration.", sequence_id: "sequence-1", sequence_title: "Opening", shot_id: "shot-1", visual_prompt: "CAMERA\nWide 35mm locked shot.\nACTION\nThe subject enters and pauses.\nLIGHTING\nSoft 5600K window light.\nATMOSPHERE\nCalm air with 10% haze.\nCONTINUITY\nCB-01 palette and subject identity remain fixed.", asset_type: "ai_reconstruction", continuity_key: "opening", continuity_bundle_id: "CB-01", reference_asset_ids: [], source_ids: ["C01"], reconstruction: true, sound_cue: "", transition_note: "", continuity_note: "Keep CB-01 palette, location, and subject identity.", editorial_overlay: { kind: "none" }, quiz: { phase: "question" as const, question_number: 1, question: "What animal is this?", choices: ["Tiger", "Lion", "Leopard"], answer: "Tiger", explanation: "Tigers have distinct orange and black stripes.", image_prompt: "A friendly cartoon tiger in a bright tropical forest." } }];
       const delta = prompt.includes("Generate exactly one reference image")
         ? "data:image/png;base64,iVBORw0KGgo="
         : sequenceTask
@@ -178,45 +178,6 @@ describe("TaskManager locks", () => {
     await manager.load();
     const task = manager.submit("GENERATE_NARRATION", channel.channel_id, episode.episode_id);
     await waitFor(() => manager.get(task.task_id).status === "FAILED");
-    expect(manager.get(task.task_id).error).toContain("Quiz channels use Quiz V2 voice generation");
-  });
-
-  it("reuses valid documentary narration segments after a retry", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "documentary-narration-resume-"));
-    roots.push(root);
-    await mkdir(path.join(root, "templates"), { recursive: true });
-    await mkdir(path.join(root, "shared"), { recursive: true });
-    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# DNA\n", "utf8");
-    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
-    const repository = new RepositoryService(root);
-    const channel = await repository.createChannel({ name: "Narration Resume", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });
-    const topics = Array.from({ length: 5 }, (_, index) => ({ topic_id: `narration_resume_topic_${index}`, channel_id: channel.channel_id, title: `Narration Resume ${index}`, premise: "Premise", why_it_fits: "Fits", hook: "Hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false }));
-    await repository.saveTopicRun(channel.channel_id, topics);
-    const episode = await repository.confirmTopic(channel.channel_id, topics[0]!.topic_id);
-    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "script.md", "# Narration Resume\n\nThis is a short narration segment for the retry test.");
-    const logger = new StudioLogger(root);
-    await logger.init();
-    let synthesizeCalls = 0;
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
-      if (String(input).endsWith("/synthesize")) {
-        synthesizeCalls += 1;
-        return new Response(fakeWav(2), { status: 200, headers: { "content-type": "audio/wav" } });
-      }
-      throw new Error(`Unexpected audio request: ${String(input)}`);
-    }) as typeof fetch;
-    try {
-      const manager = new TaskManager(repository, new ContextEngine(repository, logger), new FakeCodex() as never, 1, 8, logger, { provider: "chatterbox", service_url: "http://127.0.0.1:8890", exaggeration: 0.5, cfg_weight: 0.5, max_concurrent_tasks: 2, merge_gap_ms: 300, match_target_duration: false });
-      await manager.load();
-      const first = manager.submit("GENERATE_NARRATION", channel.channel_id, episode.episode_id);
-      await waitFor(() => manager.get(first.task_id).status === "COMPLETED");
-      const second = manager.submit("GENERATE_NARRATION", channel.channel_id, episode.episode_id);
-      await waitFor(() => manager.get(second.task_id).status === "COMPLETED");
-      expect(synthesizeCalls).toBe(1);
-      expect(manager.get(second.task_id).progress_message).toBe("Completed");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
   });
 
   it("serializes two tasks targeting the same episode", async () => {
@@ -459,39 +420,6 @@ describe("TaskManager locks", () => {
     expect(research.content).toContain("C15");
     expect(manager.get(task.task_id).progress_message).toBe("Completed");
     expect(fake.deletedThreads).toEqual([]);
-  });
-
-  it("runs the one-click pipeline and skips artifacts that are already ready", async () => {
-    const root = await mkdtemp(path.join(os.tmpdir(), "documentary-pipeline-tasks-"));
-    roots.push(root);
-    await mkdir(path.join(root, "templates"), { recursive: true });
-    await mkdir(path.join(root, "shared"), { recursive: true });
-    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# DNA\n", "utf8");
-    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
-    const repository = new RepositoryService(root);
-    const channel = await repository.createChannel({ name: "Pipeline Channel", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });
-    const topics = Array.from({ length: 5 }, (_, index) => ({ topic_id: `pipeline_topic_${index}`, channel_id: channel.channel_id, title: `Pipeline Topic ${index}`, premise: "Premise", why_it_fits: "Fits", hook: "Hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false }));
-    await repository.saveTopicRun(channel.channel_id, topics);
-    const episode = await repository.confirmTopic(channel.channel_id, topics[0].topic_id);
-    for (const filename of ["research.md", "treatment.md"]) await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, filename, `# ${filename}\nReady artifact`);
-    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "visual_bible.md", "# Episode Visual Bible\n\n## Continuity bundle CB-01 — Ready\n\n- Anchor-frame prompt: A ready continuity anchor.\n- Reference asset slots: anchor");
-    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "script.md", "# script\n\n<!-- HUMOR_POLICY: v1 -->\nReady artifact");
-    await repository.saveScenes(channel.channel_id, episode.episode_id, [{ scene_id: "pipeline_scene_1", episode_id: episode.episode_id, scene_number: 1, duration_seconds: 6, dialogue: "Ready dialogue", visual_prompt: "CAMERA\nReady\nACTION\nReady\nLIGHTING\nReady\nATMOSPHERE\nReady\nCONTINUITY\nReady", transition_note: "", continuity_note: "Ready continuity", sequence_id: "sequence-1", sequence_title: "Sequence 1", shot_id: "shot-1", asset_type: "ai_reconstruction", continuity_bundle_id: "CB-01", reference_asset_ids: [], source_ids: [], reconstruction: true, sound_cue: "", editorial_overlay: { kind: "none" }, audio_asset_path: null, audio_generated_at: null, audio_duration_seconds: null }]);
-    const narrationPath = await repository.writeNarrationAudio(channel.channel_id, episode.episode_id, fakeWav(2));
-    await repository.saveNarrationMetadata(channel.channel_id, episode.episode_id, narrationPath, 10, 1, 20);
-    const logger = new StudioLogger(root);
-    await logger.init();
-    const fake = new FakeCodex();
-    const manager = new TaskManager(repository, new ContextEngine(repository, logger), fake as never, 1, 8, logger);
-    await manager.load();
-    const pipeline = manager.submit("GENERATE_PIPELINE", channel.channel_id, episode.episode_id);
-    await waitFor(() => manager.get(pipeline.task_id).status === "COMPLETED");
-    expect(manager.get(pipeline.task_id).progress_percent).toBe(100);
-    expect(manager.get(pipeline.task_id).progress_message).toBe("Completed");
-    expect(fake.activeTurns).toBe(0);
-    const pipelineImages = await repository.listBundleImages(channel.channel_id, episode.episode_id);
-    expect(pipelineImages).toMatchObject([{ filename: "CB-01.png", bundle_id: "CB-01" }]);
-    expect((await repository.readScenes(channel.channel_id, episode.episode_id))[0].reference_asset_ids).toContain(pipelineImages[0].path);
   });
 
   it("runs a Quiz pipeline through V2 and submits video without legacy narration", async () => {

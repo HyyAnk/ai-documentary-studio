@@ -364,7 +364,7 @@ export function EpisodeDetail({
 
       <header className="detail-header episode-detail-header">
         <div>
-          <p className="eyebrow">{isQuiz ? "Quiz Production Studio" : "Documentary Studio"}</p>
+          <p className="eyebrow">Quiz Production Studio</p>
           <h1>{episode.topic.title}</h1>
           <p className="detail-copy">{episode.topic.premise}</p>
         </div>
@@ -481,7 +481,7 @@ export function EpisodeDetail({
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Rendered Master</p>
-            <h2>{isQuiz ? "Quiz Video MP4" : "Final Documentary Video"}</h2>
+            <h2>Quiz Video MP4</h2>
           </div>
           {!isQuiz ? (
             <button
@@ -1013,15 +1013,15 @@ export function EpisodeDetail({
   );
 }
 
-function resolveDocumentaryPipelineStage(pipelineTask: Task | null, tasks: Task[]): string | null {
+function resolveQuizPipelineStage(pipelineTask: Task | null, tasks: Task[]): string | null {
   if (pipelineTask && isTaskActive(pipelineTask)) {
     const text = `${pipelineTask.error ?? ""} ${pipelineTask.progress_message ?? ""}`.toLowerCase();
     if (text.includes("research")) return "research";
-    if (text.includes("treatment")) return "treatment";
-    if (text.includes("narration script") || text.includes("script")) return "script";
-    if (text.includes("visual bible") || text.includes("style anchor") || text.includes("continuity image")) return "visualBible";
-    if (text.includes("shot plan") || text.includes("sequence") || text.includes("shot")) return "scenes";
-    if (text.includes("narration") || text.includes("voice") || text.includes("audio")) return "narration";
+    if (text.includes("treatment") || text.includes("facts") || text.includes("director")) return "treatment";
+    if (text.includes("script")) return "script";
+    if (text.includes("visual bible") || text.includes("asset")) return "visualBible";
+    if (text.includes("scene") || text.includes("sequence") || text.includes("shot")) return "scenes";
+    if (text.includes("voice") || text.includes("audio") || text.includes("narration")) return "narration";
     if (text.includes("video") || text.includes("render")) return "video";
   }
   const child = tasks.find((task) => isTaskActive(task));
@@ -1039,35 +1039,25 @@ function resolveDocumentaryPipelineStage(pipelineTask: Task | null, tasks: Task[
 
 function PipelineRail({
   readiness,
-  quiz,
   pipelineTask = null,
   tasks = [],
 }: {
   readiness: { research: boolean; treatment: boolean; script: boolean; visualBible: boolean; scenes: boolean; narration: boolean; video: boolean };
-  quiz: boolean;
+  quiz?: boolean;
   pipelineTask?: Task | null;
   tasks?: Task[];
 }) {
-  const steps = quiz
-    ? ([
-        { key: "research", label: "Research", ready: readiness.research },
-        { key: "treatment", label: "Quiz plan", ready: readiness.treatment },
-        { key: "script", label: "Script", ready: readiness.script },
-        { key: "visualBible", label: "Design", ready: readiness.visualBible },
-        { key: "scenes", label: "Scenes", ready: readiness.scenes },
-        { key: "narration", label: "Audio", ready: readiness.narration },
-        { key: "video", label: "Video", ready: readiness.video },
-      ] as const)
-    : ([
-        { key: "research", label: "Research", ready: readiness.research },
-        { key: "treatment", label: "Treatment", ready: readiness.treatment },
-        { key: "script", label: "Script", ready: readiness.script },
-        { key: "visualBible", label: "Visual bible", ready: readiness.visualBible },
-        { key: "scenes", label: "Shots", ready: readiness.scenes },
-        { key: "narration", label: "Narration", ready: readiness.narration },
-      ] as const);
+  const steps = [
+    { key: "research", label: "Research", ready: readiness.research },
+    { key: "treatment", label: "Quiz plan", ready: readiness.treatment },
+    { key: "script", label: "Script", ready: readiness.script },
+    { key: "visualBible", label: "Design", ready: readiness.visualBible },
+    { key: "scenes", label: "Scenes", ready: readiness.scenes },
+    { key: "narration", label: "Audio", ready: readiness.narration },
+    { key: "video", label: "Video", ready: readiness.video },
+  ] as const;
 
-  const activeStageKey = resolveDocumentaryPipelineStage(pipelineTask, tasks);
+  const activeStageKey = resolveQuizPipelineStage(pipelineTask, tasks);
 
   return (
     <ol className="pipeline-rail" aria-label="Episode production progress">

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { analyzeWavAudio } from "../src/quiz/audio/audioDiagnostics.js";
+import { createSilenceWav, wavDurationSeconds } from "../src/quiz/audio/voiceSynthesis.js";
 
 function wav(seconds: number, sampleRate = 1000): Uint8Array {
   const frames = Math.round(seconds * sampleRate);
@@ -24,4 +25,11 @@ describe("voice audio diagnostics", () => {
     expect(result.unexpected_low_audio_runs.some((run) => run.duration_seconds > .5)).toBe(true);
     expect(result.clipping_samples).toBe(0);
   });
+
+  it("creates valid silence wav buffers with exact duration", () => {
+    const silence = createSilenceWav(1.5);
+    expect(silence.length).toBe(44 + Math.round(1.5 * 48000 * 4));
+    expect(wavDurationSeconds(silence)).toBe(1.5);
+  });
 });
+

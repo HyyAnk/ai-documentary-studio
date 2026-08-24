@@ -30,6 +30,9 @@ export class GoogleImagenProvider implements ImageProvider {
     }
 
     const cleanPrompt = this.extractCleanVisualPrompt(prompt);
+    const ratioMatch = prompt.match(/Output framing:\s*(1:1|16:9|9:16|4:3|3:4|2:3|3:2)/i)
+      || prompt.match(/Composition:\s*(1:1|16:9|9:16|4:3|3:4|2:3|3:2)/i);
+    const targetAspectRatio = ratioMatch ? ratioMatch[1] : "16:9";
     const isGeminiContentModel = !this.model.startsWith("imagen-");
     const method = isGeminiContentModel ? "generateContent" : "predict";
     const url = `${this.apiBaseUrl.replace(/\/+$/, "")}/models/${this.model}:${method}?key=${this.apiKey.trim()}`;
@@ -38,7 +41,7 @@ export class GoogleImagenProvider implements ImageProvider {
       ? {
           contents: [
             {
-              parts: [{ text: `${cleanPrompt}, 16:9 aspect ratio, high quality` }],
+              parts: [{ text: `${cleanPrompt}, ${targetAspectRatio} aspect ratio, high quality` }],
             },
           ],
           generationConfig: {
@@ -53,7 +56,7 @@ export class GoogleImagenProvider implements ImageProvider {
           ],
           parameters: {
             sampleCount: 1,
-            aspectRatio: "16:9",
+            aspectRatio: targetAspectRatio,
             outputOptions: {
               mimeType: "image/png",
             },
@@ -138,8 +141,31 @@ export class GoogleImagenProvider implements ImageProvider {
   private extractCleanVisualPrompt(rawPrompt: string): string {
     const anchorMatch = rawPrompt.match(/Anchor[- ]frame prompt\s*:\s*([^\n\r]+)/i);
     if (anchorMatch && anchorMatch[1].trim()) {
-      return anchorMatch[1].replace(/[`"]/g, "").replace(/\s+/g, " ").trim().slice(0, 450);
+      return anchorMatch[1].replace(/[`"]/g, "").replace(/\s+/g, " ").trim().slice(0, 600);
     }
-    return rawPrompt.replace(/\s+/g, " ").trim().slice(0, 450);
+    if (rawPrompt.includes("Subject:") || rawPrompt.includes("Visual Style:") || rawPrompt.includes("Solo hero art contract:")) {
+      const subjectMatch = rawPrompt.match(/Subject\s*:\s*([^\n\r]+)/i);
+      const subject = subjectMatch ? subjectMatch[1].replace(/\.$/, "").trim() : "";
+      const visualStyleMatch = rawPrompt.match(/Visual Style\s*:\s*([^\n\r]+)/i);
+      const visualStyle = visualStyleMatch ? visualStyleMatch[1].replace(/\.$/, "").trim() : "";
+      const artContractMatch = rawPrompt.match(/(?:Solo hero art contract|Every option in this set must share this exact art direction)\s*:\s*([^\n\r]+)/i);
+      const artContract = artContractMatch ? artContractMatch[1].replace(/\.$/, "").trim() : "";
+      const lightingMatch = rawPrompt.match(/Lighting\s*:\s*([^\n\r]+)/i);
+      const lighting = lightingMatch ? lightingMatch[1].replace(/\.$/, "").trim() : "";
+      const backgroundMatch = rawPrompt.match(/Background\s*:\s*([^\n\r]+)/i);
+      const background = backgroundMatch ? backgroundMatch[1].replace(/\.$/, "").trim() : "";
+
+      const parts = [
+        subject ? `Subject: ${subject}.` : "",
+        visualStyle ? `Style: ${visualStyle}.` : "",
+        artContract ? `Art Direction: ${artContract}.` : "",
+        lighting ? `Lighting: ${lighting}.` : "",
+        background ? `Background: ${background}.` : "",
+        "High quality, vibrant colors, child-friendly, clear focal subject, no text, no letters, no logos, no watermark, no split screen.",
+      ].filter(Boolean);
+
+      return parts.join(" ").slice(0, 900);
+    }
+    return rawPrompt.replace(/\s+/g, " ").trim().slice(0, 600);
   }
 }

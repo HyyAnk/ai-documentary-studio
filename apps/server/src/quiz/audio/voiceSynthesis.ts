@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { VoicePlanSchema, type AppConfig, type QuizTimeline, type VoicePauseClass, type VoiceSegment, type VoiceSegmentRole, type VoicePlan } from "@studio/shared";
 import type { RepositoryService } from "../../repository.js";
 import { synthesizeWav } from "../../providers/chatterbox.js";
+import { runConcurrent } from "../../utils/concurrency.js";
 import { audioDiagnosticsForTimeline, type VoiceAudioDiagnostics } from "./audioDiagnostics.js";
 import { countQuizVoiceWords, quizVoicePacingLimit } from "./voicePolicy.js";
 
@@ -46,15 +47,18 @@ export async function synthesizeQuizVoiceSegments(input: {
   const voice = channel.voice_reference_path ? input.repository.resolveContextPath(channel.voice_reference_path) : "default";
   const cache = new Map<string, { duration: number; absolutePath: string }>();
   const segmentPaths = new Map<string, string>();
-  const segments: VoicePlan["segments"] = [];
   const pacingDirectory = input.repository.resolvePath("runtime", "quiz-voice", input.episodeId);
   await mkdir(pacingDirectory, { recursive: true });
   const pacingLimit = quizVoicePacingLimit(input.targetWordsPerSecond);
-  for (const [index, segment] of input.voicePlan.segments.entries()) {
+
+  let completedCount = 0;
+  const voiceConcurrency = Math.max(1, Math.min(4, input.config.max_concurrent_tasks || 2));
+
+  const results = await runConcurrent(input.voicePlan.segments, voiceConcurrency, async (segment, index) => {
     const tempo = quizVoiceTempo(segment.role);
     const fingerprint = quizVoiceFingerprint(segment, tempo, voice, input.config, input.targetWordsPerSecond);
     const key = fingerprint;
-      const pacingVersion = `${segment.role === "outro" ? "paced-v12-outro" : "paced-v12"}-${fingerprint.slice(0, 20)}`;
+    const pacingVersion = `${segment.role === "outro" ? "paced-v12-outro" : "paced-v12"}-${fingerprint.slice(0, 20)}`;
     let rendered = cache.get(key);
     let reused = Boolean(rendered);
     if (!rendered) {
@@ -80,10 +84,20 @@ export async function synthesizeQuizVoiceSegments(input: {
       }
       cache.set(key, rendered);
     }
-    segmentPaths.set(segment.segment_id, rendered.absolutePath);
-    segments.push({ ...segment, duration_seconds: rendered.duration });
-    await input.onProgress?.({ completed: index + 1, total: input.voicePlan.segments.length, reused });
+    completedCount++;
+    await input.onProgress?.({ completed: completedCount, total: input.voicePlan.segments.length, reused });
+    return {
+      segment: { ...segment, duration_seconds: rendered.duration },
+      absolutePath: rendered.absolutePath,
+    };
+  });
+
+  const segments: VoicePlan["segments"] = [];
+  for (const item of results) {
+    segments.push(item.segment);
+    segmentPaths.set(item.segment.segment_id, item.absolutePath);
   }
+
   return { voicePlan: VoicePlanSchema.parse({ ...input.voicePlan, segments }), segmentPaths };
 }
 
@@ -150,32 +164,73 @@ async function renderPerformanceSegment(config: AppConfig["audio_generation"], s
   }
 }
 
+export function createSilenceWav(durationSeconds: number): Uint8Array {
+  const numSamples = Math.max(0, Math.round(durationSeconds * 48000));
+  const dataSize = numSamples * 4;
+  const buffer = new Uint8Array(44 + dataSize);
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+
+  // "RIFF"
+  buffer[0] = 0x52; buffer[1] = 0x49; buffer[2] = 0x46; buffer[3] = 0x46;
+  view.setUint32(4, 36 + dataSize, true);
+  // "WAVE"
+  buffer[8] = 0x57; buffer[9] = 0x41; buffer[10] = 0x56; buffer[11] = 0x45;
+  // "fmt "
+  buffer[12] = 0x66; buffer[13] = 0x6d; buffer[14] = 0x74; buffer[15] = 0x20;
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 2, true); // 2 channels
+  view.setUint32(24, 48000, true); // 48000 Hz
+  view.setUint32(28, 192000, true); // 192000 bytes/sec
+  view.setUint16(32, 4, true); // block align
+  view.setUint16(34, 16, true); // 16-bit
+  // "data"
+  buffer[36] = 0x64; buffer[37] = 0x61; buffer[38] = 0x74; buffer[39] = 0x61;
+  view.setUint32(40, dataSize, true);
+  return buffer;
+}
+
 async function concatenatePerformancePhrases(paths: string[], phrases: VoiceSegment["phrases"], directory: string, segmentNumber: number): Promise<Uint8Array> {
   const outputPath = path.join(directory, `segment-${String(segmentNumber).padStart(3, "0")}-joined.wav`);
-  const args: string[] = ["-y"];
-  const filters: string[] = [];
-  const chain: string[] = [];
-  let inputIndex = 0;
-  for (const [index, phrasePath] of paths.entries()) {
-    args.push("-i", phrasePath);
-    const label = `phrase${index}`;
-    filters.push(`[${inputIndex}:a]aformat=sample_rates=48000:channel_layouts=stereo[${label}]`);
-    chain.push(`[${label}]`);
-    inputIndex += 1;
-    const pauseClass = phrases[index]?.pause_after ?? "none";
-    if (index < paths.length - 1 && pauseClass !== "none") {
-      const seconds = pauseSeconds(pauseClass, segmentNumber, index);
-      const gapLabel = `gap${index}`;
-      filters.push(`anullsrc=r=48000:cl=stereo:d=${seconds.toFixed(3)}[${gapLabel}]`);
-      chain.push(`[${gapLabel}]`);
-    }
-  }
-  filters.push(`${chain.join("")}concat=n=${chain.length}:v=0:a=1,asetpts=N/SR/TB[out]`);
+  const concatManifestPath = path.join(directory, `segment-${String(segmentNumber).padStart(3, "0")}-concat.txt`);
+  const temporaryFiles: string[] = [concatManifestPath];
+
   try {
-    await execFileAsync("ffmpeg", [...args, "-filter_complex", filters.join(";"), "-map", "[out]", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", outputPath], { timeout: 2 * 60_000, windowsHide: true });
+    const manifestLines: string[] = [];
+    for (const [index, phrasePath] of paths.entries()) {
+      const normalizedPath = phrasePath.replace(/\\/g, "/").replace(/'/g, "'\\''");
+      manifestLines.push(`file '${normalizedPath}'`);
+      const pauseClass = phrases[index]?.pause_after ?? "none";
+      if (index < paths.length - 1 && pauseClass !== "none") {
+        const seconds = pauseSeconds(pauseClass, segmentNumber, index);
+        if (seconds > 0) {
+          const pausePath = path.join(directory, `segment-${String(segmentNumber).padStart(3, "0")}-pause-${index}.wav`);
+          await writeFile(pausePath, createSilenceWav(seconds));
+          temporaryFiles.push(pausePath);
+          const normalizedPause = pausePath.replace(/\\/g, "/").replace(/'/g, "'\\''");
+          manifestLines.push(`file '${normalizedPause}'`);
+        }
+      }
+    }
+    await writeFile(concatManifestPath, manifestLines.join("\n") + "\n", "utf8");
+
+    await execFileAsync("ffmpeg", [
+      "-y",
+      "-f", "concat",
+      "-safe", "0",
+      "-i", concatManifestPath,
+      "-af", "aformat=sample_rates=48000:channel_layouts=stereo,asetpts=N/SR/TB",
+      "-ar", "48000",
+      "-ac", "2",
+      "-c:a", "pcm_s16le",
+      outputPath,
+    ], { timeout: 2 * 60_000, windowsHide: true });
     return new Uint8Array(await readFile(outputPath));
   } finally {
-    await rm(outputPath, { force: true });
+    await Promise.all([
+      rm(outputPath, { force: true }),
+      ...temporaryFiles.map((file) => rm(file, { force: true })),
+    ]);
   }
 }
 
@@ -250,26 +305,66 @@ export async function assembleQuizNarration(input: {
   timeline: QuizTimeline;
   segmentPaths: Map<string, string>;
 }): Promise<{ assetPath: string; durationSeconds: number; diagnostics: VoiceAudioDiagnostics }> {
-  const narrationEvents = input.timeline.events.filter((event) => event.type === "narration.segment" && event.segment_id).sort((left, right) => left.at_seconds - right.at_seconds);
+  const narrationEvents = input.timeline.events
+    .filter((event) => event.type === "narration.segment" && event.segment_id)
+    .sort((left, right) => left.at_seconds - right.at_seconds);
   if (narrationEvents.length === 0) throw new Error("Quiz timeline has no narration segments");
+
   const workingDirectory = input.repository.resolvePath("runtime", "quiz-voice", input.episodeId);
   await mkdir(workingDirectory, { recursive: true });
   const outputPath = path.join(workingDirectory, "narration.wav");
-  const args: string[] = ["-y"];
-  const filters: string[] = [];
-  for (const [index, event] of narrationEvents.entries()) {
-    const source = input.segmentPaths.get(event.segment_id!);
-    if (!source) throw new Error("Quiz narration source is missing for " + event.segment_id);
-    args.push("-i", source);
-    const delay = Math.max(0, Math.round(event.at_seconds * 1000));
-    filters.push(`[${index}:a]aformat=sample_rates=48000:channel_layouts=stereo,adelay=${delay}|${delay},asetpts=PTS-STARTPTS[a${index}]`);
-  }
-  const mixInputs = ["[bed]", ...narrationEvents.map((_, index) => `[a${index}]`)].join("");
-  const duration = Number(input.timeline.duration_seconds.toFixed(3));
-  filters.push(`anullsrc=r=48000:cl=stereo:d=${duration}[bed]`);
-  filters.push(`${mixInputs}amix=inputs=${narrationEvents.length + 1}:duration=longest:dropout_transition=0,atrim=duration=${duration},asetpts=N/SR/TB,loudnorm=I=-16:TP=-1.5:LRA=7[mix]`);
+  const concatManifestPath = path.join(workingDirectory, "narration-concat.txt");
+  const temporaryFiles: string[] = [concatManifestPath];
+
   try {
-    await execFileAsync("ffmpeg", [...args, "-filter_complex", filters.join(";"), "-map", "[mix]", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", outputPath], { timeout: 10 * 60_000, windowsHide: true });
+    const manifestLines: string[] = [];
+    let currentPosition = 0;
+
+    for (const [index, event] of narrationEvents.entries()) {
+      const source = input.segmentPaths.get(event.segment_id!);
+      if (!source) throw new Error("Quiz narration source is missing for " + event.segment_id);
+
+      const targetStart = Number(event.at_seconds.toFixed(3));
+      if (targetStart > currentPosition + 0.002) {
+        const gap = Number((targetStart - currentPosition).toFixed(3));
+        const silencePath = path.join(workingDirectory, `silence-${String(index).padStart(4, "0")}.wav`);
+        await writeFile(silencePath, createSilenceWav(gap));
+        temporaryFiles.push(silencePath);
+        const normalizedSilence = silencePath.replace(/\\/g, "/").replace(/'/g, "'\\''");
+        manifestLines.push(`file '${normalizedSilence}'`);
+        currentPosition = targetStart;
+      }
+
+      const normalizedSource = source.replace(/\\/g, "/").replace(/'/g, "'\\''");
+      manifestLines.push(`file '${normalizedSource}'`);
+      currentPosition += Number(event.duration_seconds.toFixed(3));
+    }
+
+    const totalDuration = Number(input.timeline.duration_seconds.toFixed(3));
+    if (totalDuration > currentPosition + 0.002) {
+      const trailingGap = Number((totalDuration - currentPosition).toFixed(3));
+      const trailingSilencePath = path.join(workingDirectory, "silence-end.wav");
+      await writeFile(trailingSilencePath, createSilenceWav(trailingGap));
+      temporaryFiles.push(trailingSilencePath);
+      const normalizedTrailing = trailingSilencePath.replace(/\\/g, "/").replace(/'/g, "'\\''");
+      manifestLines.push(`file '${normalizedTrailing}'`);
+    }
+
+    await writeFile(concatManifestPath, manifestLines.join("\n") + "\n", "utf8");
+
+    const duration = totalDuration;
+    await execFileAsync("ffmpeg", [
+      "-y",
+      "-f", "concat",
+      "-safe", "0",
+      "-i", concatManifestPath,
+      "-af", `aformat=sample_rates=48000:channel_layouts=stereo,atrim=duration=${duration},asetpts=N/SR/TB,loudnorm=I=-16:TP=-1.5:LRA=7`,
+      "-ar", "48000",
+      "-ac", "2",
+      "-c:a", "pcm_s16le",
+      outputPath,
+    ], { timeout: 10 * 60_000, windowsHide: true });
+
     const audio = new Uint8Array(await readFile(outputPath));
     const assetPath = await input.repository.writeQuizNarrationAudio(input.channelId, input.episodeId, audio);
     const durationSeconds = wavDurationSeconds(audio);
@@ -278,7 +373,10 @@ export async function assembleQuizNarration(input: {
     await input.repository.saveNarrationMetadata(input.channelId, input.episodeId, assetPath, durationSeconds, input.voicePlan.segments.length, wordCount(input.voicePlan.segments.map((segment) => segment.text).join(" ")));
     return { assetPath, durationSeconds, diagnostics };
   } finally {
-    await rm(outputPath, { force: true });
+    await Promise.all([
+      rm(outputPath, { force: true }),
+      ...temporaryFiles.map((file) => rm(file, { force: true })),
+    ]);
   }
 }
 
