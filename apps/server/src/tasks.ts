@@ -845,6 +845,27 @@ export class TaskManager extends EventEmitter {
           // try next candidate
         }
       }
+      const fontTargetDir = path.join(renderRoot, "fonts");
+      await mkdir(fontTargetDir, { recursive: true });
+      const fontFiles = ["SVN-Hello Headline.otf"];
+      const fontCandidates = [
+        path.join(this.repository.rootDirectory, "assets", "fonts"),
+        path.join(this.repository.rootDirectory, "templates", "fonts"),
+        path.resolve("assets", "fonts"),
+        path.resolve("templates", "fonts"),
+        "D:\\Font 1",
+      ];
+      await Promise.all(fontFiles.map(async (file) => {
+        for (const candidateDir of fontCandidates) {
+          const candidateFile = path.join(candidateDir, file);
+          try {
+            await copyFile(candidateFile, path.join(fontTargetDir, file));
+            break;
+          } catch {
+            // try next candidate
+          }
+        }
+      }));
 
       const sourceFingerprint = renderSourceFingerprint(html, narration.modified_at, narration.size, assetResolution?.assets ?? []);
       const checkpointPath = path.join(renderRoot, "render-checkpoint.json");

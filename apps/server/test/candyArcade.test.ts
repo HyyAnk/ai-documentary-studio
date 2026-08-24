@@ -32,6 +32,7 @@ describe("Candy Arcade visual template", () => {
 
   it("uses reusable tokens and never auto-repeats a palette", () => {
     expect(candyArcadeTemplate.tokens.safeArea.left).toBeGreaterThan(0);
+    expect(candyArcadeTemplate.tokens.typography.question.family).toContain("SVN-Hello Headline");
     expect(candyArcadeTemplate.tokens.typography.question.family).toContain("Arial Rounded");
     const first = resolvePalette("auto", 0);
     expect(resolvePalette("auto", 0, first.id).id).not.toBe(first.id);
@@ -156,9 +157,15 @@ describe("Candy Arcade visual template", () => {
     expect(html).toContain("transition-bubble_splash");
     expect(html).toContain("splash-brand");
     expect(html).toContain(".decor-7 { left: 30%; top: 8%;");
+    expect(html).toContain('font-family: "SVN-Hello Headline"');
+    expect(html).toContain('.question-title h1 { margin: 0; color: #342245; font-family: "Fredoka", "SVN-Hello Headline"');
     expect(html).toContain("is-final-scene");
     expect(html).toContain(".game-stage { position: relative; z-index: 3;");
     expect(html).toContain(".reward-fx { position: absolute; z-index: 7; inset: 0;");
+    expect(html).toContain("hanging-wood-sign");
+    expect(html).toContain("wood-sign-plank");
+    expect(html).toContain("question-number-val");
+    expect(html).toContain("@keyframes hanging-sign-sway");
   });
 
   it("keeps the 50-question maximum to one scene and one hero image per question", () => {

@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { DirectorPlan, QuizConfig, QuizTimeline, QuizV2 } from "@studio/shared";
@@ -162,10 +163,8 @@ function questionClip(input: { start: number; choicesStart: number; thinkingStar
   const answers = answerCards(question, input.assets);
   const hero = visual.layoutId === "visual_choices_three" ? "" : imageCard(questionAsset, question.visual_opportunity || question.question, "hero-image", question.number);
   const visualAnswers = visual.layoutId === "visual_choices_three" ? visualAnswerCards(question, input.assets, input.questionIndex) : "";
-  const body = `<div class="game-stage" data-layout-allow-overflow><div class="question-title question-tier-${questionLayout.tier}" data-layout-allow-occlusion><h1>${highlightQuestionMarkup(question.question, question.visual_opportunity)}</h1></div>${hero}${visualAnswers || answers}<div class="phase-region">${thinkingBar({ clipStart: input.start, revealStart: input.revealStart })}${revealPanel(input)}</div></div>`;
-  const streak = input.questionIndex >= 2 ? " streak" : "";
-  const streakCue = input.questionIndex >= 2 ? "<i aria-hidden=\"true\" data-layout-ignore>✦</i>" : "";
-  return `<section id="quiz-q${question.number}-${Math.round(input.start * 1000)}" class="${classNames}" ${config} data-start="${input.start.toFixed(3)}" data-duration="${Math.max(.04, input.end - input.start).toFixed(3)}" data-track-index="0"><div class="bg-gradient"></div><div class="bg-rays"></div><div class="bg-pattern pattern-circles"></div><div class="bg-pattern pattern-sprinkles"></div><div class="bg-shape shape-a" data-layout-allow-overflow></div>${sceneDecorations(input.questionIndex)}<header class="game-header" data-layout-allow-occlusion><div class="episode-progress${streak}" data-layout-allow-occlusion><span>${esc(input.copy.question)}</span><b>${question.number} / ${input.count}</b>${streakCue}</div></header>${body}${rewardFx(input.isFinal ? "big" : "small")}</section>`;
+  const body = `<div class="game-stage" data-layout-allow-overflow><div class="question-title question-tier-${questionLayout.tier}" data-layout-allow-occlusion><div class="question-card-inner"><div class="q-badge-star" data-layout-ignore aria-hidden="true"><span class="star-shape">★</span><i class="star-sparkle star-sp-1">✦</i><i class="star-sparkle star-sp-2">•</i></div><div class="q-decor-corner q-decor-top-right" data-layout-ignore aria-hidden="true"><span class="corner-gem">✦</span></div><div class="q-decor-corner q-decor-bottom-right" data-layout-ignore aria-hidden="true"><span class="corner-petal">✿</span></div><h1>${highlightQuestionMarkup(question.question, question.visual_opportunity)}</h1></div></div>${hero}${visualAnswers || answers}<div class="phase-region">${thinkingBar({ clipStart: input.start, revealStart: input.revealStart })}${revealPanel(input)}</div></div>`;
+  return `<section id="quiz-q${question.number}-${Math.round(input.start * 1000)}" class="${classNames}" ${config} data-start="${input.start.toFixed(3)}" data-duration="${Math.max(.04, input.end - input.start).toFixed(3)}" data-track-index="0"><div class="bg-gradient"></div><div class="bg-rays"></div><div class="bg-pattern pattern-circles"></div><div class="bg-pattern pattern-sprinkles"></div><div class="bg-shape shape-a" data-layout-allow-overflow></div>${sceneDecorations(input.questionIndex)}<header class="game-header" data-layout-allow-occlusion><div class="hanging-wood-sign" data-layout-allow-occlusion><div class="hanging-ropes" aria-hidden="true"><span class="wood-rope rope-left"></span><span class="wood-rope rope-right"></span></div><div class="wood-sign-plank"><span class="rope-bracket bracket-left" aria-hidden="true"></span><span class="rope-bracket bracket-right" aria-hidden="true"></span><div class="wood-inner-panel"><span class="question-number-val">${question.number}</span></div><span class="wood-sign-star star-tl" aria-hidden="true">✦</span><span class="wood-sign-star star-br" aria-hidden="true">★</span></div></div></header>${body}${rewardFx(input.isFinal ? "big" : "small")}</section>`;
 }
 
 function transitionClip(input: { start: number; end: number; visual: QuizTemplateScene; nextPalette: QuizTemplateScene["palette"] }): string {
@@ -340,10 +339,47 @@ function fallbackSubjectArtwork(subject: string, hue: number): string {
 function esc(value: string): string { return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;"); }
 function escAttr(value: string): string { return esc(value); }
 
+let cachedHeadlineFontBase64: string | null = null;
+
+function getHeadlineFontBase64(): string {
+  if (cachedHeadlineFontBase64 !== null) return cachedHeadlineFontBase64;
+  const candidates = [
+    path.resolve(process.cwd(), "assets", "fonts", "SVN-Hello Headline.otf"),
+    path.resolve(process.cwd(), "templates", "fonts", "SVN-Hello Headline.otf"),
+    "D:\\Font 1\\SVN-Hello Headline.otf",
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) {
+        cachedHeadlineFontBase64 = fs.readFileSync(candidate).toString("base64");
+        return cachedHeadlineFontBase64;
+      }
+    } catch {}
+  }
+  cachedHeadlineFontBase64 = "";
+  return cachedHeadlineFontBase64;
+}
+
 function candyArcadeCss(): string {
+  const fontBase64 = getHeadlineFontBase64();
+  const fontSources = [
+    ...(fontBase64 ? [`url("data:font/otf;base64,${fontBase64}") format("opentype")`] : []),
+    `url("./fonts/SVN-Hello%20Headline.otf") format("opentype")`,
+    `url("./fonts/SVN-Hello Headline.otf") format("opentype")`,
+    `local("SVN-Hello Headline")`,
+  ].join(", ");
+
   return `
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@600;700;800;900&family=Baloo+2:wght@700;800&family=Nunito:wght@800;900&display=swap');
+@font-face {
+  font-family: "SVN-Hello Headline";
+  src: ${fontSources};
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
 @font-face { font-family: "Candy Rounded"; src: local("Arial Rounded MT Bold"), local("Arial Rounded MT"), local("Trebuchet MS"); font-weight: 900; }
-:root { font-family: "Candy Rounded", "Trebuchet MS", sans-serif; }
+:root { font-family: "Fredoka", "Candy Rounded", "Trebuchet MS", sans-serif; }
 * { box-sizing: border-box; }
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #16285c; }
 #stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
@@ -359,13 +395,32 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .shape-a { top: 17%; right: 7%; width: 310px; height: 190px; transform: rotate(-15deg); }
 .shape-b { bottom: 10%; left: -4%; width: 360px; height: 250px; border-radius: 63% 37% 54% 46%; animation-delay: -7s; }
 .shape-c { right: 24%; bottom: -8%; width: 290px; height: 210px; opacity: .7; animation-delay: -12s; }
-.game-header { position: relative; z-index: 4; display: flex; align-items: center; justify-content: flex-start; }
-.episode-progress { position: relative; z-index: 4; display: inline-flex; align-items: center; gap: 12px; width: max-content; padding: 13px 18px; border: 4px solid rgba(255,255,255,.73); border-radius: 999px; background: var(--surface); box-shadow: 0 9px 0 rgba(13,35,71,.2); font-size: 23px; font-weight: 900; }
-.episode-progress b { padding-left: 12px; border-left: 3px solid rgba(21,42,87,.15); font-variant-numeric: tabular-nums; }
+.game-header { position: absolute; z-index: 6; top: 0; left: 46px; }
+.hanging-wood-sign { position: relative; z-index: 6; display: flex; flex-direction: column; align-items: center; width: 140px; transform-origin: 50% 0; animation: hanging-sign-enter .64s cubic-bezier(.18,1.42,.34,1) var(--clip-start) both, hanging-sign-sway 4.8s ease-in-out calc(var(--clip-start) + .64s) infinite alternate both; }
+.hanging-ropes { position: relative; display: flex; justify-content: space-between; width: 84px; height: 38px; pointer-events: none; }
+.wood-rope { width: 6px; height: 100%; border-radius: 3px; background: repeating-linear-gradient(135deg, #D4A373 0px, #D4A373 4px, #A75C1C 4px, #A75C1C 8px); box-shadow: 2px 2px 4px rgba(13,35,71,.28); }
+.wood-sign-plank { position: relative; width: 136px; min-height: 84px; padding: 7px; border: 5px solid #48200A; border-radius: 26px; background: linear-gradient(180deg, #A25324 0%, #823E17 50%, #642B0D 100%); box-shadow: inset 0 3px 0 rgba(255,215,120,.5), inset 0 -4px 0 rgba(35,14,5,.6), 0 10px 0 var(--depth-shadow), 0 18px 28px rgba(10,25,60,.24); display: grid; place-items: center; }
+.rope-bracket { position: absolute; top: -7px; width: 16px; height: 12px; border: 3px solid #331505; border-radius: 6px; background: #FFC436; box-shadow: inset 0 2px 0 #FFF, 0 2px 4px rgba(0,0,0,.3); }
+.bracket-left { left: 20px; }
+.bracket-right { right: 20px; }
+.wood-inner-panel { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; min-height: 58px; border-radius: 18px; border: 3px solid #3E1A07; background: linear-gradient(180deg, #6F3010 0%, #522208 100%); box-shadow: inset 0 3px 6px rgba(0,0,0,.5), inset 0 -2px 0 rgba(255,215,120,.22); }
+.question-number-val { font-family: "Fredoka", "SVN-Hello Headline", "Baloo 2", "Nunito", "Arial Rounded MT Bold", sans-serif; font-size: 46px; font-weight: 900; line-height: 1; color: #FFFDF0; text-shadow: 0 3px 0 #331505, 0 5px 12px rgba(0,0,0,.45); letter-spacing: -0.5px; }
+.wood-sign-star { position: absolute; pointer-events: none; }
+.wood-sign-star.star-tl { top: -8px; left: -8px; color: #FFD43F; font-size: 20px; text-shadow: 0 0 8px rgba(255,212,63,.85); transform: rotate(-15deg); }
+.wood-sign-star.star-br { bottom: -8px; right: -8px; color: #FFB703; font-size: 22px; text-shadow: 0 2px 0 #331505; transform: rotate(15deg); }
 .game-stage { position: relative; z-index: 3; display: grid; justify-items: center; align-content: start; width: 1600px; min-height: 860px; margin: 16px auto 0; }
-.question-title { position: relative; z-index: 3; max-width: 1550px; padding: 22px 52px 24px; border: 6px solid rgba(255,255,255,.84); border-radius: 40px; background: var(--surface); box-shadow: 0 16px 0 var(--depth-shadow); text-align: center; }
-.question-title h1 { margin: 0; font-size: var(--question-size); font-weight: 900; line-height: var(--question-leading); letter-spacing: -2.4px; text-wrap: balance; text-shadow: 0 4px 0 rgba(13,35,71,.12); }
-.keyword-highlight { color: var(--surface-accent); text-shadow: 0 3px 0 rgba(13,35,71,.1); }
+.question-title { position: relative; z-index: 3; max-width: 1560px; width: 100%; text-align: center; }
+.question-card-inner { position: relative; display: block; padding: 22px 64px 24px; border: 6px solid #FFC938; border-radius: 40px; background: linear-gradient(180deg, #FFFFFF 0%, #FFFDF7 28%, #FFF8EA 100%); box-shadow: inset 0 4px 0 rgba(255,255,255,0.95), inset 0 8px 0 rgba(56,189,248,0.25), inset 0 -5px 0 rgba(245,166,35,0.22), 0 14px 0 var(--depth-shadow), 0 24px 38px rgba(10,25,60,0.16); }
+.question-title h1 { margin: 0; color: #342245; font-family: "Fredoka", "SVN-Hello Headline", "Baloo 2", "Nunito", "Arial Rounded MT Bold", sans-serif; font-size: var(--question-size); font-weight: 800; line-height: var(--question-leading); letter-spacing: -0.5px; text-wrap: balance; text-shadow: 0 2px 0 rgba(255,255,255,0.8), 0 3px 0 rgba(16,35,75,0.08); }
+.keyword-highlight { color: #10B981; text-shadow: 0 1px 0 rgba(255,255,255,0.8); }
+.q-badge-star { position: absolute; top: -24px; left: -16px; z-index: 5; display: grid; place-items: center; width: 62px; height: 62px; border: 4px solid #fff; border-radius: 20px; background: linear-gradient(145deg, #FFDD44 0%, #FFA826 100%); color: #fff; box-shadow: 0 7px 0 rgba(13,35,71,0.22), 0 10px 18px rgba(13,35,71,0.18); transform: rotate(-10deg); animation: star-wobble 3.6s ease-in-out infinite alternate; }
+.star-shape { font-size: 38px; line-height: 1; text-shadow: 0 2px 0 rgba(180,100,0,0.4); }
+.star-sparkle { position: absolute; font-style: normal; pointer-events: none; }
+.star-sp-1 { top: -10px; right: -12px; color: #5CE1E6; font-size: 22px; text-shadow: 0 0 8px rgba(92,225,230,0.8); animation: sparkle-blink 2s ease-in-out infinite; }
+.star-sp-2 { bottom: -6px; left: -10px; color: #FF66A1; font-size: 16px; animation: sparkle-blink 2s ease-in-out infinite 0.7s; }
+.q-decor-corner { position: absolute; z-index: 4; pointer-events: none; }
+.q-decor-top-right { top: -12px; right: 18px; color: #FFD43F; font-size: 26px; text-shadow: 0 0 10px rgba(255,212,63,0.7); animation: sparkle-blink 2.4s ease-in-out infinite 0.3s; }
+.q-decor-bottom-right { bottom: -14px; right: 14px; color: #C084FC; font-size: 28px; text-shadow: 0 3px 0 rgba(13,35,71,0.14); transform: rotate(12deg); }
 .image-card { position: relative; z-index: 3; display: block; margin: 0; overflow: hidden; border: 12px solid #fff; border-radius: 42px; background: #fff; box-shadow: 0 20px 0 rgba(13,35,71,.2), 0 29px 44px rgba(13,35,71,.18); }
 .image-card img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .image-shine { position: absolute; z-index: 4; inset: 0; background: linear-gradient(125deg, rgba(255,255,255,.35), transparent 31%); pointer-events: none; }
@@ -446,8 +501,8 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .episode-progress.streak { animation: progress-pop .52s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + .12s) both; }
 .episode-progress.streak i { margin-left: 2px; color: var(--surface-accent); font-size: 24px; font-style: normal; }
 .quiz-question-clip::after { position: absolute; z-index: 2; top: 58%; left: 50%; width: 980px; height: 440px; border: 26px solid rgba(255,255,255,.54); border-radius: 50%; content: ""; pointer-events: none; transform: translate(-50%,-50%) scale(.45); animation: reveal-impact .7s ease-out calc(var(--clip-start) + var(--reveal-at) + .04s) both; }
-.is-final-scene .question-title { border-color: #FFD64D; box-shadow: 0 18px 0 rgba(255,212,77,.38); }
-.quiz-question-clip .question-title { animation: title-enter .58s cubic-bezier(.18,1.42,.34,1) var(--clip-start) both; }
+.is-final-scene .question-card-inner { border-color: #FF708A; box-shadow: inset 0 4px 0 rgba(255,255,255,0.95), inset 0 8px 0 rgba(255,182,193,0.35), inset 0 -5px 0 rgba(230,60,90,0.25), 0 16px 0 rgba(230,60,90,0.32), 0 26px 42px rgba(10,25,60,0.2); }
+.quiz-question-clip .question-title { animation: question-card-enter 0.52s cubic-bezier(0.18, 1.42, 0.34, 1) var(--clip-start) both, question-card-float 4.2s ease-in-out calc(var(--clip-start) + 0.52s) infinite alternate both; }
 .layout-media_left_choices_right.quiz-question-clip .hero-image { animation: enter-from-left .66s cubic-bezier(.22,.8,.3,1) var(--clip-start) both, hero-float var(--scene-duration) ease-in-out calc(var(--clip-start) + .66s) 1 alternate both; }
 .layout-media_top_choices_bottom.quiz-question-clip .hero-image { animation: enter-from-right .66s cubic-bezier(.22,.8,.3,1) var(--clip-start) both, hero-float var(--scene-duration) ease-in-out calc(var(--clip-start) + .66s) 1 alternate both; }
 .candy-transition { position: absolute; z-index: 10; inset: 0; overflow: hidden; background: transparent; pointer-events: none; }
@@ -482,6 +537,12 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 @keyframes hero-float { 50% { transform: translateY(-8px) rotate(1deg); } }
 @keyframes answer-float { 50% { transform: translateY(-4px) rotate(.25deg); } }
 @keyframes decor-drift { 50% { transform: translate(4px,-7px) rotate(2deg); } }
+@keyframes question-card-enter { from { opacity: 0; transform: translateY(24px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes question-card-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes hanging-sign-enter { 0% { transform: translateY(-70px) rotate(5deg); opacity: 0; } 70% { transform: translateY(5px) rotate(-2deg); } 100% { transform: translateY(0) rotate(0deg); opacity: 1; } }
+@keyframes hanging-sign-sway { 0% { transform: rotate(-1.8deg) translateY(0); } 50% { transform: rotate(0.3deg) translateY(-1px); } 100% { transform: rotate(1.8deg) translateY(0); } }
+@keyframes star-wobble { 0% { transform: rotate(-10deg) scale(1); } 100% { transform: rotate(2deg) scale(1.05); } }
+@keyframes sparkle-blink { 0%, 100% { opacity: 0.4; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1.15); } }
 @keyframes title-enter { from { opacity: 0; transform: translateY(28px) scale(.94); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes hero-enter { from { opacity: 0; transform: translateY(42px) scale(.9); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes answer-enter { from { opacity: 0; transform: translateY(32px) scale(.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
