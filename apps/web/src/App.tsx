@@ -3,6 +3,7 @@ import type { AppConfig, Channel, CodexSettingsResponse, AntigravitySettingsResp
 import { api } from "./api";
 import { useChannels } from "./hooks/useChannels";
 import { useTasks } from "./hooks/useTasks";
+import { useRouter } from "./hooks/useRouter";
 import { DashboardView, type ChannelGroupId } from "./components/ChannelList";
 import { ChannelsView, CreateChannelModal, DeleteChannelModal } from "./components/ChannelView";
 import { SettingsView, StorageSetupModal } from "./components/SettingsPanel";
@@ -14,7 +15,8 @@ import { formatTaskType } from "./lib/utils";
 import { Power } from "@phosphor-icons/react";
 
 export function App() {
-  const [page, setPage] = useState<Page>("dashboard");
+  const router = useRouter();
+  const { page, channelId: selectedChannelId, episodeId: selectedEpisodeId, tab, group, openPage, openChannel, openEpisode, setQueryParam } = router;
   const [git, setGit] = useState<GitInfo>({ branch: null, dirty: false, changed_files: 0 });
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
   const [activeEngine, setActiveEngine] = useState<"codex" | "antigravity">("codex");
@@ -27,8 +29,6 @@ export function App() {
   const [antigravity, setAntigravity] = useState<AntigravitySettingsResponse | null>(null);
   const [antigravityStatus, setAntigravityStatus] = useState("ready");
   const [storage, setStorage] = useState<StorageInfo | null>(null);
-  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
-  const [selectedEpisodeId, setSelectedEpisodeId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState<ChannelGroupId | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Channel | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
@@ -100,8 +100,6 @@ export function App() {
   useEffect(() => { void refresh().catch((error: Error) => { setNotice({ tone: "bad", message: error.message }); setLoading(false); }); }, [refresh]);
 
   const selectedChannel = channels.find((channel) => channel.channel_id === selectedChannelId) ?? null;
-  const openChannel = (channelId: string) => { setSelectedChannelId(channelId); setSelectedEpisodeId(null); setPage("channels"); };
-  const openEpisode = (channelId: string, episodeId: string) => { setSelectedChannelId(channelId); setSelectedEpisodeId(episodeId); setPage("channels"); };
   const showError = (error: unknown) => setNotice({ tone: "bad", message: error instanceof Error ? error.message : "Something went wrong" });
   const showGood = (message: string) => setNotice({ tone: "good", message });
   const requestDeleteChannel = (channel: Channel) => setDeleteTarget(channel);
@@ -111,9 +109,7 @@ export function App() {
     setDeleteTarget(null);
     setChannels((current) => current.filter((item) => item.channel_id !== channel.channel_id));
     if (selectedChannelId === channel.channel_id) {
-      setSelectedChannelId(null);
-      setSelectedEpisodeId(null);
-      setPage("channels");
+      openPage("channels");
     }
     await refresh();
     showGood(`Channel deleted: ${channel.display_name}`);
@@ -178,7 +174,7 @@ export function App() {
     }
   };
 
-  const navigate = (next: Page) => { setPage(next); if (next !== "channels") { setSelectedChannelId(null); setSelectedEpisodeId(null); } };
+  const navigate = (next: Page) => openPage(next);
   if (stopped) return <main className="shutdown-screen"><div className="shutdown-card"><Power size={24} weight="bold" /><p className="eyebrow">Local workspace</p><h1>Dashboard stopped</h1><p>Run <strong>run dashboard.bat</strong> to start it again. Your channel files are still on this computer.</p></div></main>;
 
   const currentEngineStatus = activeEngine === "antigravity" ? antigravityStatus : codexStatus;
@@ -190,7 +186,7 @@ export function App() {
         <Topbar
           channel={selectedChannel}
           channels={channels}
-          onSelectChannel={openChannel}
+          onSelectChannel={(chId) => openChannel(chId)}
           activeEngine={activeEngine}
           engineStatus={currentEngineStatus}
           git={git}
@@ -232,7 +228,7 @@ export function App() {
             activeTasks={activeTasks}
             now={taskClock}
             onCreate={(groupId) => requestCreateChannel(groupId || "quiz")}
-            openChannel={openChannel}
+            openChannel={(chId) => openChannel(chId)}
             onDelete={requestDeleteChannel}
             openTaskList={() => navigate("tasks")}
             openChannelsList={() => navigate("channels")}
@@ -244,6 +240,11 @@ export function App() {
             selectedEpisodeId={selectedEpisodeId}
             channels={channels}
             tasks={tasks}
+            activeTab={tab}
+            activeGroupQuery={group}
+            onTabChange={(nextTab) => setQueryParam("tab", nextTab)}
+            onGroupChange={(nextGroup) => setQueryParam("group", nextGroup)}
+            onNavigateHome={() => openPage("dashboard")}
             onTaskSubmitted={upsertTask}
             openChannel={openChannel}
             onCreate={requestCreateChannel}
@@ -268,6 +269,8 @@ export function App() {
             antigravityStatus={antigravityStatus}
             git={git}
             storage={storage}
+            activeTab={tab}
+            onTabChange={(nextTab) => setQueryParam("tab", nextTab)}
             onStorageSaved={applyStorage}
             onCodexSaved={setCodex}
             onAntigravitySaved={setAntigravity}

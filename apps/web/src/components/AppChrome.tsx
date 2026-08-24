@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Broadcast, CaretDown, Gear, GitBranch, House, Image, ListChecks, MoonStars, Power, Sun, TerminalWindow, X, CheckCircle, Sparkle, WarningCircle } from "@phosphor-icons/react";
+import { Broadcast, CaretDown, Check, CheckCircle, CircleNotch, FileText, Gear, GitBranch, House, Image, ListChecks, MoonStars, Power, SpeakerHigh, Sparkle, Sun, TerminalWindow, VideoCamera, WarningCircle, X } from "@phosphor-icons/react";
 import type { Channel, CodexSettingsResponse } from "@studio/shared";
 import type { GitInfo, Notice, Page, Theme } from "./types";
 
@@ -252,7 +252,170 @@ export function Topbar({
 export function PageTitle({ eyebrow, title, copy, action }: { eyebrow: string; title: string; copy?: string; action?: React.ReactNode }) { return <div className="page-title"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1>{copy ? <p className="page-copy">{copy}</p> : null}</div>{action ? <div>{action}</div> : null}</div>; }
 export function StatusLine({ label, value }: { label: string; value: string }) { return <div className="status-line"><span>{label}</span><strong>{value}</strong></div>; }
 export function StatusBadge({ status }: { status: string }) { return <span className={`status-badge ${status.toLowerCase()}`}>{status.toLowerCase()}</span>; }
-export function StageBadge({ stage }: { stage: string }) { return <span className="stage-badge">{stage.replaceAll("_", " ").toLowerCase()}</span>; }
+
+export type ProductionStageCategory = "research" | "script" | "visual" | "timeline" | "assembly" | "final";
+
+export type StageMetadata = {
+  label: string;
+  category: ProductionStageCategory;
+  isReady: boolean;
+};
+
+export function getStageMetadata(stage: string): StageMetadata {
+  switch (stage.toUpperCase()) {
+    case "IDEA":
+    case "SELECTED":
+      return { label: "Idea Selected", category: "research", isReady: false };
+    case "RESEARCH":
+      return { label: "Researching", category: "research", isReady: false };
+    case "RESEARCH_READY":
+      return { label: "Research Ready", category: "research", isReady: true };
+    case "TREATMENT":
+      return { label: "Drafting Story", category: "research", isReady: false };
+    case "TREATMENT_READY":
+      return { label: "Treatment Ready", category: "research", isReady: true };
+    case "SCRIPT":
+      return { label: "Writing Script", category: "script", isReady: false };
+    case "SCRIPT_READY":
+      return { label: "Script Ready", category: "script", isReady: true };
+    case "VISUAL_BIBLE":
+      return { label: "Styling Visuals", category: "visual", isReady: false };
+    case "VISUAL_BIBLE_READY":
+      return { label: "Visual Ready", category: "visual", isReady: true };
+    case "SCENE_BREAKDOWN":
+      return { label: "Breaking Shots", category: "timeline", isReady: false };
+    case "SCENE_READY":
+      return { label: "Shots Ready", category: "timeline", isReady: true };
+    case "NARRATION_READY":
+      return { label: "Audio Ready", category: "assembly", isReady: true };
+    case "READY_FOR_GENERATION":
+      return { label: "Ready to Render", category: "assembly", isReady: true };
+    case "VIDEO_RENDERING":
+      return { label: "Rendering Video", category: "assembly", isReady: false };
+    case "VIDEO_READY":
+      return { label: "Video Ready", category: "final", isReady: true };
+    default:
+      return { label: stage.replaceAll("_", " ").toLowerCase(), category: "research", isReady: false };
+  }
+}
+
+export function StageBadge({ stage, size = "md" }: { stage: string; size?: "sm" | "md" }) {
+  const meta = getStageMetadata(stage);
+  return (
+    <span
+      className={`stage-badge stage-cat-${meta.category} stage-size-${size} ${meta.isReady ? "is-ready" : "is-progress"}`}
+    >
+      <span className="stage-dot" />
+      <span>{meta.label}</span>
+    </span>
+  );
+}
+
+export function EpisodeAssetPills({
+  episode,
+  tasks = [],
+  compact = false,
+}: {
+  episode: {
+    script_path?: string | null;
+    visual_bible_path?: string | null;
+    narration_asset_path?: string | null;
+    narration_duration_seconds?: number | null;
+    video_asset_path?: string | null;
+    stage?: string;
+  };
+  tasks?: Array<{ task_type: string; status: string }>;
+  compact?: boolean;
+}) {
+  const isTaskActiveLocal = (t: { status: string }) => t.status === "QUEUED" || t.status === "RUNNING";
+
+  // Script status
+  const scriptActive = tasks.some((t) => t.task_type === "GENERATE_SCRIPT" && isTaskActiveLocal(t));
+  const scriptReady = Boolean(episode.script_path);
+
+  // Visual status
+  const visualActive = tasks.some((t) => t.task_type === "GENERATE_VISUAL_BIBLE" && isTaskActiveLocal(t));
+  const visualReady = Boolean(episode.visual_bible_path);
+
+  // Narration status
+  const audioActive = tasks.some(
+    (t) => (t.task_type === "GENERATE_NARRATION" || t.task_type === "GENERATE_AUDIO") && isTaskActiveLocal(t)
+  );
+  const audioReady = Boolean(episode.narration_asset_path);
+  const audioSec = episode.narration_duration_seconds ? `${Math.round(episode.narration_duration_seconds)}s` : null;
+
+  // Video status
+  const videoActive = tasks.some((t) => t.task_type === "GENERATE_VIDEO" && isTaskActiveLocal(t));
+  const videoReady = Boolean(episode.video_asset_path || episode.stage === "VIDEO_READY");
+
+  return (
+    <div className={`episode-asset-pills ${compact ? "is-compact" : ""}`} aria-label="Media asset status">
+      {/* Script */}
+      <span
+        className={`asset-pill ${scriptReady ? "is-ready" : scriptActive ? "is-running" : "is-empty"}`}
+        title={
+          scriptReady
+            ? "Narration Script: Ready"
+            : scriptActive
+            ? "Narration Script: Generating…"
+            : "Narration Script: Not created"
+        }
+      >
+        {scriptActive ? <CircleNotch size={11} className="spin" /> : <FileText size={11} />}
+        <span>Script</span>
+        {scriptReady ? <Check size={10} weight="bold" /> : null}
+      </span>
+
+      {/* Visual */}
+      <span
+        className={`asset-pill ${visualReady ? "is-ready" : visualActive ? "is-running" : "is-empty"}`}
+        title={
+          visualReady
+            ? "Visual Identity: Ready"
+            : visualActive
+            ? "Visual Identity: Generating…"
+            : "Visual Identity: Not created"
+        }
+      >
+        {visualActive ? <CircleNotch size={11} className="spin" /> : <Image size={11} />}
+        <span>Visual</span>
+        {visualReady ? <Check size={10} weight="bold" /> : null}
+      </span>
+
+      {/* Audio */}
+      <span
+        className={`asset-pill ${audioReady ? "is-ready" : audioActive ? "is-running" : "is-empty"}`}
+        title={
+          audioReady
+            ? `Narration Audio: Ready (${audioSec ?? "Complete"})`
+            : audioActive
+            ? "Narration Audio: Synthesizing…"
+            : "Narration Audio: Not generated"
+        }
+      >
+        {audioActive ? <CircleNotch size={11} className="spin" /> : <SpeakerHigh size={11} />}
+        <span>Audio</span>
+        {audioReady ? <Check size={10} weight="bold" /> : null}
+      </span>
+
+      {/* Video */}
+      <span
+        className={`asset-pill ${videoReady ? "is-final-ready" : videoActive ? "is-running" : "is-empty"}`}
+        title={
+          videoReady
+            ? "Master Video: Rendered & Ready"
+            : videoActive
+            ? "Master Video: Rendering…"
+            : "Master Video: Not rendered"
+        }
+      >
+        {videoActive ? <CircleNotch size={11} className="spin" /> : <VideoCamera size={11} />}
+        <span>Video</span>
+        {videoReady ? <Check size={10} weight="bold" /> : null}
+      </span>
+    </div>
+  );
+}
 export function NoticeBanner({ notice, onClose }: { notice: NonNullable<Notice>; onClose: () => void }) {
   const duration = notice.duration ?? 4200;
   const [isPaused, setIsPaused] = useState(false);

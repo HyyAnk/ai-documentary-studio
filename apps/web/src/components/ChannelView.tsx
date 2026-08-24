@@ -5,19 +5,124 @@ import { api } from "../api";
 import { formatDate, isTaskActive, isTaskTerminal, latestTask } from "../lib/utils";
 import { EmptyState } from "./EmptyState";
 import { ChannelCard, ChannelsListView, type ChannelGroupId } from "./ChannelList";
-import { PageTitle, StageBadge, StatusBadge, StatusLine } from "./AppChrome";
+import { PageTitle, StageBadge, StatusBadge, StatusLine, EpisodeAssetPills } from "./AppChrome";
 import { TaskProgressPanel, TopicProgress } from "./TaskProgressPanel";
 import { EpisodeDetail } from "./EpisodeView";
+import { ChannelBreadcrumb } from "./Breadcrumbs";
 import type { Notice } from "./types";
 
-export function ChannelsView({ selectedChannel, selectedEpisodeId, channels, tasks, onTaskSubmitted, openChannel, onCreate, onRefresh, onNotice, onDelete, openEpisode, maxDuration, narrationWordsPerSecond, imageGenerationEnabled, imagesPerBundle }: { selectedChannel: Channel | null; selectedEpisodeId: string | null; channels: Channel[]; tasks: Task[]; onTaskSubmitted: (task: Task) => void; openChannel: (id: string) => void; onCreate: (groupId?: ChannelGroupId) => void; onRefresh: () => Promise<void>; onNotice: (notice: NonNullable<Notice>) => void; onDelete: (channel: Channel) => void; openEpisode: (channelId: string, episodeId: string) => void; maxDuration: number; narrationWordsPerSecond: number; imageGenerationEnabled: boolean; imagesPerBundle: number }) {
-  const [activeGroup, setActiveGroup] = useState<ChannelGroupId>("quiz");
+export function ChannelsView({
+  selectedChannel,
+  selectedEpisodeId,
+  channels,
+  tasks,
+  activeTab,
+  activeGroupQuery,
+  onTabChange,
+  onGroupChange,
+  onNavigateHome,
+  onTaskSubmitted,
+  openChannel,
+  onCreate,
+  onRefresh,
+  onNotice,
+  onDelete,
+  openEpisode,
+  maxDuration,
+  narrationWordsPerSecond,
+  imageGenerationEnabled,
+  imagesPerBundle,
+}: {
+  selectedChannel: Channel | null;
+  selectedEpisodeId: string | null;
+  channels: Channel[];
+  tasks: Task[];
+  activeTab?: string | null;
+  activeGroupQuery?: string | null;
+  onTabChange?: (tab: string) => void;
+  onGroupChange?: (group: string) => void;
+  onNavigateHome?: () => void;
+  onTaskSubmitted: (task: Task) => void;
+  openChannel: (id: string, tab?: string) => void;
+  onCreate: (groupId?: ChannelGroupId) => void;
+  onRefresh: () => Promise<void>;
+  onNotice: (notice: NonNullable<Notice>) => void;
+  onDelete: (channel: Channel) => void;
+  openEpisode: (channelId: string, episodeId: string, tab?: string) => void;
+  maxDuration: number;
+  narrationWordsPerSecond: number;
+  imageGenerationEnabled: boolean;
+  imagesPerBundle: number;
+}) {
+  const initialGroup: ChannelGroupId = (activeGroupQuery === "quiz" || activeGroupQuery === "documentary") ? activeGroupQuery : "quiz";
+  const [activeGroup, setActiveGroup] = useState<ChannelGroupId>(initialGroup);
+
+  useEffect(() => {
+    if (activeGroupQuery === "quiz" || activeGroupQuery === "documentary") {
+      setActiveGroup(activeGroupQuery);
+    }
+  }, [activeGroupQuery]);
+
   useEffect(() => {
     if (selectedChannel) setActiveGroup(selectedChannel.engine === "quiz" ? "quiz" : "documentary");
   }, [selectedChannel]);
-  if (selectedChannel && selectedEpisodeId) return <EpisodeDetail channel={selectedChannel} episodeId={selectedEpisodeId} tasks={tasks} onTaskSubmitted={onTaskSubmitted} maxDuration={maxDuration} narrationWordsPerSecond={narrationWordsPerSecond} imageGenerationEnabled={imageGenerationEnabled} imagesPerBundle={imagesPerBundle} onBack={() => openChannel(selectedChannel.channel_id)} onNotice={onNotice} />;
-  if (selectedChannel) return <ChannelDetail channel={selectedChannel} channels={channels} tasks={tasks} onTaskSubmitted={onTaskSubmitted} onBack={() => openChannel("")} onRefresh={onRefresh} onNotice={onNotice} onDelete={onDelete} openEpisode={openEpisode} />;
-  return <ChannelsListView channels={channels} activeGroup={activeGroup} onActiveGroupChange={setActiveGroup} onCreate={(groupId) => onCreate(groupId)} openChannel={openChannel} onDelete={onDelete} />;
+
+  const handleGroupChange = (group: ChannelGroupId) => {
+    setActiveGroup(group);
+    onGroupChange?.(group);
+  };
+
+  if (selectedChannel && selectedEpisodeId) {
+    return (
+      <EpisodeDetail
+        channel={selectedChannel}
+        episodeId={selectedEpisodeId}
+        tasks={tasks}
+        activeTab={activeTab}
+        onTabChange={onTabChange}
+        onNavigateHome={onNavigateHome}
+        onNavigateChannels={() => openChannel("")}
+        onNavigateChannel={() => openChannel(selectedChannel.channel_id)}
+        onTaskSubmitted={onTaskSubmitted}
+        maxDuration={maxDuration}
+        narrationWordsPerSecond={narrationWordsPerSecond}
+        imageGenerationEnabled={imageGenerationEnabled}
+        imagesPerBundle={imagesPerBundle}
+        onBack={() => openChannel(selectedChannel.channel_id)}
+        onNotice={onNotice}
+      />
+    );
+  }
+
+  if (selectedChannel) {
+    return (
+      <ChannelDetail
+        channel={selectedChannel}
+        channels={channels}
+        tasks={tasks}
+        activeTab={activeTab}
+        onTabChange={onTabChange}
+        onNavigateHome={onNavigateHome}
+        onTaskSubmitted={onTaskSubmitted}
+        onBack={() => openChannel("")}
+        onRefresh={onRefresh}
+        onNotice={onNotice}
+        onDelete={onDelete}
+        openEpisode={openEpisode}
+      />
+    );
+  }
+
+  return (
+    <ChannelsListView
+      channels={channels}
+      activeGroup={activeGroup}
+      onActiveGroupChange={handleGroupChange}
+      onCreate={(groupId) => onCreate(groupId)}
+      openChannel={(id) => openChannel(id)}
+      onDelete={onDelete}
+    />
+  );
 }
 
 export function DeleteChannelModal({ channel, onClose, onDeleted, onError }: { channel: Channel; onClose: () => void; onDeleted: (channel: Channel) => Promise<void>; onError: (error: unknown) => void }) {
@@ -253,7 +358,33 @@ export function TopicCard({
   </article>;
 }
 
-export function ChannelDetail({ channel, channels, tasks, onTaskSubmitted, onBack, onRefresh, onNotice, onDelete, openEpisode }: { channel: Channel; channels: Channel[]; tasks: Task[]; onTaskSubmitted: (task: Task) => void; onBack: () => void; onRefresh: () => Promise<void>; onNotice: (notice: NonNullable<Notice>) => void; onDelete: (channel: Channel) => void; openEpisode: (channelId: string, episodeId: string) => void }) {
+export function ChannelDetail({
+  channel,
+  channels,
+  tasks,
+  activeTab,
+  onTabChange,
+  onNavigateHome,
+  onTaskSubmitted,
+  onBack,
+  onRefresh,
+  onNotice,
+  onDelete,
+  openEpisode,
+}: {
+  channel: Channel;
+  channels: Channel[];
+  tasks: Task[];
+  activeTab?: string | null;
+  onTabChange?: (tab: string) => void;
+  onNavigateHome?: () => void;
+  onTaskSubmitted: (task: Task) => void;
+  onBack: () => void;
+  onRefresh: () => Promise<void>;
+  onNotice: (notice: NonNullable<Notice>) => void;
+  onDelete: (channel: Channel) => void;
+  openEpisode: (channelId: string, episodeId: string, tab?: string) => void;
+}) {
   const [dna, setDna] = useState<{ content: string; path: string; modified_at: string } | null>(null);
   const [topics, setTopics] = useState<TopicCandidate[]>([]);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
@@ -264,7 +395,19 @@ export function ChannelDetail({ channel, channels, tasks, onTaskSubmitted, onBac
   const [confirmingTopicId, setConfirmingTopicId] = useState<string | null>(null);
   const [deleteEpisodeTarget, setDeleteEpisodeTarget] = useState<Episode | null>(null);
   const [loadingChannel, setLoadingChannel] = useState(true);
-  const [channelTab, setChannelTab] = useState<"episodes" | "topics" | "dna">("episodes");
+  const initialTab = (activeTab === "episodes" || activeTab === "topics" || activeTab === "dna") ? activeTab : "episodes";
+  const [channelTab, setChannelTab] = useState<"episodes" | "topics" | "dna">(initialTab);
+
+  useEffect(() => {
+    if (activeTab && (activeTab === "episodes" || activeTab === "topics" || activeTab === "dna") && activeTab !== channelTab) {
+      setChannelTab(activeTab);
+    }
+  }, [activeTab]);
+
+  const switchTab = (tab: "episodes" | "topics" | "dna") => {
+    setChannelTab(tab);
+    onTabChange?.(tab);
+  };
   const channelTasks = tasks.filter((task) => task.channel_id === channel.channel_id);
   const topicTask = latestTask(channelTasks, ["SUGGEST_TOPICS"]);
   const dnaTask = latestTask(channelTasks, ["GENERATE_DNA"]);
@@ -304,7 +447,7 @@ export function ChannelDetail({ channel, channels, tasks, onTaskSubmitted, onBac
       const result = await api.suggestTopics(channel.channel_id);
       onTaskSubmitted(result.task);
       onNotice({ tone: "good", message: "Generating 5 lightweight topic ideas..." });
-      setChannelTab("topics");
+      switchTab("topics");
     } catch (error) {
       onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Could not generate topics" });
     } finally {
@@ -320,7 +463,7 @@ export function ChannelDetail({ channel, channels, tasks, onTaskSubmitted, onBac
       onNotice({ tone: "good", message: `Episode created: ${result.episode.topic.title} with ${questionCount} questions` });
       await load();
       await onRefresh();
-      setChannelTab("episodes");
+      switchTab("episodes");
     } catch (error) {
       onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Could not create episode" });
     } finally {
@@ -360,15 +503,17 @@ export function ChannelDetail({ channel, channels, tasks, onTaskSubmitted, onBac
     }
   };
 
-  if (loadingChannel) return <ChannelLoadingState channel={channel} onBack={onBack} />;
+  if (loadingChannel) return <ChannelLoadingState channel={channel} onBack={onBack} onNavigateHome={onNavigateHome} />;
 
   return (
     <>
       <section className="page-wrap detail-page">
-        <button className="back-button" onClick={onBack}>
-          <ArrowLeft size={16} />
-          <span>All channels</span>
-        </button>
+        <ChannelBreadcrumb
+          channelName={channel.display_name}
+          engine={channel.engine}
+          onNavigateHome={onNavigateHome}
+          onNavigateChannels={onBack}
+        />
 
         <div className="detail-header">
           <div>
@@ -400,7 +545,7 @@ export function ChannelDetail({ channel, channels, tasks, onTaskSubmitted, onBac
             role="tab"
             aria-selected={channelTab === "episodes"}
             className={`channel-group-tab ${channelTab === "episodes" ? "is-selected" : ""}`}
-            onClick={() => setChannelTab("episodes")}
+            onClick={() => switchTab("episodes")}
           >
             <FilmSlate size={18} weight={channelTab === "episodes" ? "fill" : "regular"} />
             <span>Episodes</span>
@@ -411,7 +556,7 @@ export function ChannelDetail({ channel, channels, tasks, onTaskSubmitted, onBac
             role="tab"
             aria-selected={channelTab === "topics"}
             className={`channel-group-tab ${channelTab === "topics" ? "is-selected" : ""}`}
-            onClick={() => setChannelTab("topics")}
+            onClick={() => switchTab("topics")}
           >
             <Lightbulb size={18} weight={channelTab === "topics" ? "fill" : "regular"} />
             <span>Idea Lab & Topics</span>
@@ -422,7 +567,7 @@ export function ChannelDetail({ channel, channels, tasks, onTaskSubmitted, onBac
             role="tab"
             aria-selected={channelTab === "dna"}
             className={`channel-group-tab ${channelTab === "dna" ? "is-selected" : ""}`}
-            onClick={() => setChannelTab("dna")}
+            onClick={() => switchTab("dna")}
           >
             <FileText size={18} weight={channelTab === "dna" ? "fill" : "regular"} />
             <span>Channel DNA & Identity</span>
@@ -441,7 +586,7 @@ export function ChannelDetail({ channel, channels, tasks, onTaskSubmitted, onBac
                 <span className="count-note">
                   {episodes.length} {episodes.length === 1 ? "episode" : "episodes"}
                 </span>
-                <button className="primary-button compact" onClick={() => setChannelTab("topics")}>
+                <button className="primary-button compact" onClick={() => switchTab("topics")}>
                   <Plus size={15} />
                   <span>New Episode from Topics</span>
                 </button>
@@ -455,7 +600,7 @@ export function ChannelDetail({ channel, channels, tasks, onTaskSubmitted, onBac
                 title="No episodes confirmed yet"
                 copy="Explore and confirm ideas in the Idea Lab to start generating video episodes."
                 action="Explore Idea Lab"
-                onAction={() => setChannelTab("topics")}
+                onAction={() => switchTab("topics")}
               />
             ) : (
               <div className="episode-list">
@@ -472,7 +617,14 @@ export function ChannelDetail({ channel, channels, tasks, onTaskSubmitted, onBac
                         <strong>{episode.topic.title}</strong>
                         <span>{episode.topic.premise}</span>
                       </div>
-                      <StageBadge stage={episode.stage} />
+                      <div className="episode-status-col">
+                        <StageBadge stage={episode.stage} size="sm" />
+                        <EpisodeAssetPills
+                          episode={episode}
+                          tasks={tasks.filter((t) => t.episode_id === episode.episode_id)}
+                          compact
+                        />
+                      </div>
                       <ArrowUpRight size={17} />
                     </button>
                     <button
@@ -661,8 +813,39 @@ export function ChannelDetail({ channel, channels, tasks, onTaskSubmitted, onBac
   );
 }
 
-function ChannelLoadingState({ channel, onBack }: { channel: Channel; onBack: () => void }) {
-  return <section className="page-wrap detail-page"><button className="back-button" onClick={onBack}><ArrowLeft size={16} />All channels</button><div className="detail-header"><div><p className="eyebrow">Channel workspace</p><h1>{channel.display_name}</h1></div></div><div className="channel-loading" role="status" aria-label="Loading channel"><span>Loading channel</span><div className="channel-loading-grid" aria-hidden="true"><div className="channel-skeleton channel-skeleton-large" /><div className="channel-skeleton" /><div className="channel-skeleton channel-skeleton-wide" /></div></div></section>;
+function ChannelLoadingState({
+  channel,
+  onBack,
+  onNavigateHome,
+}: {
+  channel: Channel;
+  onBack: () => void;
+  onNavigateHome?: () => void;
+}) {
+  return (
+    <section className="page-wrap detail-page">
+      <ChannelBreadcrumb
+        channelName={channel.display_name}
+        engine={channel.engine}
+        onNavigateHome={onNavigateHome}
+        onNavigateChannels={onBack}
+      />
+      <div className="detail-header">
+        <div>
+          <p className="eyebrow">Channel workspace</p>
+          <h1>{channel.display_name}</h1>
+        </div>
+      </div>
+      <div className="channel-loading" role="status" aria-label="Loading channel">
+        <span>Loading channel</span>
+        <div className="channel-loading-grid" aria-hidden="true">
+          <div className="channel-skeleton channel-skeleton-large" />
+          <div className="channel-skeleton" />
+          <div className="channel-skeleton channel-skeleton-wide" />
+        </div>
+      </div>
+    </section>
+  );
 }
 
 type CreateChannelForm = { name: string; description: string; target_audience: string; language: string; market: string; group_id: ChannelGroupId; dna_mode: "example" | "ai" | "upload"; dna_content: string };

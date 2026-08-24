@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, CheckCircle, CircleNotch, Copy, DownloadSimple, Eye, FileText, FilmSlate, FloppyDisk, FolderOpen, Image, Lightbulb, PencilSimple, Play, SpeakerHigh, VideoCamera, WarningCircle, X } from "@phosphor-icons/react";
+import { ArrowLeft, ArrowsInSimple, ArrowsOutSimple, Check, CheckCircle, CircleNotch, Copy, DownloadSimple, Eye, FileText, FilmSlate, FloppyDisk, FolderOpen, Image, Lightbulb, MagnifyingGlass, PencilSimple, Play, SpeakerHigh, VideoCamera, WarningCircle, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ALL_QUIZ_IMAGE_STYLES, QUIZ_IMAGE_STYLE_LABELS, QUIZ_MAX_QUESTION_COUNT, QUIZ_MIN_QUESTION_COUNT, type Channel, type ProductionAssessment, type QuizImageStyle, type Scene, type Task } from "@studio/shared";
 import { api, type BundleImage } from "../api";
@@ -6,10 +6,12 @@ import { isTaskActive, isTaskTerminal, latestTask } from "../lib/utils";
 import { parseContinuityBundles } from "../lib/continuity";
 import { useEpisode } from "../hooks/useEpisode";
 import { EmptyState, LoadingState } from "./EmptyState";
-import { StageBadge } from "./AppChrome";
+import { StageBadge, EpisodeAssetPills } from "./AppChrome";
 import { SceneCard } from "./SceneCard";
 import { TaskProgressPanel } from "./TaskProgressPanel";
 import { QuizV2Panel } from "./QuizV2Panel";
+import { EpisodeBreadcrumb } from "./Breadcrumbs";
+import { PromptFocusModal } from "./PromptFocusModal";
 import type { Notice } from "./types";
 
 export type PreviewImageData = {
@@ -36,6 +38,11 @@ export function EpisodeDetail({
   channel,
   episodeId,
   tasks,
+  activeTab,
+  onTabChange,
+  onNavigateHome,
+  onNavigateChannels,
+  onNavigateChannel,
   onTaskSubmitted,
   maxDuration,
   narrationWordsPerSecond,
@@ -47,6 +54,11 @@ export function EpisodeDetail({
   channel: Channel;
   episodeId: string;
   tasks: Task[];
+  activeTab?: string | null;
+  onTabChange?: (tab: string) => void;
+  onNavigateHome?: () => void;
+  onNavigateChannels?: () => void;
+  onNavigateChannel?: () => void;
   onTaskSubmitted: (task: Task) => void;
   maxDuration: number;
   narrationWordsPerSecond: number;
@@ -64,7 +76,24 @@ export function EpisodeDetail({
   const [questionCountDraft, setQuestionCountDraft] = useState(8);
   const [durationDraft, setDurationDraft] = useState(8);
   const [previewImage, setPreviewImage] = useState<PreviewImageData | null>(null);
-  const [workflowTab, setWorkflowTab] = useState<"script" | "visual" | "timeline">("timeline");
+  const [promptModalScene, setPromptModalScene] = useState<Scene | null>(null);
+  const [selectedSequenceId, setSelectedSequenceId] = useState<string>("all");
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [globalPromptExpanded, setGlobalPromptExpanded] = useState<boolean | null>(false);
+  const initialWorkflowTab = (activeTab === "script" || activeTab === "visual" || activeTab === "timeline") ? activeTab : "timeline";
+  const [workflowTab, setWorkflowTab] = useState<"script" | "visual" | "timeline">(initialWorkflowTab);
+
+  useEffect(() => {
+    if (activeTab && (activeTab === "script" || activeTab === "visual" || activeTab === "timeline") && activeTab !== workflowTab) {
+      setWorkflowTab(activeTab);
+    }
+  }, [activeTab]);
+
+  const switchWorkflowTab = (tab: "script" | "visual" | "timeline") => {
+    setWorkflowTab(tab);
+    onTabChange?.(tab);
+  };
   const episodeTasks = tasks.filter((task) => task.episode_id === episodeId);
   const sequenceShotTasks = episodeTasks.filter((task) => task.task_type === "GENERATE_SEQUENCE_SCENES");
   const latestShotBatchStartedAt = sequenceShotTasks.map((task) => task.created_at).sort().at(-1) ?? null;
@@ -73,6 +102,65 @@ export function EpisodeDetail({
   const activeEpisodeTask = episodeTasks.find(isTaskActive) ?? null;
   const pipelineTask = latestTask(episodeTasks, ["GENERATE_PIPELINE"]);
   const [observedTerminalTasks, setObservedTerminalTasks] = useState(() => new Set<string>());
+
+  const sequences = useMemo(() => {
+    const map = new Map<string, { id: string; title: string; count: number }>();
+    for (const s of scenes) {
+      const existing = map.get(s.sequence_id);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        map.set(s.sequence_id, { id: s.sequence_id, title: s.sequence_title || s.sequence_id, count: 1 });
+      }
+    }
+    return Array.from(map.values());
+  }, [scenes]);
+
+  const filterCounts = useMemo(() => {
+    let missingAudio = 0;
+    let audioMismatch = 0;
+    let hasOverlay = 0;
+    let multiCut = 0;
+    for (const s of scenes) {
+      if (!s.audio_asset_path) missingAudio += 1;
+      if (s.audio_duration_seconds !== null && s.audio_duration_seconds !== undefined && Math.abs(s.audio_duration_seconds - s.duration_seconds) > Math.max(1, s.duration_seconds * 0.15)) {
+        audioMismatch += 1;
+      }
+      if (s.editorial_overlay && s.editorial_overlay.kind !== "none") hasOverlay += 1;
+      if (s.visual_prompt.trim() && s.visual_prompt.split(/^\s*(?:CUT|HARD CUT)\s*$/m).length > 1) multiCut += 1;
+    }
+    return { missingAudio, audioMismatch, hasOverlay, multiCut };
+  }, [scenes]);
+
+  const filteredScenes = useMemo(() => {
+    return scenes.filter((scene) => {
+      if (selectedSequenceId !== "all" && scene.sequence_id !== selectedSequenceId) return false;
+      if (selectedStatusFilter === "missing_audio" && scene.audio_asset_path) return false;
+      if (selectedStatusFilter === "audio_mismatch") {
+        const isMismatch = scene.audio_duration_seconds !== null && scene.audio_duration_seconds !== undefined && Math.abs(scene.audio_duration_seconds - scene.duration_seconds) > Math.max(1, scene.duration_seconds * 0.15);
+        if (!isMismatch) return false;
+      }
+      if (selectedStatusFilter === "has_overlay" && (!scene.editorial_overlay || scene.editorial_overlay.kind === "none")) return false;
+      if (selectedStatusFilter === "multi_cut") {
+        const cuts = scene.visual_prompt.trim() ? scene.visual_prompt.split(/^\s*(?:CUT|HARD CUT)\s*$/m).length : 0;
+        if (cuts <= 1) return false;
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchNumber = String(scene.scene_number).includes(q);
+        const matchDialogue = scene.dialogue.toLowerCase().includes(q);
+        const matchPrompt = scene.visual_prompt.toLowerCase().includes(q);
+        const matchSeq = scene.sequence_title.toLowerCase().includes(q);
+        const matchOverlay = scene.editorial_overlay?.text?.toLowerCase().includes(q);
+        if (!matchNumber && !matchDialogue && !matchPrompt && !matchSeq && !matchOverlay) return false;
+      }
+      return true;
+    });
+  }, [scenes, selectedSequenceId, selectedStatusFilter, searchQuery]);
+
+  const filteredTotalSeconds = useMemo(() => {
+    return filteredScenes.reduce((sum, s) => sum + s.duration_seconds, 0);
+  }, [filteredScenes]);
 
   const isQuiz = channel.engine === "quiz";
   useEffect(() => {
@@ -265,10 +353,14 @@ export function EpisodeDetail({
 
   return (
     <section className="page-wrap detail-page">
-      <button className="back-button" onClick={onBack}>
-        <ArrowLeft size={16} />
-        <span>{channel.display_name}</span>
-      </button>
+      <EpisodeBreadcrumb
+        channelName={channel.display_name}
+        episodeTitle={episode.topic.title}
+        engine={channel.engine}
+        onNavigateHome={onNavigateHome}
+        onNavigateChannels={onNavigateChannels}
+        onNavigateChannel={onNavigateChannel || onBack}
+      />
 
       <header className="detail-header episode-detail-header">
         <div>
@@ -277,7 +369,10 @@ export function EpisodeDetail({
           <p className="detail-copy">{episode.topic.premise}</p>
         </div>
         <div className="detail-actions">
-          <StageBadge stage={episode.stage} />
+          <div className="episode-detail-badges">
+            <StageBadge stage={episode.stage} />
+            <EpisodeAssetPills episode={episode} tasks={episodeTasks} />
+          </div>
           {totalImageCostVnd > 0 ? (
             <span className="bundle-image-cost-tag" title="Total image generation cost for this episode">
               💰 {totalImageCostVnd.toLocaleString("en-US")} VND
@@ -456,7 +551,7 @@ export function EpisodeDetail({
           role="tab"
           aria-selected={workflowTab === "script"}
           className={`channel-group-tab ${workflowTab === "script" ? "is-selected" : ""}`}
-          onClick={() => setWorkflowTab("script")}
+          onClick={() => switchWorkflowTab("script")}
         >
           <FileText size={17} weight={workflowTab === "script" ? "fill" : "regular"} />
           <span>1. Script & Plan</span>
@@ -467,7 +562,7 @@ export function EpisodeDetail({
           role="tab"
           aria-selected={workflowTab === "visual"}
           className={`channel-group-tab ${workflowTab === "visual" ? "is-selected" : ""}`}
-          onClick={() => setWorkflowTab("visual")}
+          onClick={() => switchWorkflowTab("visual")}
         >
           <Image size={17} weight={workflowTab === "visual" ? "fill" : "regular"} />
           <span>2. Visual & Continuity</span>
@@ -478,7 +573,7 @@ export function EpisodeDetail({
           role="tab"
           aria-selected={workflowTab === "timeline"}
           className={`channel-group-tab ${workflowTab === "timeline" ? "is-selected" : ""}`}
-          onClick={() => setWorkflowTab("timeline")}
+          onClick={() => switchWorkflowTab("timeline")}
         >
           <FilmSlate size={17} weight={workflowTab === "timeline" ? "fill" : "regular"} />
           <span>3. Timeline & Shots</span>
@@ -567,15 +662,26 @@ export function EpisodeDetail({
             </div>
             <div className="scene-heading-actions">
               {scenes.length > 0 ? (
-                <button
-                  type="button"
-                  className="quiet-button"
-                  onClick={() => void copyAllVisualPrompts()}
-                  title="Copy all prompts in text format"
-                >
-                  <Copy size={16} />
-                  <span>Copy all prompts</span>
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="quiet-button"
+                    onClick={() => setGlobalPromptExpanded(globalPromptExpanded ? false : true)}
+                    title={globalPromptExpanded ? "Collapse all prompt boxes" : "Expand all prompt boxes"}
+                  >
+                    {globalPromptExpanded ? <ArrowsInSimple size={16} /> : <ArrowsOutSimple size={16} />}
+                    <span>{globalPromptExpanded ? "Collapse all prompts" : "Expand all prompts"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="quiet-button"
+                    onClick={() => void copyAllVisualPrompts()}
+                    title="Copy all prompts in text format"
+                  >
+                    <Copy size={16} />
+                    <span>Copy all prompts</span>
+                  </button>
+                </>
               ) : null}
               <button
                 className="primary-button"
@@ -640,49 +746,191 @@ export function EpisodeDetail({
               onAction={() => void createTask("GENERATE_SCENES")}
             />
           ) : (
-            <div className="scene-list">
-              {scenes.map((scene, index) => (
-                <div key={scene.scene_id}>
-                  {index === 0 || scenes[index - 1].sequence_id !== scene.sequence_id ? (
-                    <SequenceDivider
-                      scene={scene}
-                      images={bundleImages}
-                      channelId={channel.channel_id}
-                      episodeId={episodeId}
-                      onPreviewImage={(img) => setPreviewImage(img)}
+            <div>
+              {/* Shot Plan Filtering & Quick Access Toolbar */}
+              <div className="shot-plan-toolbar">
+                <div className="toolbar-top-row">
+                  <div className="search-box">
+                    <MagnifyingGlass size={15} className="search-icon" />
+                    <input
+                      type="text"
+                      placeholder="Search dialogue, prompt, sequence, or shot #…"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
                     />
-                  ) : null}
-                  <SceneCard
-                    scene={scene}
-                    nextScene={scenes[index + 1] ?? null}
-                    task={latestTask(episodeTasks, ["REGENERATE_DIALOGUE", "REGENERATE_PROMPT", "REGENERATE_BOTH"], scene.scene_number)}
-                    audioTask={latestTask(episodeTasks, ["GENERATE_AUDIO"], scene.scene_number)}
-                    channelId={channel.channel_id}
-                    episodeId={episodeId}
-                    now={episodeClock}
-                    maxDuration={maxDuration}
-                    narrationWordsPerSecond={episode.measured_narration_words_per_second ?? narrationWordsPerSecond}
-                    copied={copied}
-                    busy={busy}
-                    onCopy={copy}
-                    onChange={(next) => setScenes((current) => current.map((item) => (item.scene_id === scene.scene_id ? next : item)))}
-                    onRegenerate={(type) => void createTask(type, scene.scene_number)}
-                    onGenerateAudio={() => void createTask("GENERATE_AUDIO", scene.scene_number)}
-                    onMergeNext={() => void mergeNext(scene.scene_number)}
-                  />
+                    {searchQuery ? (
+                      <button
+                        type="button"
+                        className="search-clear-btn"
+                        onClick={() => setSearchQuery("")}
+                        title="Clear search query"
+                      >
+                        <X size={14} />
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="toolbar-summary-meta">
+                    <span>
+                      Showing <strong>{filteredScenes.length}</strong> of <strong>{scenes.length}</strong> shots (
+                      {formatDuration(filteredTotalSeconds)})
+                    </span>
+                    {selectedSequenceId !== "all" || selectedStatusFilter !== "all" || searchQuery ? (
+                      <button
+                        type="button"
+                        className="link-button"
+                        style={{ fontSize: "12px", marginLeft: "6px" }}
+                        onClick={() => {
+                          setSelectedSequenceId("all");
+                          setSelectedStatusFilter("all");
+                          setSearchQuery("");
+                        }}
+                      >
+                        Reset filters
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
-              ))}
-              <div className="scene-save-row">
-                <span>Manual edits update the assessment score after saving</span>
-                <button
-                  className="primary-button compact"
-                  disabled={busy === "scenes" || episodeTasks.some(isTaskActive)}
-                  onClick={() => void saveScenes()}
-                >
-                  {busy === "scenes" ? <CircleNotch className="spin" size={15} /> : <FloppyDisk size={15} />}
-                  <span>{busy === "scenes" ? "Saving…" : "Save shots"}</span>
-                </button>
+
+                <div className="toolbar-filters-row">
+                  {sequences.length > 1 ? (
+                    <div className="filter-group">
+                      <span className="filter-label">Sequence:</span>
+                      <div className="filter-pills" role="group" aria-label="Filter by sequence">
+                        <button
+                          type="button"
+                          className={`filter-pill ${selectedSequenceId === "all" ? "is-active" : ""}`}
+                          onClick={() => setSelectedSequenceId("all")}
+                        >
+                          All ({scenes.length})
+                        </button>
+                        {sequences.map((seq) => (
+                          <button
+                            key={seq.id}
+                            type="button"
+                            className={`filter-pill ${selectedSequenceId === seq.id ? "is-active" : ""}`}
+                            onClick={() => setSelectedSequenceId(seq.id)}
+                            title={seq.title}
+                          >
+                            {seq.title} ({seq.count})
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="filter-group">
+                    <span className="filter-label">Filter:</span>
+                    <div className="filter-pills" role="group" aria-label="Filter by status">
+                      <button
+                        type="button"
+                        className={`filter-pill ${selectedStatusFilter === "all" ? "is-active" : ""}`}
+                        onClick={() => setSelectedStatusFilter("all")}
+                      >
+                        All
+                      </button>
+                      {filterCounts.missingAudio > 0 ? (
+                        <button
+                          type="button"
+                          className={`filter-pill is-warning ${selectedStatusFilter === "missing_audio" ? "is-active" : ""}`}
+                          onClick={() => setSelectedStatusFilter(selectedStatusFilter === "missing_audio" ? "all" : "missing_audio")}
+                        >
+                          🎙️ Missing Audio ({filterCounts.missingAudio})
+                        </button>
+                      ) : null}
+                      {filterCounts.audioMismatch > 0 ? (
+                        <button
+                          type="button"
+                          className={`filter-pill is-warning ${selectedStatusFilter === "audio_mismatch" ? "is-active" : ""}`}
+                          onClick={() => setSelectedStatusFilter(selectedStatusFilter === "audio_mismatch" ? "all" : "audio_mismatch")}
+                        >
+                          ⚠️ Audio Mismatch ({filterCounts.audioMismatch})
+                        </button>
+                      ) : null}
+                      {filterCounts.hasOverlay > 0 ? (
+                        <button
+                          type="button"
+                          className={`filter-pill ${selectedStatusFilter === "has_overlay" ? "is-active" : ""}`}
+                          onClick={() => setSelectedStatusFilter(selectedStatusFilter === "has_overlay" ? "all" : "has_overlay")}
+                        >
+                          🎨 Overlays ({filterCounts.hasOverlay})
+                        </button>
+                      ) : null}
+                      {filterCounts.multiCut > 0 ? (
+                        <button
+                          type="button"
+                          className={`filter-pill ${selectedStatusFilter === "multi_cut" ? "is-active" : ""}`}
+                          onClick={() => setSelectedStatusFilter(selectedStatusFilter === "multi_cut" ? "all" : "multi_cut")}
+                        >
+                          ✂️ Multi-cut ({filterCounts.multiCut})
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
               </div>
+
+              {filteredScenes.length === 0 ? (
+                <EmptyState
+                  compact
+                  icon={<MagnifyingGlass size={22} />}
+                  title="No shots match this filter"
+                  copy="Try selecting another sequence, clearing your search query, or resetting filters."
+                  action="Reset all filters"
+                  onAction={() => {
+                    setSelectedSequenceId("all");
+                    setSelectedStatusFilter("all");
+                    setSearchQuery("");
+                  }}
+                />
+              ) : (
+                <div className="scene-list">
+                  {filteredScenes.map((scene, index) => (
+                    <div key={scene.scene_id}>
+                      {index === 0 || filteredScenes[index - 1].sequence_id !== scene.sequence_id ? (
+                        <SequenceDivider
+                          scene={scene}
+                          images={bundleImages}
+                          channelId={channel.channel_id}
+                          episodeId={episodeId}
+                          onPreviewImage={(img) => setPreviewImage(img)}
+                        />
+                      ) : null}
+                      <SceneCard
+                        scene={scene}
+                        nextScene={scenes.find((s) => s.scene_number === scene.scene_number + 1) ?? null}
+                        task={latestTask(episodeTasks, ["REGENERATE_DIALOGUE", "REGENERATE_PROMPT", "REGENERATE_BOTH"], scene.scene_number)}
+                        audioTask={latestTask(episodeTasks, ["GENERATE_AUDIO"], scene.scene_number)}
+                        channelId={channel.channel_id}
+                        episodeId={episodeId}
+                        now={episodeClock}
+                        maxDuration={maxDuration}
+                        narrationWordsPerSecond={episode.measured_narration_words_per_second ?? narrationWordsPerSecond}
+                        copied={copied}
+                        busy={busy}
+                        globalPromptExpanded={globalPromptExpanded}
+                        onCopy={copy}
+                        onChange={(next) => setScenes((current) => current.map((item) => (item.scene_id === scene.scene_id ? next : item)))}
+                        onRegenerate={(type) => void createTask(type, scene.scene_number)}
+                        onGenerateAudio={() => void createTask("GENERATE_AUDIO", scene.scene_number)}
+                        onMergeNext={() => void mergeNext(scene.scene_number)}
+                        onOpenPromptModal={(targetScene) => setPromptModalScene(targetScene)}
+                      />
+                    </div>
+                  ))}
+                  <div className="scene-save-row">
+                    <span>Manual edits update the assessment score after saving</span>
+                    <button
+                      className="primary-button compact"
+                      disabled={busy === "scenes" || episodeTasks.some(isTaskActive)}
+                      onClick={() => void saveScenes()}
+                    >
+                      {busy === "scenes" ? <CircleNotch className="spin" size={15} /> : <FloppyDisk size={15} />}
+                      <span>{busy === "scenes" ? "Saving…" : "Save shots"}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -746,6 +994,21 @@ export function EpisodeDetail({
       ) : null}
 
       {previewImage ? <ImagePreviewModal image={previewImage} onClose={() => setPreviewImage(null)} /> : null}
+      {promptModalScene ? (
+        <PromptFocusModal
+          scene={promptModalScene}
+          channelId={channel.channel_id}
+          episodeId={episodeId}
+          onSave={(updatedPrompt) => {
+            setScenes((current) =>
+              current.map((item) =>
+                item.scene_id === promptModalScene.scene_id ? { ...item, visual_prompt: updatedPrompt } : item
+              )
+            );
+          }}
+          onClose={() => setPromptModalScene(null)}
+        />
+      ) : null}
     </section>
   );
 }

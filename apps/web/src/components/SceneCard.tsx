@@ -1,13 +1,54 @@
-import { ArrowClockwise, ArrowRight, Check, CircleNotch, Copy, SpeakerHigh, WarningCircle } from "@phosphor-icons/react";
-import { useLayoutEffect, useRef } from "react";
+import { ArrowClockwise, ArrowRight, ArrowsOutSimple, CaretDown, CaretUp, Check, CircleNotch, Copy, PencilSimple, SpeakerHigh, WarningCircle } from "@phosphor-icons/react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { Scene, Task } from "@studio/shared";
 import { api } from "../api";
 import { InlineTaskState } from "./InlineTaskState";
 import { isTaskActive } from "../lib/utils";
 
-export function SceneCard({ scene, nextScene, task, audioTask, channelId, episodeId, now, maxDuration, narrationWordsPerSecond, copied, busy, onCopy, onChange, onRegenerate, onGenerateAudio, onMergeNext }: { scene: Scene; nextScene: Scene | null; task: Task | null; audioTask: Task | null; channelId: string; episodeId: string; now: number; maxDuration: number; narrationWordsPerSecond: number; copied: string | null; busy: string | null; onCopy: (key: string, value: string) => Promise<void>; onChange: (scene: Scene) => void; onRegenerate: (type: Task["task_type"]) => void; onGenerateAudio: () => void; onMergeNext: () => void }) {
+export function SceneCard({
+  scene,
+  nextScene,
+  task,
+  audioTask,
+  channelId,
+  episodeId,
+  now,
+  maxDuration,
+  narrationWordsPerSecond,
+  copied,
+  busy,
+  globalPromptExpanded = null,
+  onCopy,
+  onChange,
+  onRegenerate,
+  onGenerateAudio,
+  onMergeNext,
+  onOpenPromptModal,
+}: {
+  scene: Scene;
+  nextScene: Scene | null;
+  task: Task | null;
+  audioTask: Task | null;
+  channelId: string;
+  episodeId: string;
+  now: number;
+  maxDuration: number;
+  narrationWordsPerSecond: number;
+  copied: string | null;
+  busy: string | null;
+  globalPromptExpanded?: boolean | null;
+  onCopy: (key: string, value: string) => Promise<void>;
+  onChange: (scene: Scene) => void;
+  onRegenerate: (type: Task["task_type"]) => void;
+  onGenerateAudio: () => void;
+  onMergeNext: () => void;
+  onOpenPromptModal?: (scene: Scene) => void;
+}) {
   const dialogueRef = useRef<HTMLTextAreaElement | null>(null);
   const promptRef = useRef<HTMLTextAreaElement | null>(null);
+  const [localPromptExpanded, setLocalPromptExpanded] = useState(false);
+  const isPromptExpanded = globalPromptExpanded !== null && globalPromptExpanded !== undefined ? globalPromptExpanded : localPromptExpanded;
+
   const regenerating = Boolean(task && isTaskActive(task));
   const audioGenerating = Boolean(audioTask && isTaskActive(audioTask));
   const processing = regenerating || audioGenerating;
@@ -35,8 +76,11 @@ export function SceneCard({ scene, nextScene, task, audioTask, channelId, episod
 
   useLayoutEffect(() => {
     if (dialogueRef.current) autoGrow(dialogueRef.current);
-    if (promptRef.current) autoGrow(promptRef.current);
-  }, [scene.dialogue, scene.visual_prompt]);
+    if (promptRef.current && isPromptExpanded) autoGrow(promptRef.current);
+    else if (promptRef.current && !isPromptExpanded) {
+      promptRef.current.style.height = "64px";
+    }
+  }, [scene.dialogue, scene.visual_prompt, isPromptExpanded]);
 
   return <article className={`scene-card ${processing || mergePending ? "is-processing" : ""}`}>
     <div className="scene-card-header">
@@ -62,9 +106,64 @@ export function SceneCard({ scene, nextScene, task, audioTask, channelId, episod
         {audioSrc ? <div className="audio-player-row"><audio controls={!processing && !mergePending} preload="metadata" src={audioSrc} aria-label={`Shot ${scene.scene_number} preview audio`} /><button className="icon-button" type="button" title="Regenerate preview audio" aria-label="Regenerate preview audio" disabled={processing || mergePending} onClick={onGenerateAudio}><ArrowClockwise size={15} /></button></div> : null}
         <textarea ref={dialogueRef} rows={1} value={scene.dialogue} disabled={processing || mergePending} onInput={(event) => autoGrow(event.currentTarget)} onChange={(event) => onChange(clearAudioWhenDialogueChanges(event.target.value))} />
       </div>
-      <div className="scene-block prompt-block">
-        <div className="block-heading"><span>Video generation prompt</span><div className="reference-asset-label">{scene.continuity_bundle_id ? <span>Reference: {scene.continuity_bundle_id}</span> : null}{referenceFilename ? <a href={api.bundleImageUrl(channelId, episodeId, referenceFilename)} target="_blank" rel="noreferrer" download={referenceFilename}>Download</a> : null}<button className="copy-button" onClick={() => void onCopy(`${scene.scene_id}-prompt`, scene.visual_prompt)}>{copied === `${scene.scene_id}-prompt` ? <Check size={14} /> : <Copy size={14} />}{copied === `${scene.scene_id}-prompt` ? "Copied" : "Copy"}</button></div></div>
-        <textarea ref={promptRef} rows={1} value={scene.visual_prompt} disabled={processing || mergePending} onInput={(event) => autoGrow(event.currentTarget)} onChange={(event) => onChange({ ...scene, visual_prompt: event.target.value })} />
+      <div className={`scene-block prompt-block ${isPromptExpanded ? "is-expanded" : "is-collapsed"}`}>
+        <div className="block-heading">
+          <span>Video generation prompt</span>
+          <div className="scene-block-actions">
+            {scene.continuity_bundle_id ? <span className="reference-asset-tag">Ref: {scene.continuity_bundle_id}</span> : null}
+            {referenceFilename ? <a className="copy-button" href={api.bundleImageUrl(channelId, episodeId, referenceFilename)} target="_blank" rel="noreferrer" download={referenceFilename}>Download Ref</a> : null}
+            {onOpenPromptModal ? (
+              <button
+                type="button"
+                className="copy-button"
+                onClick={() => onOpenPromptModal(scene)}
+                title="Open full prompt editor modal"
+              >
+                <ArrowsOutSimple size={13} />
+                <span>Modal</span>
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="copy-button"
+              onClick={() => void onCopy(`${scene.scene_id}-prompt`, scene.visual_prompt)}
+            >
+              {copied === `${scene.scene_id}-prompt` ? <Check size={14} /> : <Copy size={14} />}
+              <span>{copied === `${scene.scene_id}-prompt` ? "Copied" : "Copy"}</span>
+            </button>
+            <button
+              type="button"
+              className="copy-button prompt-expand-btn"
+              onClick={() => setLocalPromptExpanded(!isPromptExpanded)}
+              title={isPromptExpanded ? "Collapse prompt view" : "Expand full prompt view"}
+            >
+              {isPromptExpanded ? <CaretUp size={13} /> : <CaretDown size={13} />}
+              <span>{isPromptExpanded ? "Collapse" : "Expand"}</span>
+            </button>
+          </div>
+        </div>
+        <div className="prompt-textarea-wrap">
+          <textarea
+            ref={promptRef}
+            rows={2}
+            className={`scene-prompt-textarea ${isPromptExpanded ? "is-expanded" : "is-collapsed"}`}
+            value={scene.visual_prompt}
+            disabled={processing || mergePending}
+            onInput={(event) => {
+              if (isPromptExpanded) autoGrow(event.currentTarget);
+            }}
+            onChange={(event) => onChange({ ...scene, visual_prompt: event.target.value })}
+          />
+          {!isPromptExpanded && scene.visual_prompt.length > 120 ? (
+            <div
+              className="prompt-expand-overlay"
+              onClick={() => setLocalPromptExpanded(true)}
+              title="Click to expand prompt"
+            >
+              <span>Click to view full prompt ({scene.visual_prompt.length} chars)</span>
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
     <div className="scene-notes"><input aria-label="Transition note" placeholder="Transition" value={scene.transition_note} disabled={processing || mergePending} onChange={(event) => onChange({ ...scene, transition_note: event.target.value })} /><input aria-label="Continuity note" placeholder="Continuity" value={scene.continuity_note} disabled={processing || mergePending} onChange={(event) => onChange({ ...scene, continuity_note: event.target.value })} /></div>
