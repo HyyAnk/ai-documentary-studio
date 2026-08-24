@@ -886,7 +886,7 @@ export class TaskManager extends EventEmitter {
 
         for (let attempt = 1; attempt <= maxCheckAttempts; attempt++) {
           try {
-            ({ stdout: checkOutput } = await execFileAsync(npxCommand, hyperframesArgs("check", renderRoot, "--json", "--samples", "5", "--timeout", "60000"), { cwd: this.repository.rootDirectory, timeout: 600_000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 }));
+            ({ stdout: checkOutput } = await execFileAsync(npxCommand, hyperframesArgs("check", renderRoot, "--json", "--samples", "5", "--timeout", "150000"), { cwd: this.repository.rootDirectory, timeout: 600_000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 }));
           } catch (error) {
             const failure = error as Error & { stdout?: string };
             const errorReport = parseHyperframesCheckReport(failure.stdout);
