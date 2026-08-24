@@ -230,7 +230,7 @@ function thinkingBar(input: { clipStart: number; revealStart: number }): string 
   const cd1 = Math.max(0, duration - 1);
   const queryDuration = cd5;
   const style = `style="--timer-duration:${duration.toFixed(3)}s;--cd-query-dur:${queryDuration.toFixed(3)}s;--cd5-at:${cd5.toFixed(3)}s;--cd4-at:${cd4.toFixed(3)}s;--cd3-at:${cd3.toFixed(3)}s;--cd2-at:${cd2.toFixed(3)}s;--cd1-at:${cd1.toFixed(3)}s"`;
-  return `<div class="thinking-bar" ${style}><div class="thinking-track" aria-label="Quiz timer" data-layout-allow-overflow><div class="timer-progress"></div><span class="timer-marker" data-layout-allow-occlusion><b class="marker-val val-query">?</b><b class="marker-val val-5">5</b><b class="marker-val val-4">4</b><b class="marker-val val-3">3</b><b class="marker-val val-2">2</b><b class="marker-val val-1">1</b></span><div class="timer-sparkles" data-layout-ignore aria-hidden="true"><i>✦</i><i>•</i><i>✦</i></div></div></div>`;
+  return `<div class="thinking-bar" ${style}><div class="thinking-track" aria-label="Quiz timer" data-layout-allow-overflow><div class="timer-milestones" data-layout-ignore aria-hidden="true"><span class="milestone-star star-1">★</span><span class="milestone-star star-2">★</span><span class="milestone-star star-3">★</span><span class="milestone-star star-4">★</span></div><div class="timer-progress"></div><span class="timer-marker" data-layout-allow-occlusion><b class="marker-val val-query">?</b><b class="marker-val val-5">5</b><b class="marker-val val-4">4</b><b class="marker-val val-3">3</b><b class="marker-val val-2">2</b><b class="marker-val val-1">1</b></span><div class="timer-sparkles" data-layout-ignore aria-hidden="true"><i>✦</i><i>•</i><i>✦</i></div></div></div>`;
 }
 
 function revealPanel(input: { question: QuizV2["questions"][number]; copy: Copy; isFinal: boolean }): string {
@@ -446,7 +446,7 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .layout-visual_choices_three .visual-answer-grid { grid-area: answers; width: 1540px; margin-top: 0; gap: 24px; }
 .phase-region { position: absolute; z-index: 5; left: 50%; bottom: 24px; width: 100%; height: 130px; transform: translateX(-50%); }
 .phase-region > .thinking-bar, .phase-region > .fact-card { position: absolute; z-index: 5; top: 0; left: 50%; margin-top: 0; transform: translateX(-50%); }
-.phase-region > .thinking-bar { width: min(1380px, 100%); min-height: 80px; }
+.phase-region > .thinking-bar { width: min(69vw, 1325px); min-height: 54px; }
 .phase-region > .fact-card { width: min(1220px, 100%); }
 .answer-grid { position: relative; z-index: 3; display: grid; gap: 24px; width: 1540px; margin-top: 25px; opacity: 0; animation: phase-enter .01s steps(1,end) calc(var(--clip-start) + var(--choices-at)) both; }
 .answer-count-2 { grid-template-columns: repeat(2, 1fr); }
@@ -464,22 +464,29 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .answer-card.answer-incorrect { animation: incorrect-card-settle .38s ease-out calc(var(--clip-start) + var(--reveal-at)) both; }
 .answer-check, .answer-cross { position: absolute; z-index: 6; top: 16px; right: 19px; display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: var(--correct); color: var(--on-accent); box-shadow: 0 5px 0 rgba(13,35,71,.16); font-size: 31px; font-style: normal; opacity: 0; animation: status-pop .38s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--reveal-at) + .16s) both; }
 .answer-cross { background: var(--incorrect); }
-.thinking-bar { position: relative; z-index: 5; display: flex; align-items: center; width: 1380px; min-height: 80px; margin-top: 0; padding: 12px 24px; border: 0; border-radius: 999px; background: transparent; box-shadow: none; opacity: 0; animation: phase-hold var(--timer-duration) steps(1,end) var(--clip-start) both, timer-exit-fade .28s cubic-bezier(.22,.8,.3,1) calc(var(--clip-start) + var(--timer-duration) - .28s) both; }
-.thinking-track { position: relative; z-index: 5; width: 100%; height: 52px; overflow: visible; border: 5px solid rgba(255,255,255,.9); border-radius: 999px; background: rgba(16,35,72,.35); box-shadow: inset 0 4px 6px rgba(0,0,0,.22), 0 7px 0 var(--depth-edge), 0 0 24px rgba(255,255,255,.22); animation: timer-urgency-glow var(--timer-duration) ease-in var(--clip-start) both; }
-.thinking-track::after { position: absolute; inset: 6px 12px; border-radius: inherit; background: repeating-linear-gradient(90deg, rgba(255,255,255,.15) 0 2px, transparent 2px 12.5%); content: ""; pointer-events: none; z-index: 2; }
-.timer-progress { position: absolute; top: 0; left: 0; bottom: 0; width: 100%; border-radius: 999px; background: linear-gradient(90deg, #FF3B56 0%, #FF7844 20%, #FFB536 42%, #5D6DF8 68%, #2DCBA8 88%, #2FBE79 100%); background-size: 1380px 100%; background-position: left center; animation: quiz-timer-drain var(--timer-duration) linear var(--clip-start) both, quiz-timer-danger var(--timer-duration) ease-in var(--clip-start) both; }
-.timer-marker { position: absolute; top: 50%; left: 100%; display: grid; place-items: center; width: 70px; height: 70px; border: 6px solid #fff; border-radius: 50%; background: var(--accent); color: var(--on-accent); box-shadow: 0 8px 0 rgba(13,35,71,.24), inset 0 -4px 0 rgba(13,35,71,.14); font-size: 33px; font-weight: 900; font-style: normal; transform: translate(-50%,-50%); animation: quiz-timer-marker-slide var(--timer-duration) linear var(--clip-start) both, timer-marker-danger var(--timer-duration) ease-in var(--clip-start) both; z-index: 6; }
-.timer-marker::after { position: absolute; inset: -8px; border: 3px dashed rgba(255,255,255,.75); border-radius: 50%; content: ""; transform: rotate(-8deg); pointer-events: none; }
-.marker-val { position: absolute; inset: 0; display: grid; place-items: center; font-size: 33px; font-weight: 900; line-height: 1; color: #fff; opacity: 0; pointer-events: none; }
+.thinking-bar { position: relative; z-index: 5; isolation: isolate; display: flex; align-items: center; justify-content: center; width: min(69vw, 1325px); min-height: 54px; margin: 0 auto; padding: 14px 0; border: 0; border-radius: 9999px; background: transparent; box-shadow: none; opacity: 0; animation: phase-hold var(--timer-duration) steps(1,end) var(--clip-start) both, timer-exit-fade .28s cubic-bezier(.22,.8,.3,1) calc(var(--clip-start) + var(--timer-duration) - .28s) both; }
+.thinking-track { position: relative; z-index: 0; width: 100%; height: 26px; overflow: visible; border: 3px solid rgba(255,255,255,.92); border-radius: 9999px; background: rgba(112,54,66,.45); box-shadow: inset 0 1px 2px rgba(255,255,255,.20), inset 0 -2px 4px rgba(0,0,0,.12), 0 4px 10px rgba(13,35,71,.25), 0 0 12px rgba(255,255,255,.18); }
+.timer-milestones { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+.milestone-star { position: absolute; top: 50%; font-size: 14px; line-height: 1; color: #FFE66D; text-shadow: 0 0 6px rgba(255,230,109,.85), 0 1px 2px rgba(0,0,0,.35); transform: translate(-50%,-50%); animation: quizProgressStarTwinkle 2.4s ease-in-out infinite; }
+.milestone-star.star-1 { left: 20%; animation-delay: 0s; }
+.milestone-star.star-2 { left: 40%; animation-delay: .6s; }
+.milestone-star.star-3 { left: 60%; animation-delay: 1.2s; }
+.milestone-star.star-4 { left: 80%; animation-delay: 1.8s; }
+.timer-progress { position: absolute; top: 0; left: 0; bottom: 0; width: 100%; border-radius: 9999px; overflow: hidden; background: linear-gradient(90deg, #ff4f5e 0%, #ff7a45 20%, #ffc83d 42%, #6fa9ff 70%, #28d5d0 100%); background-size: 1325px 100%; background-position: left center; z-index: 1; animation: quiz-timer-drain var(--timer-duration) linear var(--clip-start) both; }
+.timer-progress::after { position: absolute; top: 0; left: 0; right: 0; height: 50%; border-radius: 9999px 9999px 0 0; background: linear-gradient(to bottom, rgba(255,255,255,.34) 0%, rgba(255,255,255,.08) 35%, rgba(255,255,255,0) 60%); content: ""; pointer-events: none; z-index: 2; }
+.timer-marker { position: absolute; top: 50%; left: 100%; display: grid; place-items: center; width: 46px; height: 46px; border: 3px solid rgba(255,255,255,.95); border-radius: 50%; background: linear-gradient(145deg, #54e4df 0%, #19bfc4 100%); color: #fff; box-shadow: 0 3px 6px rgba(0,0,0,.22), 0 0 12px rgba(74,220,218,.4), inset 0 2px 0 rgba(255,255,255,.7); font-size: 24px; font-weight: 900; font-style: normal; transform: translate(-50%,-50%); animation: quiz-timer-marker-slide var(--timer-duration) linear var(--clip-start) both, quizProgressMarkerPulse 2.8s ease-in-out infinite; z-index: 4; }
+.marker-val { position: absolute; inset: 0; display: grid; place-items: center; font-family: "Fredoka", "SVN-Hello Headline", "Baloo 2", "Nunito", "Arial Rounded MT Bold", sans-serif; font-size: 24px; font-weight: 900; line-height: 1; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.25); opacity: 0; pointer-events: none; z-index: 5; }
 .val-query { opacity: 1; animation: query-hold var(--cd-query-dur) steps(1,end) var(--clip-start) both; }
 .val-5 { animation: number-countdown-tick 1s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--cd5-at)) both; }
 .val-4 { animation: number-countdown-tick 1s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--cd4-at)) both; }
 .val-3 { animation: number-countdown-tick 1s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--cd3-at)) both; }
 .val-2 { animation: number-countdown-tick 1s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--cd2-at)) both; }
 .val-1 { animation: number-countdown-final 1s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--cd1-at)) both; }
-.timer-sparkles { position: absolute; inset: -18px -12px; pointer-events: none; }
-.timer-sparkles i { position: absolute; color: var(--accent); font-size: 22px; font-style: normal; animation: timer-sparkle var(--timer-duration) ease-in-out calc(var(--clip-start) + var(--ambient-phase)) 1 both; }
-.timer-sparkles i:nth-child(1) { right: 7%; top: -17px; }.timer-sparkles i:nth-child(2) { right: 1%; bottom: -15px; color: #FFD34D; font-size: 18px; animation-delay: calc(var(--clip-start) + .55s); }.timer-sparkles i:nth-child(3) { left: 4%; top: -14px; color: #fff; animation-delay: calc(var(--clip-start) + 1.05s); }
+.timer-sparkles { position: absolute; inset: -14px -10px; pointer-events: none; z-index: 6; }
+.timer-sparkles i { position: absolute; color: #FFE66D; font-size: 18px; font-style: normal; text-shadow: 0 0 6px rgba(255,230,109,.8); animation: timer-sparkle var(--timer-duration) ease-in-out calc(var(--clip-start) + var(--ambient-phase)) 1 both; }
+.timer-sparkles i:nth-child(1) { right: 6%; top: -14px; }
+.timer-sparkles i:nth-child(2) { right: 1%; bottom: -12px; color: #5CE1E6; font-size: 16px; animation-delay: calc(var(--clip-start) + .55s); }
+.timer-sparkles i:nth-child(3) { left: 4%; top: -12px; color: #fff; animation-delay: calc(var(--clip-start) + 1.05s); }
 .fact-card { position: relative; z-index: 5; max-width: 1220px; margin-top: 14px; padding: 20px 38px 23px; border: 6px solid rgba(255,255,255,.79); border-radius: 35px; background: var(--surface); box-shadow: 0 15px 0 rgba(13,35,71,.18); text-align: center; opacity: 0; animation: phase-enter .01s steps(1,end) calc(var(--clip-start) + var(--reward-at)) both; }
 .fact-card span { color: var(--surface-accent); font-size: 22px; font-weight: 900; letter-spacing: 1.5px; text-transform: uppercase; }
 .fact-card p { margin: 8px 0 0; font-size: 30px; font-weight: 800; line-height: 1.24; }
@@ -573,6 +580,9 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 @keyframes reveal-answer-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes stamp-pop { 0% { opacity: 0; transform: scale(0) rotate(-18deg); } 68% { opacity: 1; transform: scale(1.18) rotate(6deg); } 100% { opacity: 1; transform: scale(1) rotate(0); } }
 @keyframes star-burst { from { opacity: 0; transform: translateY(28px) scale(.2) rotate(-28deg); } to { opacity: 1; transform: translateY(0) scale(1) rotate(0); } }
+@keyframes quizProgressStarTwinkle { 0%, 100% { opacity: 0.65; transform: translate(-50%, -50%) scale(0.95); } 50% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); } }
+@keyframes quizProgressMarkerPulse { 0%, 100% { transform: translate(-50%, -50%) scale(1); } 50% { transform: translate(-50%, -50%) scale(1.04); } }
+@media (prefers-reduced-motion: reduce) { .milestone-star { animation: none; } }
 @keyframes reveal-impact { 0% { opacity: 0; transform: translate(-50%,-50%) scale(.45); } 25% { opacity: .95; transform: translate(-50%,-50%) scale(1); } 100% { opacity: 0; transform: translate(-50%,-50%) scale(1.12); } }
 @keyframes progress-pop { 0% { transform: scale(1); } 58% { transform: scale(1.08); } 100% { transform: scale(1); } }
 @keyframes brush-wave { 0% { transform: translateX(-115%); } 48% { transform: translateX(-10%); } 100% { transform: translateX(115%); } }

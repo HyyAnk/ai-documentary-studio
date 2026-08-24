@@ -140,7 +140,7 @@ describe("Candy Arcade visual template", () => {
     expect(html).toContain("--on-accent:");
     expect(html).toContain(".fact-card span { color: var(--surface-accent);");
     expect(html).toContain(".timer-marker { position: absolute;");
-    expect(html).toContain("background: var(--accent); color: var(--on-accent);");
+    expect(html).toContain("background: linear-gradient(145deg, #54e4df 0%, #19bfc4 100%);");
     expect(html).toContain(".intro-card > span, .outro-card > span { display: inline-flex; padding: 15px 23px; border-radius: 999px; background: #FF6277; color: #172A59;");
     expect(html).toContain(".intro-stars, .outro-stars { margin-top: 35px; color: #172A59;");
     expect(html).toContain("background: #29B9A8; color: #172A59;");
