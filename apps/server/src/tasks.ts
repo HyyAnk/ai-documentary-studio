@@ -49,6 +49,7 @@ import { quizVoicePlanNeedsRegeneration, quizVoiceTargetWordsPerSecond } from ".
 import { healQuizVoicePacingWithLLM } from "./quiz/audio/voicePacingHealer.js";
 import type { QuizVoicePacingClamp } from "./quiz/audio/voiceSynthesis.js";
 import { canonicalizeVisibleQuizAnswer, resolveVisibleQuizChoice, stripQuizChoiceLabel } from "./quiz/domain/quiz.js";
+import { validateQuizResearchCopyright, validateQuizScriptCopyright } from "./quiz/qa/copyrightValidator.js";
 
 export { buildQuizComposition };
 
@@ -2005,6 +2006,10 @@ function validateResearch(markdown: string): void {
 }
 
 function validateQuizResearch(markdown: string, questionCount: number): void {
+  const copyrightCheck = validateQuizResearchCopyright(markdown);
+  if (copyrightCheck.violated) {
+    throw new Error(`Quiz research quality gate failed: ${copyrightCheck.questionNumber ? `Question ${copyrightCheck.questionNumber}` : "Research dossier"} contains prohibited term '${copyrightCheck.term}'. Please regenerate without using copyrighted characters or lion cubs.`);
+  }
   const sourceCount = new Set(markdown.match(/https?:\/\/[^\s)>\]]+/g) ?? []).size;
   const claimCount = new Set(markdown.match(/\bC\d{2,}\b/g) ?? []).size;
   if (sourceCount < Math.max(3, Math.ceil(questionCount / 2))) throw new Error(`Quiz research quality gate failed: found ${sourceCount} source URLs`);
@@ -2012,6 +2017,10 @@ function validateQuizResearch(markdown: string, questionCount: number): void {
 }
 
 function validateQuizTreatment(markdown: string, questionCount: number): void {
+  const copyrightCheck = validateQuizScriptCopyright(markdown);
+  if (copyrightCheck.violated) {
+    throw new Error(`Quiz treatment quality gate failed: ${copyrightCheck.questionNumber ? `Question ${copyrightCheck.questionNumber}` : "Treatment"} contains prohibited term '${copyrightCheck.term}'. Please regenerate without using copyrighted characters or lion cubs.`);
+  }
   const headings = new Set(markdown.match(/^#{2,3}\s+Question\s+\d+/gim) ?? []).size;
   if (headings < questionCount) throw new Error(`Quiz treatment quality gate failed: found ${headings} question blocks for ${questionCount} questions`);
   if (!/time budget/i.test(markdown) || !/correct answer/i.test(markdown)) throw new Error("Quiz treatment quality gate failed: each question needs time budget and correct answer");
@@ -2019,6 +2028,10 @@ function validateQuizTreatment(markdown: string, questionCount: number): void {
 
 export function validateQuizScript(markdown: string, questionCount: number): void {
   if (!hasHumorPolicyMarker(markdown)) throw new Error("Quiz script quality gate failed: HUMOR_POLICY v1 marker is missing");
+  const copyrightCheck = validateQuizScriptCopyright(markdown);
+  if (copyrightCheck.violated) {
+    throw new Error(`Quiz script quality gate failed: ${copyrightCheck.questionNumber ? `Question ${copyrightCheck.questionNumber}` : "Script"} contains prohibited term '${copyrightCheck.term}'. Please regenerate this question using a safe alternative subject without using copyrighted characters or lion cubs.`);
+  }
   const headingNumbers = [...markdown.matchAll(/^#{2,3}\s+Question\s+(\d+)\b/gim)].map((match) => Number(match[1]));
   const listNumbers = [...markdown.matchAll(/(?:^|\n)\s*(?:Question\s*)?(\d+)[.)—:-]\s*/gi)].map((match) => Number(match[1]));
   const questionNumbers = new Set(headingNumbers.length > 0 ? headingNumbers : listNumbers);

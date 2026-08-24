@@ -74,7 +74,7 @@ test("Quiz Engine V2 rail is status-only and Build video is the single productio
   const scenesStage = refreshedRail.getByLabel("Scenes: 3 of 3 tasks complete, 100%");
   await expect(scenesStage).toHaveClass(/is-ready/);
   await expect(scenesStage).not.toHaveClass(/is-failed/);
-  await expect(refreshedRail.getByLabel("Assets: 0 of 1 task complete, 0%")).toHaveClass(/is-running/);
+  await expect(refreshedRail.getByLabel("Assets: 2 of 3 assets complete, 67%")).toHaveClass(/is-running/);
 
   await page.setViewportSize({ width: 390, height: 844 });
   const mobileWidth = await page.evaluate(() => ({ scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth }));

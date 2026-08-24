@@ -472,7 +472,7 @@ export function EpisodeDetail({
           questionCount={episode.quiz_config?.question_count ?? 0}
         />
       ) : (
-        <PipelineRail readiness={readiness} quiz={false} />
+        <PipelineRail readiness={readiness} quiz={false} pipelineTask={pipelineTask} tasks={episodeTasks} />
       )}
 
       {assessment && !isQuiz ? <AssessmentPanel assessment={assessment} /> : null}
@@ -1013,9 +1013,88 @@ export function EpisodeDetail({
   );
 }
 
-function PipelineRail({ readiness, quiz }: { readiness: { research: boolean; treatment: boolean; script: boolean; visualBible: boolean; scenes: boolean; narration: boolean; video: boolean }; quiz: boolean }) {
-  const steps = quiz ? [["Research", readiness.research], ["Quiz plan", readiness.treatment], ["Script", readiness.script], ["Design", readiness.visualBible], ["Scenes", readiness.scenes], ["Audio", readiness.narration], ["Video", readiness.video]] as const : [["Research", readiness.research], ["Treatment", readiness.treatment], ["Script", readiness.script], ["Visual bible", readiness.visualBible], ["Shots", readiness.scenes], ["Narration", readiness.narration]] as const;
-  return <ol className="pipeline-rail" aria-label="Episode production progress">{steps.map(([label, ready], index) => <li className={ready ? "is-ready" : ""} key={label}><span>{ready ? <CheckCircle size={15} weight="fill" /> : index + 1}</span><strong>{label}</strong></li>)}</ol>;
+function resolveDocumentaryPipelineStage(pipelineTask: Task | null, tasks: Task[]): string | null {
+  if (pipelineTask && isTaskActive(pipelineTask)) {
+    const text = `${pipelineTask.error ?? ""} ${pipelineTask.progress_message ?? ""}`.toLowerCase();
+    if (text.includes("research")) return "research";
+    if (text.includes("treatment")) return "treatment";
+    if (text.includes("narration script") || text.includes("script")) return "script";
+    if (text.includes("visual bible") || text.includes("style anchor") || text.includes("continuity image")) return "visualBible";
+    if (text.includes("shot plan") || text.includes("sequence") || text.includes("shot")) return "scenes";
+    if (text.includes("narration") || text.includes("voice") || text.includes("audio")) return "narration";
+    if (text.includes("video") || text.includes("render")) return "video";
+  }
+  const child = tasks.find((task) => isTaskActive(task));
+  if (child) {
+    if (child.task_type === "GENERATE_RESEARCH") return "research";
+    if (child.task_type === "GENERATE_TREATMENT") return "treatment";
+    if (child.task_type === "GENERATE_SCRIPT") return "script";
+    if (child.task_type === "GENERATE_VISUAL_BIBLE" || child.task_type === "GENERATE_BUNDLE_IMAGE") return "visualBible";
+    if (child.task_type === "GENERATE_SCENES" || child.task_type === "GENERATE_SEQUENCE_SCENES") return "scenes";
+    if (child.task_type === "GENERATE_NARRATION") return "narration";
+    if (child.task_type === "GENERATE_VIDEO") return "video";
+  }
+  return null;
+}
+
+function PipelineRail({
+  readiness,
+  quiz,
+  pipelineTask = null,
+  tasks = [],
+}: {
+  readiness: { research: boolean; treatment: boolean; script: boolean; visualBible: boolean; scenes: boolean; narration: boolean; video: boolean };
+  quiz: boolean;
+  pipelineTask?: Task | null;
+  tasks?: Task[];
+}) {
+  const steps = quiz
+    ? ([
+        { key: "research", label: "Research", ready: readiness.research },
+        { key: "treatment", label: "Quiz plan", ready: readiness.treatment },
+        { key: "script", label: "Script", ready: readiness.script },
+        { key: "visualBible", label: "Design", ready: readiness.visualBible },
+        { key: "scenes", label: "Scenes", ready: readiness.scenes },
+        { key: "narration", label: "Audio", ready: readiness.narration },
+        { key: "video", label: "Video", ready: readiness.video },
+      ] as const)
+    : ([
+        { key: "research", label: "Research", ready: readiness.research },
+        { key: "treatment", label: "Treatment", ready: readiness.treatment },
+        { key: "script", label: "Script", ready: readiness.script },
+        { key: "visualBible", label: "Visual bible", ready: readiness.visualBible },
+        { key: "scenes", label: "Shots", ready: readiness.scenes },
+        { key: "narration", label: "Narration", ready: readiness.narration },
+      ] as const);
+
+  const activeStageKey = resolveDocumentaryPipelineStage(pipelineTask, tasks);
+
+  return (
+    <ol className="pipeline-rail" aria-label="Episode production progress">
+      {steps.map((step, index) => {
+        const isRunning = activeStageKey === step.key;
+        const isReady = step.ready;
+        const className = isRunning ? "is-running" : isReady ? "is-ready" : "";
+        return (
+          <li className={className} key={step.label}>
+            <span>
+              {isRunning ? (
+                <CircleNotch className="spin" size={15} />
+              ) : isReady ? (
+                <CheckCircle size={15} weight="fill" />
+              ) : (
+                index + 1
+              )}
+            </span>
+            <div className="pipeline-rail-content">
+              <strong>{step.label}</strong>
+              <span className="pipeline-rail-status">{isRunning ? "Generating" : isReady ? "Ready" : "Waiting"}</span>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
 }
 
 function PromptCollapsible({ prompt }: { prompt: string }) {

@@ -3,6 +3,7 @@ import { validateDirectorPlan } from "../director/validateDirectorPlan.js";
 import { validateQuizTimeline } from "../timeline/validateTimeline.js";
 import { assessQuizVisualLayout } from "./visualQa.js";
 import { quizVoiceTargetWordsPerSecond, quizVoiceWordsPerSecond } from "../audio/voicePolicy.js";
+import { validateTextCopyright } from "./copyrightValidator.js";
 
 export type QuizAssessmentInput = {
   quiz: QuizV2;
@@ -23,6 +24,18 @@ export function assessQuiz(input: QuizAssessmentInput): QuizAssessment {
     const result: QuizIssue[] = [];
     if (!question.validation.fact_locked) result.push({ code: "semantic_fact_unlocked", severity: "blocker", message: "Question " + question.number + " is not fact locked.", next_action: "Validate the canonical answer and explanation before directing or rendering.", question_ids: [question.id], stage: "semantic" });
     if (!question.source_ids.length) result.push({ code: "semantic_sources_missing", severity: "blocker", message: "Question " + question.number + " has no source IDs.", next_action: "Attach source IDs from the research ledger before rendering.", question_ids: [question.id], stage: "semantic" });
+    const textToScan = `${question.question} ${question.choices.map((c) => c.text).join(" ")} ${question.explanation} ${question.visual_opportunity ?? ""}`;
+    const copyright = validateTextCopyright(textToScan);
+    if (copyright.violated) {
+      result.push({
+        code: "semantic_copyright_violation",
+        severity: "blocker",
+        message: `Question ${question.number} contains prohibited term '${copyright.term}' (${copyright.reason}).`,
+        next_action: "Regenerate this question using a safe alternative subject without using copyrighted characters or lion cubs.",
+        question_ids: [question.id],
+        stage: "semantic",
+      });
+    }
     if (question.question.length > 220) result.push({ code: "layout_question_long", severity: "warning", message: "Question " + question.number + " is longer than the safe card limit.", next_action: "Shorten the question or use a layout variant with more breathing room.", question_ids: [question.id], stage: "layout" });
     if (question.choices.some((choice) => choice.text.length > 100)) result.push({ code: "layout_choice_long", severity: "warning", message: "Question " + question.number + " contains a long answer choice.", next_action: "Shorten the choice text so it remains readable on a 16:9 card.", question_ids: [question.id], stage: "layout" });
     return result;
@@ -50,7 +63,7 @@ export function assessQuiz(input: QuizAssessmentInput): QuizAssessment {
   if (input.assetPlan) {
     const resolved = new Set((input.resolvedAssets ?? []).map((asset) => asset.asset_id));
     for (const asset of input.assetPlan.assets) {
-      if (asset.required && !resolved.has(asset.asset_id)) add({ code: "asset_required_unresolved", severity: "blocker", message: "Required asset " + asset.asset_id + " is unresolved.", next_action: "Resolve the exact semantic asset before rendering.", question_ids: asset.question_id ? [asset.question_id] : [], stage: "assets" });
+      if (!resolved.has(asset.asset_id)) add({ code: "asset_required_unresolved", severity: "blocker", message: "Required asset " + asset.asset_id + " is unresolved.", next_action: "Resolve the exact semantic asset before rendering.", question_ids: asset.question_id ? [asset.question_id] : [], stage: "assets" });
     }
   }
   if (input.resolvedAssets) {

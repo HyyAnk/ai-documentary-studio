@@ -9,4 +9,5 @@ Write `visual_prompt` following the full structure in `cinematic_prompt_referenc
 - Keep API parameters, model names, and platform-specific syntax out of the prompt text (no `@tag` references, no voice-lock instructions, no v2v/i2v directives) — this text must be paste-ready for Seedance, Veo Omni Flash, or any comparable model without editing.
 - Do not combine genuinely unrelated events (different era, different location, different subject) into one shot or one scene — pack only beats that truly belong together, per `visual_rules.md`.
 - For quiz episodes, every question beat must have a non-empty `quiz.image_prompt` providing the clear semantic visual subject for illustration.
+- Never include prohibited copyright entities or lion cub keywords in `visual_prompt` or `image_prompt` (no Marvel, DC, Game characters, or "sư tử con" / "lion cub" / "Simba"). Anime & Manga characters and adult lions ("sư tử" / "lion") are allowed.
 - Run the checklist in `cinematic_prompt_reference.md` before finalizing each scene's prompt.

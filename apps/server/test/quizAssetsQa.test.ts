@@ -15,7 +15,7 @@ import { buildQuizVoicePlan } from "../src/quiz/audio/voicePlan.js";
 import { quizVoiceFingerprint, quizVoiceTempo } from "../src/quiz/audio/voiceSynthesis.js";
 import { compileQuizTimeline } from "../src/quiz/timeline/compileTimeline.js";
 
-import { resolveQuizAssets } from "../src/quiz/assets/resolveQuizAssets.js";
+import { isQuizAssetResolutionComplete, resolveQuizAssets } from "../src/quiz/assets/resolveQuizAssets.js";
 import { RepositoryService } from "../src/repository.js";
 
 const roots: string[] = [];
@@ -164,5 +164,48 @@ describe("Quiz V2 assets and QA", () => {
     expect(heroAsset).toBeDefined();
     expect(heroAsset?.source).toBe("explicit_episode");
     expect(heroAsset?.path).toContain("asset-question-01-hero");
+  });
+
+  it("strictly enforces 100% completion in isQuizAssetResolutionComplete and rejects partial resolutions", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "quiz-completeness-"));
+    roots.push(root);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# Channel DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "quiz_channel_dna.md"), "# Quiz Channel DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style Guide\n", "utf8");
+    const repository = new RepositoryService(root);
+    const channel = await repository.createChannel({ name: "Completeness Quiz", description: "", target_audience: "", language: "English", market: "", dna_mode: "example", group_id: "quiz" });
+    const topics = Array.from({ length: 5 }, (_, index) => ({ topic_id: "topic-" + index, channel_id: channel.channel_id, title: "Topic " + index, premise: "Premise", why_it_fits: "Fits", hook: "Hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false }));
+    await repository.saveTopicRun(channel.channel_id, topics);
+    const episode = await repository.confirmTopic(channel.channel_id, topics[0].topic_id);
+
+    const pngBytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAFAAI/9B+f9AAAAABJRU5ErkJggg==", "base64");
+    const validFingerprint = "a".repeat(64);
+    const assetPath1 = await repository.writeQuizImageAsset(channel.channel_id, episode.episode_id, "asset-question-01-hero", validFingerprint, pngBytes);
+
+    const plan = planQuizAssets(quiz, createDefaultDirectorPlan(quiz));
+    expect(plan.assets.length).toBeGreaterThan(1);
+
+    // Partial resolution (e.g. 1 asset out of 3)
+    const partialResolution = {
+      schema_version: 2 as const,
+      episode_id: episode.episode_id,
+      template_id: "candy_arcade",
+      assets: [{
+        ...plan.assets[0],
+        fingerprint: validFingerprint,
+        path: assetPath1,
+        source: "provider" as const,
+      }],
+    };
+
+    const isCompletePartial = await isQuizAssetResolutionComplete({
+      repository,
+      channelId: channel.channel_id,
+      episodeId: episode.episode_id,
+      plan,
+      resolution: partialResolution,
+    });
+    expect(isCompletePartial).toBe(false);
   });
 });

@@ -15,3 +15,9 @@
 - Never invent a quote, statistic, reaction, or anecdote for a joke. Do not mock victims, vulnerable people, tragedies, or cultures. For sensitive subjects, use gentle framing and allow zero audible laughter when that is the respectful choice.
 - Put an audio cue after a humorous spoken line using an HTML comment only: `<!-- AUDIO_CUE: chuckle -->` for a small amused beat or `<!-- AUDIO_CUE: laugh -->` for a rare audible laugh. The comment is not spoken and must not replace the joke's actual wording.
 - Use at most one audible laugh cue per three minutes of target runtime. Prefer `chuckle` and let punctuation carry the comic timing; never write `(laughs)`, `[laugh]`, or other production directions directly into the visible narration.
+- **Strict Copyright & Trademark Rules:**
+  - **PROHIBITED:** Never include Marvel superheroes (Spider-Man, Iron Man, Captain America, Thor, Hulk...), DC superheroes (Batman, Superman, Wonder Woman, Joker, Flash...), commercial Game characters (Pikachu, Pokémon, Mario, Luigi, Sonic...), or Disney icons (Mickey, Donald, Elsa...).
+  - **LION CUB ZERO-TOLERANCE:** Never use the term "sư tử con" / "lion cub" / "baby lion" / "Simba" / "The Lion King" anywhere (in questions, choices, or baby animal quizzes). "Sư tử" (adult lion / African lion / pride of lions) is completely allowed.
+  - **ALLOWED:** Anime & Manga characters and stories (Naruto, Son Goku / Dragon Ball, Doraemon, Luffy / One Piece, Conan...) are fully permitted and can be used normally.
+  - For baby animal quizzes (e.g. "Guess the Baby Animal"), use safe alternatives (Kangaroo joey, Baby Penguin, Baby Giraffe, Baby Elephant, Panda cub, Baby Seal, Fox kit, etc.).
+

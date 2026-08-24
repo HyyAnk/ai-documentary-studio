@@ -32,7 +32,7 @@ export function QuizV2Panel({ state, readiness, pipelineTask, tasks, questionCou
     <ol className="quiz-v2-rail" aria-label="Quiz production stages">
       {stages.map((stage, index) => {
         const status = resolveStatus(stage.key, index, readiness, state, pipelineTask, tasks, currentStage);
-        const progress = resolveProgress(stage.key, readiness, state, tasks, questionCount);
+        const progress = resolveProgress(stage.key, readiness, state, tasks, questionCount, pipelineTask);
         return <li key={stage.key} className={"quiz-v2-stage is-" + status} aria-label={`${stage.label}: ${progress.completed} of ${progress.total} ${progress.unit} complete, ${progress.percent}%`}>
           <span className="quiz-v2-stage-icon">{status === "ready" ? <CheckCircle size={16} weight="fill" /> : status === "failed" ? <WarningCircle size={16} weight="fill" /> : status === "running" ? <CircleNotch className="spin" size={16} /> : <span>{index + 1}</span>}</span>
           <div><strong>{stage.label}</strong><span>{statusLabel(status)}</span><span className="quiz-v2-stage-progress">{progress.completed}/{progress.total} {progress.unit} · {progress.percent}%</span><span className="quiz-v2-stage-track" aria-hidden="true"><span style={{ width: `${progress.percent}%` }} /></span></div>
@@ -74,15 +74,27 @@ function baseStatus(stage: RailStage, readiness: Readiness, state: QuizV2State):
   return state.stages[stage];
 }
 
-function resolveProgress(stage: RailStage, readiness: Readiness, state: QuizV2State, tasks: Task[], questionCount: number): StageProgress {
+function resolveProgress(stage: RailStage, readiness: Readiness, state: QuizV2State, tasks: Task[], questionCount: number, pipelineTask?: Task | null): StageProgress {
   const questionTotal = Math.max(0, questionCount || state.quiz?.questions.length || 0);
   if (stage === "questions") return itemProgress(state.quiz?.questions.length ?? 0, questionTotal, "questions");
   if (stage === "director") return itemProgress(state.director_plan?.beats.length ?? 0, questionTotal || state.director_plan?.beats.length || 1, "beats");
   if (stage === "assets") {
+    if (pipelineTask && isTaskActive(pipelineTask) && pipelineTask.progress_message) {
+      const match = /(?:resolving\s+)?assets\s+(\d+)\/(\d+)/i.exec(pipelineTask.progress_message);
+      if (match) {
+        return itemProgress(Number(match[1]), Number(match[2]), "assets");
+      }
+    }
     const total = state.asset_plan?.assets.length ?? 0;
     return total > 0 ? itemProgress(state.asset_resolution?.assets.length ?? 0, total, "assets") : itemProgress(state.asset_plan ? 1 : 0, 1, "task");
   }
   if (stage === "voice") {
+    if (pipelineTask && isTaskActive(pipelineTask) && pipelineTask.progress_message) {
+      const match = /(?:generating|reusing)?\s*voice\s+(\d+)\/(\d+)/i.exec(pipelineTask.progress_message);
+      if (match) {
+        return itemProgress(Number(match[1]), Number(match[2]), "segments");
+      }
+    }
     const segments = state.voice_plan?.segments ?? [];
     return segments.length > 0 ? itemProgress(segments.filter((segment) => segment.duration_seconds !== null).length, segments.length, "segments") : itemProgress(0, 1, "task");
   }
@@ -92,6 +104,12 @@ function resolveProgress(stage: RailStage, readiness: Readiness, state: QuizV2St
   }
   if (stage === "qa") return itemProgress(state.assessment ? 1 : 0, 1, "check");
   if (stage === "scenes") {
+    if (pipelineTask && isTaskActive(pipelineTask) && pipelineTask.progress_message) {
+      const match = /(?:sequences|shots)\s+(\d+)\/(\d+)/i.exec(pipelineTask.progress_message);
+      if (match) {
+        return itemProgress(Number(match[1]), Number(match[2]), "tasks");
+      }
+    }
     const sequenceTasks = tasks.filter((task) => task.task_type === "GENERATE_SEQUENCE_SCENES");
     return sequenceTasks.length > 0 ? sequenceTaskProgress(sequenceTasks, questionTotal) : itemProgress(readiness.scenes ? 1 : 0, 1, "task");
   }
@@ -155,11 +173,11 @@ function pipelineStage(task: Task | null): { key: RailStage; label: string } | n
   const match = text.includes("research") ? "research"
     : text.includes("treatment") ? "treatment"
       : text.includes("narration script") || text.includes("script") ? "script"
-        : text.includes("visual bible") ? "visualBible"
+        : text.includes("visual bible") || text.includes("style anchor") ? "visualBible"
           : text.includes("shot plan") || text.includes("sequence") ? "scenes"
             : text.includes("question facts") || text.includes("quiz · locking") ? "questions"
               : text.includes("directing") || text.includes("director") ? "director"
-                : text.includes("semantic assets") || text.includes("resolving") ? "assets"
+                : text.includes("semantic assets") || text.includes("resolving") || text.includes("assets") ? "assets"
                   : text.includes("voice") || text.includes("narration") ? "voice"
                     : text.includes("timeline") ? "timeline"
                       : text.includes("qa") || text.includes("quality") ? "qa"
@@ -180,5 +198,8 @@ function QuizV2PendingAssessment() {
 function statusLabel(status: RailStatus): string {
   if (status === "not_started") return "Not started";
   if (status === "queued") return "Waiting";
+  if (status === "running") return "Generating";
+  if (status === "ready") return "Ready";
+  if (status === "failed") return "Failed";
   return status.replaceAll("_", " ");
 }
