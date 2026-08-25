@@ -71,3 +71,51 @@ export function splitSmartPunctuationPhrases(text: string): string[] {
 
   return parts.length > 1 ? parts : [sanitized];
 }
+
+export const NO_SPLIT_AFTER_WORDS = new Set([
+  // English intensifiers & degree modifiers (MUST stay attached to adjective/adverb)
+  "too", "very", "so", "more", "most", "less", "least", "really", "quite", "pretty",
+  "extremely", "super", "fairly", "highly", "deeply", "terribly", "awfully", "hardly",
+  "nearly", "almost", "just", "much", "way", "far",
+  // Vietnamese intensifiers & degree modifiers (MUST stay attached to adjective/adverb)
+  "quá", "rất", "cực", "vô", "hết", "khá", "hơi", "thật", "càng", "quá_đỗi", "thêm",
+  // English determiners & articles (MUST stay attached to noun/modifier)
+  "the", "a", "an", "this", "that", "these", "those", "my", "your", "his", "her",
+  "its", "our", "their", "each", "every", "all", "some", "any", "no", "both",
+  "neither", "either", "another", "such",
+  // Vietnamese determiners & classifiers (MUST stay attached to noun/modifier)
+  "những", "các", "mỗi", "từng", "mọi", "một", "hai", "ba", "bốn", "năm",
+  "con", "cái", "chiếc", "loài", "loại", "người", "vật", "tấm", "bức", "cây", "quả", "trái",
+  // English prepositions (MUST stay attached to complement noun phrase)
+  "in", "on", "at", "to", "for", "of", "with", "by", "from", "about", "into",
+  "onto", "through", "over", "under", "between", "among", "behind", "across",
+  "without", "like", "as", "during", "before", "after", "than", "upon", "within", "towards",
+  // Vietnamese prepositions (MUST stay attached to complement noun phrase)
+  "ở", "tại", "trên", "trong", "dưới", "cho", "với", "của", "bởi", "từ",
+  "đến", "vào", "qua", "giữa", "như", "về", "cùng", "bằng", "trước", "sau", "theo",
+  // Auxiliaries & modal / tense markers
+  "can", "could", "will", "would", "shall", "should", "may", "might", "must",
+  "is", "are", "am", "was", "were", "do", "does", "did", "have", "has", "had",
+  "đã", "sẽ", "đang", "vừa", "mới", "sắp", "cần", "phải", "được", "bị", "hãy", "chớ", "đừng", "nên",
+]);
+
+export const NO_SPLIT_BEFORE_WORDS = new Set([
+  // Vietnamese post-modifiers & question/exclamation particles
+  "nhất", "hơn", "quá", "lắm", "nào", "gì", "sao", "nhỉ", "nhé", "hả", "chăng", "thay",
+  // English post-modifiers & particles
+  "enough", "ago", "away", "apart",
+]);
+
+/**
+ * Validates whether a natural speech pause/split is grammatically allowed between two adjacent words.
+ * Returns false if left word is an intensifier/article/preposition or right word is a bound particle.
+ */
+export function canSplitBetweenWords(left: string, right: string): boolean {
+  const cleanLeft = left.replace(/^[^A-Za-zÀ-ỹ0-9]+|[^A-Za-zÀ-ỹ0-9]+$/g, "").toLowerCase();
+  const cleanRight = right.replace(/^[^A-Za-zÀ-ỹ0-9]+|[^A-Za-zÀ-ỹ0-9]+$/g, "").toLowerCase();
+  if (!cleanLeft || !cleanRight) return true;
+  if (NO_SPLIT_AFTER_WORDS.has(cleanLeft)) return false;
+  if (NO_SPLIT_BEFORE_WORDS.has(cleanRight)) return false;
+  return true;
+}
+

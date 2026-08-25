@@ -1,5 +1,5 @@
 import { VoicePlanSchema, type QuizV2, type VoicePhrase, type VoiceSegmentRole, type VoicePlan } from "@studio/shared";
-import { sanitizeTextForSpeech, splitSmartPunctuationPhrases } from "../../utils/speechSanitizer.js";
+import { sanitizeTextForSpeech, splitSmartPunctuationPhrases, canSplitBetweenWords } from "../../utils/speechSanitizer.js";
 
 export function buildQuizVoicePlan(quiz: QuizV2): VoicePlan {
   const copy = voiceCopy(quiz.language);
@@ -38,11 +38,28 @@ export function performancePhrases(text: string, role: VoiceSegmentRole): VoiceP
 function splitQuestionPhrases(text: string): string[] {
   const punctuation = splitPunctuationPhrases(text);
   if (punctuation.length > 1) return punctuation;
-  const words = text.split(" ");
-  if (words.length < 7) return [text];
-  const preferred = words.findIndex((word, index) => index >= 2 && index <= words.length - 3 && /^(is|are|can|does|do|has|have|will|was|were)$/i.test(word.replace(/^[^A-Za-z]+/, "")));
-  const splitAt = preferred > 0 ? preferred : Math.round(words.length / 2);
-  return [words.slice(0, splitAt).join(" "), words.slice(splitAt).join(" ")];
+  const words = text.split(" ").filter(Boolean);
+  if (words.length <= 12) return [text];
+
+  const midpoint = Math.round(words.length / 2);
+  let bestSplit = -1;
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  for (let i = 3; i <= words.length - 3; i++) {
+    if (!canSplitBetweenWords(words[i - 1]!, words[i]!)) continue;
+    const word = words[i]!.replace(/^[^A-Za-zÀ-ỹ]+/, "").toLowerCase();
+    const isConjunction = /^(and|or|but|because|although|when|while|which|that|who|whom|where|if|as|và|nhưng|hoặc|bởi|vì|khi|nếu|mà)$/i.test(word);
+    const score = (isConjunction ? 0 : 5) + Math.abs(i - midpoint);
+    if (score < bestScore) {
+      bestScore = score;
+      bestSplit = i;
+    }
+  }
+
+  if (bestSplit > 0) {
+    return [words.slice(0, bestSplit).join(" "), words.slice(bestSplit).join(" ")];
+  }
+  return [text];
 }
 
 export function splitChoicePhrases(text: string): string[] {
@@ -79,7 +96,7 @@ function voiceCopy(language: string) {
       explanation: (text: string) => text,
       fact: (text: string) => text,
       midpoint: "",
-      outro: "Bạn đúng được mấy câu? Giỏi quá đi thôi! Chơi lại sớm nhé!",
+      outro: "Bạn đúng được mấy câu? Hãy bình luận số điểm của bạn bên dưới nhé! Nhớ nhấn Thích và Đăng ký kênh để đón xem những thử thách tiếp theo. Hẹn gặp lại các bạn!",
     };
   }
   return {
@@ -91,6 +108,6 @@ function voiceCopy(language: string) {
     explanation: (text: string) => text,
     fact: (text: string) => text,
     midpoint: "",
-    outro: "How many did you get right? You did amazing! Play again soon!",
+    outro: "How many did you get right? Leave your score in the comments below! Remember to like and subscribe for more fun quizzes. See you next time!",
   };
 }

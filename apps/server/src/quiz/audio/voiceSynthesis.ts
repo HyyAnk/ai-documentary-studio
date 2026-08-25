@@ -103,10 +103,10 @@ export async function synthesizeQuizVoiceSegments(input: {
 
 export function quizVoiceTempo(role: VoicePlan["segments"][number]["role"]): number {
   if (role === "question" || role === "choice") return 1.1;
-  if (role === "reveal" || role === "intro") return 1.12;
+  if (role === "reveal" || role === "intro" || role === "outro") return 1.12;
   if (role === "explanation" || role === "fun_fact") return 1;
   if (role === "thinking_prompt") return 1.04;
-  if (role === "midpoint" || role === "outro") return 1.06;
+  if (role === "midpoint") return 1.06;
   return 1;
 }
 
@@ -141,7 +141,7 @@ export function voicePerformanceConfig(config: AppConfig["audio_generation"], ro
     explanation: { exaggeration: .58, cfg_weight: .52 },
     fun_fact: { exaggeration: .62, cfg_weight: .50 },
     midpoint: { exaggeration: .70, cfg_weight: .45 },
-    outro: { exaggeration: .72, cfg_weight: .45 },
+    outro: { exaggeration: .84, cfg_weight: .34 },
   };
   return { ...config, ...settings[role] };
 }
@@ -152,7 +152,7 @@ async function renderPerformanceSegment(config: AppConfig["audio_generation"], s
   try {
     for (const [phraseIndex, phrase] of phrases.entries()) {
       const raw = await synthesizeWav(voicePerformanceConfig(config, segment.role), phrase.text, voice);
-      const gainDb = segment.role === "reveal" ? 2.0 : segment.role === "intro" ? 1.5 : 0;
+      const gainDb = segment.role === "reveal" ? 2.0 : (segment.role === "intro" || segment.role === "outro") ? 1.5 : 0;
       const paced = await paceQuizVoiceAudio(raw, quizVoiceTempo(segment.role), directory, segmentNumber * 100 + phraseIndex + 1, gainDb);
       const phrasePath = path.join(directory, `segment-${String(segmentNumber).padStart(3, "0")}-phrase-${phraseIndex + 1}.wav`);
       await writeFile(phrasePath, paced);

@@ -149,7 +149,7 @@ function introClip(end: number, count: number, copy: Copy): string {
 }
 
 function outroClip(start: number, end: number, count: number, copy: Copy): string {
-  return `<section id="candy-outro" class="clip candy-scene candy-outro" data-start="${start.toFixed(3)}" data-duration="${Math.max(.04, end - start).toFixed(3)}" data-track-index="0"><div class="intro-rays"></div><div class="outro-blob blob-a"></div><div class="outro-blob blob-b"></div><div class="outro-card"><span>${esc(copy.scorePrompt)}</span><h1>${esc(copy.playAgain)}</h1><p>${esc(copy.exploreMore)}</p><div class="outro-stars" data-layout-ignore aria-hidden="true">★&nbsp;&nbsp;✦&nbsp;&nbsp;★</div></div></section>`;
+  return `<section id="candy-outro" class="clip candy-scene candy-outro" data-start="${start.toFixed(3)}" data-duration="${Math.max(.04, end - start).toFixed(3)}" data-track-index="0"><div class="intro-rays"></div><div class="outro-blob blob-a"></div><div class="outro-blob blob-b"></div><div class="outro-card"><span>${esc(copy.scorePrompt)}</span><h1>${esc(copy.playAgain)}</h1><p>${esc(copy.exploreMore)}</p><div class="outro-cta-badges"><span class="badge-cta badge-comment">💬 ${esc(copy.ctaComment)}</span><span class="badge-cta badge-like">👍 ${esc(copy.ctaLike)}</span><span class="badge-cta badge-sub">🔔 ${esc(copy.ctaSubscribe)}</span></div><div class="outro-stars" data-layout-ignore aria-hidden="true">★&nbsp;&nbsp;✦&nbsp;&nbsp;★</div></div></section>`;
 }
 
 function questionClip(input: { start: number; choicesStart: number; thinkingStart: number; revealStart: number; rewardStart: number; end: number; question: QuizV2["questions"][number]; questionIndex: number; count: number; visual: QuizTemplateScene; copy: Copy; assets: Record<string, string>; isFinal: boolean }): string {
@@ -311,8 +311,8 @@ function sfxSource(filename: string, assets?: Record<string, string>): string {
 function quizCopy(language: string) {
   const vietnamese = /^(vi|vietnamese|tiếng việt)/i.test(language.trim());
   return vietnamese
-    ? { ready: "Sẵn sàng chơi chưa?", questions: (count: number) => count === 1 ? "câu hỏi" : "câu hỏi đầy bất ngờ", question: "Câu", getReady: "Quan sát thật kỹ nhé!", choose: "Chọn một đáp án", time: "Sắp hết giờ!", correct: "Đúng rồi!", why: "Bạn có biết?", funFact: "Bạn có biết?", final: "Thử thách cuối", scorePrompt: "Bạn đúng được mấy câu?", playAgain: "Chơi lại nhé", exploreMore: "Còn nhiều câu hỏi thú vị phía trước" }
-    : { ready: "Ready to play?", questions: (count: number) => count === 1 ? "question" : "questions to explore", question: "Question", getReady: "Look closely and get ready!", choose: "Choose one", time: "Final seconds!", correct: "That's right!", why: "Did you know?", funFact: "Did you know?", final: "Final challenge", scorePrompt: "How many did you get right?", playAgain: "Play again soon", exploreMore: "Many more questions to explore" };
+    ? { ready: "Sẵn sàng chơi chưa?", questions: (count: number) => count === 1 ? "câu hỏi" : "câu hỏi đầy bất ngờ", question: "Câu", getReady: "Quan sát thật kỹ nhé!", choose: "Chọn một đáp án", time: "Sắp hết giờ!", correct: "Đúng rồi!", why: "Bạn có biết?", funFact: "Bạn có biết?", final: "Thử thách cuối", scorePrompt: "Bạn đúng được mấy câu?", playAgain: "Chơi lại nhé", exploreMore: "Còn nhiều câu hỏi thú vị phía trước", ctaComment: "Bình luận", ctaLike: "Thích", ctaSubscribe: "Đăng ký" }
+    : { ready: "Ready to play?", questions: (count: number) => count === 1 ? "question" : "questions to explore", question: "Question", getReady: "Look closely and get ready!", choose: "Choose one", time: "Final seconds!", correct: "That's right!", why: "Did you know?", funFact: "Did you know?", final: "Final challenge", scorePrompt: "How many did you get right?", playAgain: "Play again soon", exploreMore: "Many more questions to explore", ctaComment: "Comment", ctaLike: "Like", ctaSubscribe: "Subscribe" };
 }
 
 function illustrationDataUri(subject: string, seed: number): string {
@@ -557,6 +557,11 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .intro-card h1, .outro-card h1 { max-width: 1050px; margin: 29px 0 9px; font-size: 96px; line-height: 1.02; letter-spacing: -4px; }
 .intro-card p, .outro-card p { margin: 0; font-size: 37px; font-weight: 900; }
 .intro-stars, .outro-stars { margin-top: 35px; color: #172A59; font-size: 43px; }
+.outro-cta-badges { display: flex; gap: 18px; margin-top: 24px; align-items: center; justify-content: center; }
+.badge-cta { display: inline-flex; align-items: center; gap: 8px; padding: 10px 22px; border-radius: 999px; background: #FFFFFF; color: #172A59; font-size: 24px; font-weight: 900; box-shadow: 0 8px 0 rgba(13,35,71,.18); border: 3px solid #172A59; }
+.badge-comment { background: #29B9A8; color: #FFFFFF; }
+.badge-like { background: #FF6277; color: #FFFFFF; }
+.badge-sub { background: #FFC436; color: #172A59; }
 .intro-dot { position: absolute; z-index: 1; border-radius: 50%; background: #fff; opacity: .47; }.dot-a { top: 126px; left: 250px; width: 158px; height: 158px; }.dot-b { right: 235px; bottom: 149px; width: 128px; height: 128px; }
 .brand-mascot { position: absolute; z-index: 4; right: 255px; bottom: 95px; display: grid; place-items: center; width: 179px; height: 179px; border: 10px solid #fff; border-radius: 53px; background: #29B9A8; color: #172A59; box-shadow: 0 20px 0 rgba(13,35,71,.2); font-size: 93px; transform: rotate(-8deg); }
 .outro-blob { position: absolute; z-index: 1; border-radius: 50%; background: rgba(255,255,255,.36); }.outro-blob.blob-a { top: 112px; left: 205px; width: 170px; height: 170px; }.outro-blob.blob-b { right: 220px; bottom: 130px; width: 205px; height: 205px; background: rgba(41,185,168,.36); }

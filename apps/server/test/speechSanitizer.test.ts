@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeTextForSpeech, splitSmartPunctuationPhrases } from "../src/utils/speechSanitizer.js";
+import { sanitizeTextForSpeech, splitSmartPunctuationPhrases, canSplitBetweenWords } from "../src/utils/speechSanitizer.js";
 import { performancePhrases, splitPunctuationPhrases } from "../src/quiz/audio/voicePlan.js";
 import { splitAtNarrativeBoundaries } from "../src/production.js";
 
@@ -72,6 +72,37 @@ describe("Speech Sanitizer & Text Normalization", () => {
       const chunks = splitAtNarrativeBoundaries(text, 50);
       expect(chunks).toHaveLength(1);
       expect(chunks[0]).toContain("T-rex");
+    });
+  });
+
+  describe("canSplitBetweenWords & Collocation Protection", () => {
+    it("disallows splitting after intensifiers like too, very, so, quá, rất", () => {
+      expect(canSplitBetweenWords("too", "high")).toBe(false);
+      expect(canSplitBetweenWords("very", "fast")).toBe(false);
+      expect(canSplitBetweenWords("so", "loud")).toBe(false);
+      expect(canSplitBetweenWords("quá", "cao")).toBe(false);
+      expect(canSplitBetweenWords("rất", "nhanh")).toBe(false);
+    });
+
+    it("disallows splitting after articles, determiners and prepositions", () => {
+      expect(canSplitBetweenWords("the", "moon")).toBe(false);
+      expect(canSplitBetweenWords("a", "tiger")).toBe(false);
+      expect(canSplitBetweenWords("những", "ngôi")).toBe(false);
+      expect(canSplitBetweenWords("for", "humans")).toBe(false);
+      expect(canSplitBetweenWords("in", "the")).toBe(false);
+      expect(canSplitBetweenWords("trong", "rừng")).toBe(false);
+    });
+
+    it("keeps short questions with too high intact without mid-clause splitting", () => {
+      const phrases = performancePhrases("Dogs hear sounds too high for humans.", "question");
+      expect(phrases).toHaveLength(1);
+      expect(phrases[0]?.text).toBe("Dogs hear sounds too high for humans.");
+    });
+
+    it("keeps short Vietnamese and English questions intact without breaking collocations", () => {
+      const viPhrases = performancePhrases("Loài báo săn chạy rất nhanh trên đồng cỏ.", "question");
+      expect(viPhrases).toHaveLength(1);
+      expect(viPhrases[0]?.text).toBe("Loài báo săn chạy rất nhanh trên đồng cỏ.");
     });
   });
 });

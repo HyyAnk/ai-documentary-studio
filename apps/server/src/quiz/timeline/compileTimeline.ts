@@ -120,7 +120,9 @@ export function compileQuizTimeline(input: TimelineCompileInput): QuizTimeline {
   const outro = input.voicePlan.segments.find((segment) => segment.role === "outro");
   if (outro) {
     const outroStart = cursor;
-    cursor = round(cursor + scheduleNarration(outro.segment_id, cursor, outro.text, null));
+    const outroNarrationDuration = scheduleNarration(outro.segment_id, cursor, outro.text, null);
+    const outroEnd = round(outroStart + outroNarrationDuration + policy.outro_hold_seconds);
+    cursor = outroEnd;
     add({ type: "background.motion", at_seconds: outroStart, duration_seconds: round(cursor - outroStart), question_id: null, choice_id: null, segment_id: null, payload: { layers: ["sunburst", "ambient_shapes"] } });
   }
   const missingNarration = input.voicePlan.segments.filter((segment) => !scheduled.has(segment.segment_id));

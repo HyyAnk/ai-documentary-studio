@@ -22,6 +22,7 @@ export type QuizTimingPolicy = {
   fact_hold_seconds: number;
   transition_seconds: number;
   transition_overlap_seconds: number;
+  outro_hold_seconds: number;
   minimum_thinking_seconds: number;
   maximum_thinking_seconds: number;
   countdown_seconds: number;
@@ -51,6 +52,7 @@ export function timingPolicyForAgeBand(ageBand: QuizAgeBand): QuizTimingPolicy {
     fact_hold_seconds: 2.0,
     transition_seconds: 0.86,
     transition_overlap_seconds: 0,
+    outro_hold_seconds: 5.0,
     minimum_thinking_seconds: { "4-6": 7.2, "7-9": 6.8, "10-12": 6.5, family: 6.8 }[ageBand],
     maximum_thinking_seconds: { "4-6": 8.5, "7-9": 8, "10-12": 7.8, family: 8 }[ageBand],
     countdown_seconds: 3,

@@ -247,6 +247,13 @@ describe("Candy Arcade visual template", () => {
     const viTimeline = compileQuizTimeline({ quiz: vietnameseQuiz, director, voicePlan: viVoice });
     const viBundle = buildCandyArcadeCompositionBundle({ quiz: vietnameseQuiz, director, timeline: viTimeline, theme: "candy_arcade", audioPath: "./narration.wav", narrationDurationSeconds: viTimeline.duration_seconds });
     expect(viBundle.files["compositions/candy-outro.html"]).toContain("Còn nhiều câu hỏi thú vị phía trước");
+    expect(viBundle.files["compositions/candy-outro.html"]).toContain("badge-cta");
+    expect(viBundle.files["compositions/candy-outro.html"]).toContain("Đăng ký");
+    expect(viBundle.files["compositions/candy-outro.html"]).toContain("Bình luận");
+
+    // Outro hold test (5s hold after voice segment)
+    const outroEvent = viTimeline.events.find((e) => e.segment_id === "outro")!;
+    expect(viTimeline.duration_seconds - (outroEvent.at_seconds + outroEvent.duration_seconds)).toBeGreaterThanOrEqual(4.9);
   });
 });
 

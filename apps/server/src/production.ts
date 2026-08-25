@@ -5,7 +5,7 @@ import {
   type ProductionAssessment,
   type Scene,
 } from "@studio/shared";
-import { sanitizeTextForSpeech } from "./utils/speechSanitizer.js";
+import { sanitizeTextForSpeech, canSplitBetweenWords } from "./utils/speechSanitizer.js";
 
 const WORD_PATTERN = /[\p{L}\p{N}]+(?:[’'-][\p{L}\p{N}]+)*/gu;
 const AUDIO_CUE_PATTERN = /<!--\s*AUDIO[_ -]?CUE\s*:\s*(chuckle|laugh)\s*-->/gi;
@@ -122,7 +122,19 @@ function splitLongUnit(unit: string, maxWords: number): string[] {
   }
   const words = unit.match(WORD_PATTERN) ?? [];
   const chunks: string[] = [];
-  for (let index = 0; index < words.length; index += maxWords) chunks.push(words.slice(index, index + maxWords).join(" "));
+  let cursor = 0;
+  while (cursor < words.length) {
+    if (words.length - cursor <= maxWords) {
+      chunks.push(words.slice(cursor).join(" "));
+      break;
+    }
+    let target = cursor + maxWords;
+    while (target > cursor + 3 && !canSplitBetweenWords(words[target - 1]!, words[target]!)) {
+      target--;
+    }
+    chunks.push(words.slice(cursor, target).join(" "));
+    cursor = target;
+  }
   return chunks;
 }
 

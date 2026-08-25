@@ -65,7 +65,7 @@ describe("deterministic Quiz timeline compiler", () => {
     const timeline = compileQuizTimeline({ quiz: value, director: createDefaultDirectorPlan(value), voicePlan: voice });
     const narrationIds = new Set(timeline.events.filter((event) => event.type === "narration.segment").map((event) => event.segment_id));
     expect(timeline.duration_seconds).toBeGreaterThan(130);
-    expect(timeline.duration_seconds).toBeLessThan(300);
+    expect(timeline.duration_seconds).toBeLessThan(320);
     expect([...narrationIds].sort()).toEqual(voice.segments.map((segment) => segment.segment_id).sort());
     for (const [index, question] of value.questions.entries()) {
       const start = timeline.events.find((event) => event.type === "question.enter" && event.question_id === question.id)?.at_seconds ?? 0;
