@@ -38,28 +38,18 @@ function SimplifyToggle({
   onChange: (enabled: boolean) => void;
 }) {
   return (
-    <label className="session-cleanup-toggle">
-      <div>
-        <strong style={{ display: "block", fontSize: "14px", color: "var(--ink)" }}>Simplify Mode</strong>
-        <small style={{ color: "var(--muted)", fontSize: "12px" }}>
-          {enabled
-            ? "Bật (Ẩn các tab: Channel DNA, Script & Plan, Visual & Continuity, Timeline & Shots)"
-            : "Tắt (Hiển thị đầy đủ tất cả các tab chi tiết)"}
-        </small>
-      </div>
-      <span className="session-cleanup-switch">
-        <input
-          type="checkbox"
-          role="switch"
-          aria-label="Toggle Simplify mode"
-          checked={enabled}
-          onChange={(event) => onChange(event.target.checked)}
-        />
-        <span className="session-cleanup-track" aria-hidden="true">
-          <span>Off</span>
-          <span>On</span>
-          <i />
-        </span>
+    <label className="session-cleanup-switch">
+      <input
+        type="checkbox"
+        role="switch"
+        aria-label="Toggle Simplify mode"
+        checked={enabled}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span className="session-cleanup-track" aria-hidden="true">
+        <span>Off</span>
+        <span>On</span>
+        <i />
       </span>
     </label>
   );
@@ -1201,17 +1191,13 @@ export function SettingsView({
             <div className="panel-heading">
               <div>
                 <p className="eyebrow">Workspace Experience</p>
-                <h2>Giao diện Tối giản (Simplify)</h2>
+                <h2>Simplify</h2>
               </div>
-              <SlidersHorizontal size={22} />
+              <SimplifyToggle
+                enabled={simplifyMode}
+                onChange={(enabled) => onSimplifyChange?.(enabled)}
+              />
             </div>
-            <p className="field-help" style={{ marginTop: 0, marginBottom: "16px" }}>
-              Tự động ẩn bớt các tab cấu hình chi tiết (Channel DNA & Identity, Script & Plan, Visual & Continuity, Timeline & Shots) dành cho người chỉ muốn chạy quy trình sản xuất nhanh mà không quan tâm đến các thành phần bên dưới.
-            </p>
-            <SimplifyToggle
-              enabled={simplifyMode}
-              onChange={(enabled) => onSimplifyChange?.(enabled)}
-            />
           </section>
 
           <section className="panel storage-panel">

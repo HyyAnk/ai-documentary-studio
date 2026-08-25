@@ -4293,6 +4293,8 @@ h3 {
   position: relative;
   display: inline-flex;
   flex: 0 0 auto;
+  cursor: pointer;
+  user-select: none;
 }
 
 .session-cleanup-switch input {
