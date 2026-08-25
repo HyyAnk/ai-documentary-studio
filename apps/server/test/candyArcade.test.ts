@@ -125,6 +125,12 @@ describe("Candy Arcade visual template", () => {
     expect(voxelPrompt.prompt).toContain("3D Voxel / Low-Poly");
     expect(voxelPrompt.prompt).toContain("3D voxel blocky environment");
 
+    const plasticToyPrompt = compileQuizAssetPrompt(hero, undefined, "plastic_toy");
+    expect(plasticToyPrompt.prompt).toContain("3D Glossy Vinyl Toy");
+    expect(plasticToyPrompt.prompt).toContain("cute painted glossy eyes with expressive pupils");
+    expect(plasticToyPrompt.prompt).toContain("Living creatures, characters, dinosaurs, and animals must have complete, expressive natural eyes");
+    expect(plasticToyPrompt.cacheVersion).toContain("v3-expressive-faces");
+
     expect(assessQuizVisualLayout({ quiz, director }).filter((issue) => issue.severity === "blocker")).toEqual([]);
     const fairnessIssues = assessQuizVisualLayout({ quiz, director, assetPlan });
     expect(fairnessIssues.filter((issue) => issue.severity === "blocker")).toEqual([]);

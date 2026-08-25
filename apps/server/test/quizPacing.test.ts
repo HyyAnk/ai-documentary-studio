@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { QuizV2Schema } from "@studio/shared";
 import { buildQuizVoicePlan, splitChoicePhrases } from "../src/quiz/audio/voicePlan.js";
-import { MIN_QUIZ_VOICE_SLOWDOWN_TEMPO, quizVoiceFingerprint, quizVoicePaceCorrectionTempo, quizVoiceTempo, voicePerformanceConfig } from "../src/quiz/audio/voiceSynthesis.js";
+import { createSilenceWav, isStandardPcmWav, MIN_QUIZ_VOICE_SLOWDOWN_TEMPO, quizVoiceFingerprint, quizVoicePaceCorrectionTempo, quizVoiceTempo, voicePerformanceConfig } from "../src/quiz/audio/voiceSynthesis.js";
 import { quizVoicePacingLimit, quizVoicePlanNeedsRegeneration, quizVoiceTargetWordsPerSecond, quizVoiceWordsPerSecond } from "../src/quiz/audio/voicePolicy.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
 import { createDefaultDirectorPlan } from "../src/quiz/director/parseDirectorPlan.js";
@@ -146,5 +146,17 @@ describe("Quiz V2 pacing", () => {
   it("adds a visual acknowledgement while long answer choices are being read", () => {
     const timeline = compileQuizTimeline({ quiz, director: createDefaultDirectorPlan(quiz), voicePlan: buildQuizVoicePlan(quiz), audioDurations: Object.fromEntries(buildQuizVoicePlan(quiz).segments.map((segment) => [segment.segment_id, segment.role === "choice" ? 6 : 1])) });
     expect(timeline.events.some((event) => event.type === "mascot.state" && event.payload.phase === "choices_pulse")).toBe(true);
+  });
+
+  it("validates standard 48kHz stereo 16-bit PCM WAV audio buffers and rejects non-standard formats", () => {
+    const silence = createSilenceWav(1.5);
+    expect(isStandardPcmWav(silence)).toBe(true);
+    expect(isStandardPcmWav(new Uint8Array([1, 2, 3]))).toBe(false);
+
+    // Modify sample rate in header to simulate 24kHz
+    const modified = new Uint8Array(silence);
+    const view = new DataView(modified.buffer, modified.byteOffset, modified.byteLength);
+    view.setUint32(24, 24000, true);
+    expect(isStandardPcmWav(modified)).toBe(false);
   });
 });

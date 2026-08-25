@@ -346,7 +346,8 @@ function getHeadlineFontBase64(): string {
   const candidates = [
     path.resolve(process.cwd(), "assets", "fonts", "SVN-Hello Headline.otf"),
     path.resolve(process.cwd(), "templates", "fonts", "SVN-Hello Headline.otf"),
-    "D:\\Font 1\\SVN-Hello Headline.otf",
+    path.resolve(process.cwd(), "..", "assets", "fonts", "SVN-Hello Headline.otf"),
+    path.resolve(process.cwd(), "..", "..", "assets", "fonts", "SVN-Hello Headline.otf"),
   ];
   for (const candidate of candidates) {
     try {
@@ -355,6 +356,19 @@ function getHeadlineFontBase64(): string {
         return cachedHeadlineFontBase64;
       }
     } catch {}
+  }
+  let curr = process.cwd();
+  for (let i = 0; i < 5; i++) {
+    const probe = path.join(curr, "assets", "fonts", "SVN-Hello Headline.otf");
+    try {
+      if (fs.existsSync(probe)) {
+        cachedHeadlineFontBase64 = fs.readFileSync(probe).toString("base64");
+        return cachedHeadlineFontBase64;
+      }
+    } catch {}
+    const parent = path.dirname(curr);
+    if (parent === curr) break;
+    curr = parent;
   }
   cachedHeadlineFontBase64 = "";
   return cachedHeadlineFontBase64;

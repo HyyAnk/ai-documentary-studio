@@ -67,7 +67,7 @@ export async function synthesizeQuizVoiceSegments(input: {
         try {
           const audio = new Uint8Array(await readFile(existing.absolutePath));
           const duration = wavDurationSeconds(audio);
-          if (duration > 0.05 && segmentPace(segment, duration) <= pacingLimit) {
+          if (duration > 0.05 && isStandardPcmWav(audio) && segmentPace(segment, duration) <= pacingLimit) {
             rendered = { duration, absolutePath: existing.absolutePath };
             reused = true;
           }
@@ -246,7 +246,6 @@ function pauseSeconds(pauseClass: VoicePauseClass, segmentNumber: number, phrase
 }
 
 async function paceQuizVoiceAudio(audio: Uint8Array, tempo: number, directory: string, segmentNumber: number, gainDb = 0): Promise<Uint8Array> {
-  if (tempo === 1 && gainDb === 0) return audio;
   const base = `segment-${String(segmentNumber).padStart(3, "0")}`;
   const inputPath = path.join(directory, `${base}-source.wav`);
   const outputPath = path.join(directory, `${base}-paced.wav`);
@@ -254,7 +253,8 @@ async function paceQuizVoiceAudio(audio: Uint8Array, tempo: number, directory: s
     await writeFile(inputPath, audio);
     const filters = atempoFilters(tempo);
     if (gainDb !== 0) filters.push(`volume=${Math.pow(10, gainDb / 20).toFixed(4)}`);
-    await execFileAsync("ffmpeg", ["-y", "-i", inputPath, "-filter:a", filters.join(","), "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", outputPath], { timeout: 2 * 60_000, windowsHide: true });
+    const filterArgs = filters.length > 0 ? ["-filter:a", filters.join(",")] : [];
+    await execFileAsync("ffmpeg", ["-y", "-i", inputPath, ...filterArgs, "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", outputPath], { timeout: 2 * 60_000, windowsHide: true });
     return new Uint8Array(await readFile(outputPath));
   } finally {
     await Promise.all([rm(inputPath, { force: true }), rm(outputPath, { force: true })]);
@@ -403,3 +403,24 @@ export function wavDurationSeconds(buffer: Uint8Array): number {
 function wordCount(value: string): number {
   return countQuizVoiceWords(value);
 }
+
+export function isStandardPcmWav(buffer: Uint8Array, expectedSampleRate = 48000, expectedChannels = 2): boolean {
+  if (buffer.length < 44) return false;
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  if (new TextDecoder().decode(buffer.slice(0, 4)) !== "RIFF" || new TextDecoder().decode(buffer.slice(8, 12)) !== "WAVE") return false;
+  let offset = 12;
+  while (offset + 8 <= buffer.length) {
+    const id = new TextDecoder().decode(buffer.slice(offset, offset + 4));
+    const size = view.getUint32(offset + 4, true);
+    if (id === "fmt " && size >= 16 && offset + 24 <= buffer.length) {
+      const audioFormat = view.getUint16(offset + 8, true); // 1 = PCM integer
+      const numChannels = view.getUint16(offset + 10, true);
+      const sampleRate = view.getUint32(offset + 12, true);
+      const bitsPerSample = view.getUint16(offset + 22, true);
+      return audioFormat === 1 && numChannels === expectedChannels && sampleRate === expectedSampleRate && bitsPerSample === 16;
+    }
+    offset += 8 + size + (size % 2);
+  }
+  return false;
+}
+

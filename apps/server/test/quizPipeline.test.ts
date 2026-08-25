@@ -29,7 +29,7 @@ const scene = (number: number, question: string, answer: string): Scene => ({
 
 describe("Quiz HyperFrames composition", () => {
   it("uses structured question content and keeps the narration duration as the timeline", () => {
-    const html = buildQuizComposition({ question_count: 2, quiz_format: "multiple_choice", age_band: "7-9", visual_theme: "candy_pop" }, [scene(1, "Which color is on a traffic light?", "Red"), scene(2, "Which planet is red?", "Mars")], "D:/audio/narration.wav", 14.2);
+    const html = buildQuizComposition({ question_count: 2, quiz_format: "multiple_choice", age_band: "7-9", visual_theme: "candy_pop" }, [scene(1, "Which color is on a traffic light?", "Red"), scene(2, "Which planet is red?", "Mars")], "./audio/narration.wav", 14.2);
     expect(html).toContain('data-duration="14.200"');
     expect(html).toContain("Which color is on a traffic light?");
     expect(html).toContain("Mars");

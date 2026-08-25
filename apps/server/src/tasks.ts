@@ -859,7 +859,8 @@ export class TaskManager extends EventEmitter {
         path.join(this.repository.rootDirectory, "templates", "fonts"),
         path.resolve("assets", "fonts"),
         path.resolve("templates", "fonts"),
-        "D:\\Font 1",
+        path.resolve(process.cwd(), "..", "assets", "fonts"),
+        path.resolve(process.cwd(), "..", "..", "assets", "fonts"),
       ];
       await Promise.all(fontFiles.map(async (file) => {
         for (const candidateDir of fontCandidates) {
