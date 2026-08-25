@@ -431,7 +431,7 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .wood-sign-star { position: absolute; pointer-events: none; }
 .wood-sign-star.star-tl { top: -12px; left: -12px; color: #FFD43F; font-size: 30px; text-shadow: 0 0 12px rgba(255,212,63,.85); transform: rotate(-15deg); }
 .wood-sign-star.star-br { bottom: -12px; right: -12px; color: #FFB703; font-size: 32px; text-shadow: 0 3px 0 #331505; transform: rotate(15deg); }
-.game-stage { position: relative; z-index: 3; display: grid; justify-items: center; align-content: start; width: 1580px; min-height: 860px; margin: 12px 40px 0 auto; }
+.game-stage { position: relative; z-index: 3; display: grid; justify-items: center; align-content: start; width: 1580px; min-height: 945px; margin: 12px 40px 0 auto; }
 .question-title { position: relative; z-index: 3; max-width: 1520px; width: 100%; text-align: center; }
 .question-card-inner { position: relative; display: block; padding: 26px 64px 28px; border: 7px solid #FFC938; border-radius: 42px; background: linear-gradient(180deg, #FFFFFF 0%, #FFFDF7 28%, #FFF8EA 100%); box-shadow: inset 0 4px 0 rgba(255,255,255,0.95), inset 0 8px 0 rgba(56,189,248,0.25), inset 0 -5px 0 rgba(245,166,35,0.22), 0 16px 0 var(--depth-shadow), 0 26px 42px rgba(10,25,60,0.16); }
 .question-title h1 { margin: 0; color: #342245; font-family: "Fredoka", "SVN-Hello Headline", "Baloo 2", "Nunito", sans-serif; font-size: var(--question-size); font-weight: 800; line-height: var(--question-leading); letter-spacing: -0.5px; text-wrap: balance; text-shadow: 0 2px 0 rgba(255,255,255,0.8), 0 3px 0 rgba(16,35,75,0.08); }
@@ -511,9 +511,9 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .timer-sparkles i:nth-child(1) { right: 6%; top: -18px; }
 .timer-sparkles i:nth-child(2) { right: 1%; bottom: -16px; color: #5CE1E6; font-size: 22px; animation-delay: calc(var(--clip-start) + .55s); }
 .timer-sparkles i:nth-child(3) { left: 4%; top: -16px; color: #fff; animation-delay: calc(var(--clip-start) + 1.05s); }
-.fact-card { position: relative; z-index: 5; max-width: 1220px; margin-top: 14px; padding: 20px 38px 23px; border: 6px solid rgba(255,255,255,.79); border-radius: 35px; background: var(--surface); box-shadow: 0 15px 0 rgba(13,35,71,.18); text-align: center; opacity: 0; animation: phase-enter .01s steps(1,end) calc(var(--clip-start) + var(--reward-at)) both; }
-.fact-card span { color: var(--surface-accent); font-size: 22px; font-weight: 900; letter-spacing: 1.5px; text-transform: uppercase; }
-.fact-card p { margin: 8px 0 0; font-size: 30px; font-weight: 800; line-height: 1.24; }
+.fact-card { position: relative; z-index: 5; max-width: 1220px; margin-top: 14px; padding: 22px 44px 26px; border: 6px solid rgba(255,255,255,.85); border-radius: 38px; background: var(--surface); box-shadow: 0 16px 0 rgba(13,35,71,.18), 0 22px 36px rgba(10,25,60,.14); text-align: center; opacity: 0; animation: phase-enter .01s steps(1,end) calc(var(--clip-start) + var(--reward-at)) both; }
+.fact-card span { color: var(--surface-accent); font-size: 24px; font-weight: 900; letter-spacing: 1.5px; text-transform: uppercase; }
+.fact-card p { margin: 8px 0 0; font-family: "Fredoka", "SVN-Hello Headline", "Baloo 2", "Nunito", sans-serif; font-size: 38px; font-weight: 900; line-height: 1.22; letter-spacing: -0.3px; }
 .visual-answer-grid { position: relative; z-index: 3; display: grid; grid-template-columns: repeat(3,1fr); gap: 28px; width: 1560px; margin-top: 28px; opacity: 0; animation: phase-enter .01s steps(1,end) calc(var(--clip-start) + var(--choices-at)) both; }
 .visual-answer-card { position: relative; z-index: 3; }
 .option-image { width: 100%; height: 372px; border-width: 12px; border-radius: 40px; animation: answer-float var(--scene-duration) ease-in-out calc(var(--clip-start) + var(--item-phase)) 1 alternate both; }

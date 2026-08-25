@@ -13,7 +13,7 @@ export const candyArcadeTokens: QuizVisualTemplate["tokens"] = {
     badge: { family: roundedFont, weight: 900, size: 36, lineHeight: 1, letterSpacing: 0, shadow: "none" },
     label: { family: roundedFont, weight: 900, size: 23, lineHeight: 1.1, letterSpacing: 0.4, shadow: "none" },
     counter: { family: roundedFont, weight: 900, size: 27, lineHeight: 1, letterSpacing: 0.2, shadow: "none" },
-    fact: { family: roundedFont, weight: 800, size: 31, lineHeight: 1.24, letterSpacing: -0.3, shadow: "none" },
+    fact: { family: headlineFont, weight: 900, size: 38, lineHeight: 1.22, letterSpacing: -0.3, shadow: "none" },
     interstitial: { family: roundedFont, weight: 900, size: 96, lineHeight: 1.02, letterSpacing: -3.2, shadow: "0 7px 0 rgba(13, 35, 71, .12)" },
   },
   shadow: { card: "0 18px 0 rgba(13, 35, 71, .18)", lift: "0 25px 36px rgba(13, 35, 71, .22)", sticker: "0 10px 0 rgba(13, 35, 71, .24)", glow: "0 0 0 8px rgba(255,255,255,.22), 0 0 42px rgba(255,255,255,.55)" },
