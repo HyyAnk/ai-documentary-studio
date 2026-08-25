@@ -3,6 +3,11 @@ import { fileURLToPath } from "node:url";
 import { buildApp } from "./app.js";
 
 const workspaceRoot = process.env.STUDIO_ROOT ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+try {
+  process.loadEnvFile?.(path.join(workspaceRoot, ".env"));
+} catch {
+  // .env is optional
+}
 const app = await buildApp(workspaceRoot);
 const port = Number(process.env.PORT ?? 4310);
 const host = process.env.HOST ?? "127.0.0.1";

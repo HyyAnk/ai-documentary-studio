@@ -47,7 +47,9 @@ describe("Candy Arcade visual template", () => {
     expect(bundle.html).toContain('class="clip sfx-clip"');
     expect(bundle.html).toContain('ui_pop.wav');
     expect(bundle.html).toContain('correct_ding.wav');
+    expect(bundle.html).toContain('data-no-timeline');
     expect(Object.keys(bundle.files)).toContain("compositions/candy-intro.html");
+    expect(Object.values(bundle.files).every((file) => file.includes("data-no-timeline"))).toBe(true);
     expect(Object.values(bundle.files).every((file) => !file.includes('src="../'))).toBe(true);
     expect(Object.values(bundle.files).every((file) => !file.includes("data-start="))).toBe(true);
     expect(Object.values(bundle.files).every((file) => !file.includes("data-track-index="))).toBe(true);

@@ -883,10 +883,20 @@ export class TaskManager extends EventEmitter {
         await this.update(task.task_id, { progress_message: "Video · checking layout and media", progress_percent: 20 });
         let checkOutput: string = "";
         const maxCheckAttempts = 2;
+        const checkTimeoutMs = Number(process.env.PRODUCER_PAGE_NAVIGATION_TIMEOUT_MS || "300000");
+        const hyperframesEnv = {
+          ...process.env,
+          PRODUCER_PAGE_NAVIGATION_TIMEOUT_MS: process.env.PRODUCER_PAGE_NAVIGATION_TIMEOUT_MS || "300000",
+          ...(process.env.HYPERFRAMES_BROWSER_PATH ? { HYPERFRAMES_BROWSER_PATH: process.env.HYPERFRAMES_BROWSER_PATH } : {}),
+        };
 
         for (let attempt = 1; attempt <= maxCheckAttempts; attempt++) {
           try {
-            ({ stdout: checkOutput } = await execFileAsync(npxCommand, hyperframesArgs("check", renderRoot, "--json", "--samples", "5", "--timeout", "150000"), { cwd: this.repository.rootDirectory, timeout: 600_000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 }));
+            ({ stdout: checkOutput } = await execFileAsync(
+              npxCommand,
+              hyperframesArgs("check", renderRoot, "--json", "--samples", "5", "--timeout", String(checkTimeoutMs)),
+              { cwd: this.repository.rootDirectory, timeout: 600_000, windowsHide: true, maxBuffer: 20 * 1024 * 1024, env: hyperframesEnv }
+            ));
           } catch (error) {
             const failure = error as Error & { stdout?: string };
             const errorReport = parseHyperframesCheckReport(failure.stdout);
@@ -921,7 +931,40 @@ export class TaskManager extends EventEmitter {
         await this.update(task.task_id, { progress_message: "Video · reusing verified MP4", progress_percent: 75 });
       } else {
         await this.update(task.task_id, { progress_message: "Video · rendering MP4 with narration", progress_percent: 45 });
-        await execFileAsync(npxCommand, hyperframesArgs("render", renderRoot, "--output", outputPath, "--fps", String(this.videoConfig.fps), "--quality", this.videoConfig.render_quality, "--strict", "--json"), { cwd: this.repository.rootDirectory, timeout: 30 * 60_000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 });
+        const browserTimeout = process.env.HYPERFRAMES_BROWSER_TIMEOUT_SECONDS || "300";
+        const renderTimeoutMs = Number(process.env.HYPERFRAMES_RENDER_TIMEOUT_MS) || (120 * 60_000);
+        const hyperframesEnv = {
+          ...process.env,
+          PRODUCER_PAGE_NAVIGATION_TIMEOUT_MS: process.env.PRODUCER_PAGE_NAVIGATION_TIMEOUT_MS || "300000",
+          PRODUCER_PUPPETEER_PROTOCOL_TIMEOUT_MS: process.env.PRODUCER_PUPPETEER_PROTOCOL_TIMEOUT_MS || "300000",
+          PRODUCER_PLAYER_READY_TIMEOUT_MS: process.env.PRODUCER_PLAYER_READY_TIMEOUT_MS || "60000",
+          PRODUCER_EXPERIMENTAL_FAST_CAPTURE: process.env.PRODUCER_EXPERIMENTAL_FAST_CAPTURE || "true",
+          ...(process.env.HYPERFRAMES_BROWSER_PATH ? { HYPERFRAMES_BROWSER_PATH: process.env.HYPERFRAMES_BROWSER_PATH } : {}),
+        };
+        await execFileAsync(
+          npxCommand,
+          hyperframesArgs(
+            "render",
+            renderRoot,
+            "--output",
+            outputPath,
+            "--fps",
+            String(this.videoConfig.fps),
+            "--quality",
+            this.videoConfig.render_quality,
+            "--browser-timeout",
+            browserTimeout,
+            "--strict",
+            "--json"
+          ),
+          {
+            cwd: this.repository.rootDirectory,
+            timeout: renderTimeoutMs,
+            windowsHide: true,
+            maxBuffer: 50 * 1024 * 1024,
+            env: hyperframesEnv,
+          }
+        );
       }
       await this.update(task.task_id, { progress_message: "Video · verifying MP4 and audio track", progress_percent: 90 });
       const probe = await inspectRenderedVideo(outputPath, { width: 1920, height: 1080, fps: this.videoConfig.fps });

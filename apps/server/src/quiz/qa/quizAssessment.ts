@@ -37,7 +37,7 @@ export function assessQuiz(input: QuizAssessmentInput): QuizAssessment {
       });
     }
     if (question.question.length > 100) result.push({ code: "layout_question_long", severity: "warning", message: "Question " + question.number + " exceeds the recommended child-friendly limit (100 characters).", next_action: "Shorten the question to be direct, punchy, and under 10 words.", question_ids: [question.id], stage: "layout" });
-    if (question.explanation.length > 150) result.push({ code: "layout_explanation_long", severity: "warning", message: "Question " + question.number + " explanation exceeds the recommended child-friendly limit (150 characters).", next_action: "Shorten the explanation to strictly 1 punchy sentence under 18 words with a fun fact.", question_ids: [question.id], stage: "layout" });
+    if (question.explanation.length > 90) result.push({ code: "layout_explanation_long", severity: "warning", message: "Question " + question.number + " explanation exceeds the recommended child-friendly limit (90 characters).", next_action: "Shorten the explanation to strictly 1 punchy fun fact under 10 words (under 70 characters).", question_ids: [question.id], stage: "layout" });
     if (question.choices.some((choice) => choice.text.length > 100)) result.push({ code: "layout_choice_long", severity: "warning", message: "Question " + question.number + " contains a long answer choice.", next_action: "Shorten the choice text so it remains readable on a 16:9 card.", question_ids: [question.id], stage: "layout" });
     return result;
   });

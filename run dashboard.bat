@@ -22,6 +22,9 @@ if not exist "!ROOT!\.env" if exist "!ROOT!\.env.example" (
   copy /y "!ROOT!\.env.example" "!ROOT!\.env" >nul
 )
 
+if not defined PRODUCER_PAGE_NAVIGATION_TIMEOUT_MS set "PRODUCER_PAGE_NAVIGATION_TIMEOUT_MS=300000"
+if not defined HYPERFRAMES_BROWSER_TIMEOUT_SECONDS set "HYPERFRAMES_BROWSER_TIMEOUT_SECONDS=300"
+
 REM Dynamically include standard Windows binary locations in session PATH
 set "PATH=%ProgramFiles%\nodejs;%LOCALAPPDATA%\Programs\nodejs;%APPDATA%\npm;%LOCALAPPDATA%\pnpm;%LOCALAPPDATA%\Microsoft\WinGet\Links;%ProgramFiles%\ffmpeg\bin;C:\ffmpeg\bin;!PATH!"
 
