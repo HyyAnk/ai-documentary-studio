@@ -218,7 +218,7 @@ export const DirectorEnergySchema = z.enum(["gentle", "curious", "playful", "exc
 export const DirectorVisualDensitySchema = z.enum(["calm", "focused", "lively", "burst"]);
 export const QuizPaletteIdSchema = z.enum(["auto", "lime", "aqua", "sunny", "purple", "pink", "orange", "red", "blue"]);
 export type QuizPaletteId = z.infer<typeof QuizPaletteIdSchema>;
-export const QuizLayoutIdSchema = z.enum(["auto", "media_left_choices_right", "visual_choices_three", "media_top_choices_bottom", "media_center_choices_side"]);
+export const QuizLayoutIdSchema = z.enum(["auto", "media_left_choices_right", "visual_choices_three"]);
 export type QuizLayoutId = z.infer<typeof QuizLayoutIdSchema>;
 export const QuizMotionIdSchema = z.enum([
   "auto",

@@ -57,7 +57,7 @@ describe("Candy Arcade visual template", () => {
   });
 
   it("selects semantic layouts and deterministic readable text tiers", () => {
-    expect(resolveLayout("auto", "illustrated_multiple_choice", "multiple_choice")).toBe("media_top_choices_bottom");
+    expect(resolveLayout("auto", "illustrated_multiple_choice", "multiple_choice")).toBe("media_left_choices_right");
     expect(resolveLayout("auto", "visual_multiple_choice", "image_guess")).toBe("visual_choices_three");
     expect(textLayout("Which ocean is the largest on Earth?", "question").fits).toBe(true);
     expect(textLayout("x".repeat(190), "question").fits).toBe(false);
@@ -153,10 +153,8 @@ describe("Candy Arcade visual template", () => {
     expect(html).not.toContain('<div class="timer-progress"><span class="timer-marker');
     expect(html).toContain("@keyframes quiz-timer-marker-slide");
     expect(html).toContain("layout-media_left_choices_right .game-stage");
-    expect(html).toContain("layout-media_top_choices_bottom .game-stage");
     expect(html).toContain("<strong class=\"keyword-highlight\">");
     expect(candyArcadeHeroAreaRatio("media_left_choices_right")).toBeGreaterThan(.2);
-    expect(candyArcadeHeroAreaRatio("media_top_choices_bottom", "choices")).toBeGreaterThan(.3);
     expect(html).toContain("transition-bubble_splash");
     expect(html).toContain("splash-brand");
     expect(html).toContain(".decor-7 { left: 30%; top: 8%;");

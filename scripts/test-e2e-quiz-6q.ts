@@ -123,12 +123,12 @@ function seed6Questions(episodeId: string): Scene[] {
 function create6QuestionDirector(quiz: QuizV2) {
   const plan = createDefaultDirectorPlan(quiz);
   const specs = [
-    { archetype: "illustrated_multiple_choice" as const, palette_id: "blue" as const, layout_id: "media_top_choices_bottom" as const, motion_id: "enter.pop" as const },
+    { archetype: "illustrated_multiple_choice" as const, palette_id: "blue" as const, layout_id: "media_left_choices_right" as const, motion_id: "enter.pop" as const },
     { archetype: "visual_multiple_choice" as const, palette_id: "lime" as const, layout_id: "visual_choices_three" as const, motion_id: "enter.slideUp" as const },
-    { archetype: "illustrated_multiple_choice" as const, palette_id: "purple" as const, layout_id: "media_top_choices_bottom" as const, motion_id: "enter.scale" as const },
+    { archetype: "illustrated_multiple_choice" as const, palette_id: "purple" as const, layout_id: "media_left_choices_right" as const, motion_id: "enter.scale" as const },
     { archetype: "visual_multiple_choice" as const, palette_id: "sunny" as const, layout_id: "visual_choices_three" as const, motion_id: "enter.pop" as const },
-    { archetype: "illustrated_multiple_choice" as const, palette_id: "pink" as const, layout_id: "media_top_choices_bottom" as const, motion_id: "enter.slideUp" as const },
-    { archetype: "final_challenge" as const, palette_id: "aqua" as const, layout_id: "media_center_choices_side" as const, motion_id: "enter.scale" as const },
+    { archetype: "illustrated_multiple_choice" as const, palette_id: "pink" as const, layout_id: "media_left_choices_right" as const, motion_id: "enter.slideUp" as const },
+    { archetype: "final_challenge" as const, palette_id: "aqua" as const, layout_id: "media_left_choices_right" as const, motion_id: "enter.scale" as const },
   ];
   plan.beats = plan.beats.map((beat, index) => ({
     ...beat,

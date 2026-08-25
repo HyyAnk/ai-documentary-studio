@@ -24,7 +24,7 @@ export function createDefaultDirectorPlan(quiz: QuizV2): DirectorPlan {
       energy: isFinal ? "triumphant" : isMidpoint ? "excited" : index % 2 ? "playful" : "curious",
       visual_density: isFinal ? "burst" : index % 2 ? "lively" : "focused",
       palette_id: (["lime", "aqua", "sunny", "purple", "pink", "orange", "red", "blue"] as const)[index % 8],
-      layout_id: archetype === "visual_multiple_choice" ? "visual_choices_three" : archetype === "illustrated_multiple_choice" ? "media_top_choices_bottom" : "media_left_choices_right",
+      layout_id: archetype === "visual_multiple_choice" ? "visual_choices_three" : "media_left_choices_right",
       motion_id: (["enter.pop", "enter.slideUp", "enter.scale"] as const)[index % 3],
       transition_id: isFinal ? "lightning_brush" : "bubble_splash",
       thinking_seconds: minimumThinking[quiz.age_band] + (isFinal ? .6 : 0),

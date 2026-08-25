@@ -29,19 +29,17 @@ type Phase = "question" | "choices" | "think" | "countdown" | "reveal" | "explai
 export const CANDY_ARCADE_LAYOUT_DIMENSIONS = {
   baseline: { width: 800, height: 284 },
   media_left_choices_right: { width: 840, height: 580 },
-  media_top_choices_bottom: { width: 1500, height: 500, thinkHeight: 360 },
   visual_choices_three: { width: 501, height: 372, count: 3 },
 } as const;
 
-export function candyArcadeHeroAreaRatio(layout: keyof typeof CANDY_ARCADE_LAYOUT_DIMENSIONS, phase: Phase = "think"): number {
+export function candyArcadeHeroAreaRatio(layout: keyof typeof CANDY_ARCADE_LAYOUT_DIMENSIONS): number {
   const frameArea = 1920 * 1080;
   if (layout === "visual_choices_three") {
     const dimensions = CANDY_ARCADE_LAYOUT_DIMENSIONS.visual_choices_three;
     return Number(((dimensions.width * dimensions.height * dimensions.count) / frameArea).toFixed(4));
   }
   const dimensions = CANDY_ARCADE_LAYOUT_DIMENSIONS[layout];
-  const height = layout === "media_top_choices_bottom" && (phase === "think" || phase === "explain") ? CANDY_ARCADE_LAYOUT_DIMENSIONS.media_top_choices_bottom.thinkHeight : dimensions.height;
-  return Number(((dimensions.width * height) / frameArea).toFixed(4));
+  return Number(((dimensions.width * dimensions.height) / frameArea).toFixed(4));
 }
 
 export function buildCandyArcadeComposition(input: CandyArcadeCompositionInput): string {
@@ -454,16 +452,6 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .layout-media_left_choices_right .game-stage > .hero-image { grid-area: hero; width: 100%; height: 380px; margin-top: 0; }
 .layout-media_left_choices_right .answer-grid { grid-area: answers; grid-template-columns: 1fr; width: 100%; margin-top: 0; gap: 14px; }
 .layout-media_left_choices_right .answer-card { min-height: 102px; padding: 14px 22px 14px 16px; font-size: 28px; }
-.layout-media_center_choices_side .game-stage { grid-template-columns: minmax(0, 1.08fr) minmax(520px, .92fr); grid-template-areas: "title title" "hero answers"; align-items: start; column-gap: 42px; row-gap: 22px; }
-.layout-media_center_choices_side .question-title { grid-area: title; width: 100%; }
-.layout-media_center_choices_side .game-stage > .hero-image { grid-area: hero; width: 100%; height: 380px; margin-top: 0; }
-.layout-media_center_choices_side .answer-grid { grid-area: answers; grid-template-columns: 1fr; width: 100%; margin-top: 0; gap: 14px; }
-.layout-media_center_choices_side .answer-card { min-height: 102px; padding: 14px 22px 14px 16px; font-size: 28px; }
-.layout-media_top_choices_bottom .game-stage { grid-template-columns: 1fr; grid-template-areas: "title" "hero" "answers"; align-items: center; row-gap: 20px; }
-.layout-media_top_choices_bottom .question-title { grid-area: title; width: 100%; }
-.layout-media_top_choices_bottom .game-stage > .hero-image { grid-area: hero; width: 720px; height: 230px; margin-top: 0; }
-.layout-media_top_choices_bottom .answer-grid { grid-area: answers; width: 1540px; margin-top: 0; gap: 14px; }
-.layout-media_top_choices_bottom .answer-card { min-height: 86px; padding: 10px 18px 10px 16px; font-size: 26px; }
 .layout-visual_choices_three .game-stage { grid-template-columns: 1fr; grid-template-areas: "title" "answers"; align-items: start; row-gap: 20px; }
 .layout-visual_choices_three .question-title { grid-area: title; width: 100%; }
 .layout-visual_choices_three .visual-answer-grid { grid-area: answers; width: 1540px; margin-top: 0; gap: 24px; }
@@ -535,7 +523,6 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .is-final-scene .question-card-inner { border-color: #FF708A; box-shadow: inset 0 4px 0 rgba(255,255,255,0.95), inset 0 8px 0 rgba(255,182,193,0.35), inset 0 -5px 0 rgba(230,60,90,0.25), 0 16px 0 rgba(230,60,90,0.32), 0 26px 42px rgba(10,25,60,0.2); }
 .quiz-question-clip .question-title { animation: question-card-enter 0.52s cubic-bezier(0.18, 1.42, 0.34, 1) var(--clip-start) both, question-card-float 4.2s ease-in-out calc(var(--clip-start) + 0.52s) infinite alternate both; }
 .layout-media_left_choices_right.quiz-question-clip .hero-image { animation: enter-from-left .66s cubic-bezier(.22,.8,.3,1) var(--clip-start) both, hero-float var(--scene-duration) ease-in-out calc(var(--clip-start) + .66s) 1 alternate both; }
-.layout-media_top_choices_bottom.quiz-question-clip .hero-image { animation: enter-from-right .66s cubic-bezier(.22,.8,.3,1) var(--clip-start) both, hero-float var(--scene-duration) ease-in-out calc(var(--clip-start) + .66s) 1 alternate both; }
 .candy-transition { position: absolute; z-index: 10; inset: 0; overflow: hidden; background: transparent; pointer-events: none; }
 .transition-bubble_splash { background: transparent; }
 .splash-bed { position: absolute; inset: 0; background: var(--from); opacity: 0; transform: scale(.96); animation: splash-bed .86s cubic-bezier(.22,.8,.3,1) var(--clip-start) both; }

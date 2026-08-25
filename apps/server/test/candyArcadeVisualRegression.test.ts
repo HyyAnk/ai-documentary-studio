@@ -64,15 +64,12 @@ describe("Candy Arcade visual regression contract", () => {
   it("keeps every resolved hero layout above the old boxed-image area", () => {
     const baseline = candyArcadeHeroAreaRatio("baseline");
     expect(candyArcadeHeroAreaRatio("media_left_choices_right")).toBeGreaterThan(baseline * 2);
-    expect(candyArcadeHeroAreaRatio("media_top_choices_bottom", "choices")).toBeGreaterThan(baseline * 3);
     expect(candyArcadeHeroAreaRatio("visual_choices_three")).toBeGreaterThan(baseline * 2);
   });
 
-  it("emits real selectors for both semantic media layouts and a safe keyword fallback", () => {
+  it("emits real selectors for semantic media layouts and a safe keyword fallback", () => {
     const html = renderHtml();
     expect(html).toContain(".layout-media_left_choices_right .game-stage");
-    expect(html).toContain(".layout-media_top_choices_bottom .game-stage");
-    expect(html).toContain(".layout-media_center_choices_side .game-stage");
     expect(html).toContain(".layout-visual_choices_three .visual-answer-grid");
     expect(html).toContain('<strong class="keyword-highlight">ocean</strong>');
     const keywordChecks = [
