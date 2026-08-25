@@ -4357,7 +4357,8 @@ h3 {
 }
 
 .voices-panel,
-.storage-panel {
+.storage-panel,
+.workspace-panel {
   grid-column: 1 / -1;
 }
 

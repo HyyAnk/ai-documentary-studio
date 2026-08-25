@@ -32,6 +32,7 @@ export function ChannelsView({
   narrationWordsPerSecond,
   imageGenerationEnabled,
   imagesPerBundle,
+  simplifyMode = true,
 }: {
   selectedChannel: Channel | null;
   selectedEpisodeId: string | null;
@@ -53,6 +54,7 @@ export function ChannelsView({
   narrationWordsPerSecond: number;
   imageGenerationEnabled: boolean;
   imagesPerBundle: number;
+  simplifyMode?: boolean;
 }) {
   const initialGroup: ChannelGroupId = "quiz";
   const [activeGroup, setActiveGroup] = useState<ChannelGroupId>(initialGroup);
@@ -88,6 +90,7 @@ export function ChannelsView({
         imagesPerBundle={imagesPerBundle}
         onBack={() => openChannel(selectedChannel.channel_id)}
         onNotice={onNotice}
+        simplifyMode={simplifyMode}
       />
     );
   }
@@ -107,6 +110,7 @@ export function ChannelsView({
         onNotice={onNotice}
         onDelete={onDelete}
         openEpisode={openEpisode}
+        simplifyMode={simplifyMode}
       />
     );
   }
@@ -515,6 +519,7 @@ export function ChannelDetail({
   onNotice,
   onDelete,
   openEpisode,
+  simplifyMode = true,
 }: {
   channel: Channel;
   channels: Channel[];
@@ -528,6 +533,7 @@ export function ChannelDetail({
   onNotice: (notice: NonNullable<Notice>) => void;
   onDelete: (channel: Channel) => void;
   openEpisode: (channelId: string, episodeId: string, tab?: string) => void;
+  simplifyMode?: boolean;
 }) {
   const [dna, setDna] = useState<{ content: string; path: string; modified_at: string } | null>(null);
   const [topics, setTopics] = useState<TopicCandidate[]>([]);
@@ -539,14 +545,27 @@ export function ChannelDetail({
   const [confirmingTopicId, setConfirmingTopicId] = useState<string | null>(null);
   const [deleteEpisodeTarget, setDeleteEpisodeTarget] = useState<Episode | null>(null);
   const [loadingChannel, setLoadingChannel] = useState(true);
-  const initialTab = (activeTab === "episodes" || activeTab === "topics" || activeTab === "dna") ? activeTab : "episodes";
+  const initialTab =
+    activeTab === "episodes" || activeTab === "topics" || (activeTab === "dna" && !simplifyMode)
+      ? activeTab
+      : "episodes";
   const [channelTab, setChannelTab] = useState<"episodes" | "topics" | "dna">(initialTab);
 
   useEffect(() => {
-    if (activeTab && (activeTab === "episodes" || activeTab === "topics" || activeTab === "dna") && activeTab !== channelTab) {
+    if (
+      activeTab &&
+      (activeTab === "episodes" || activeTab === "topics" || (activeTab === "dna" && !simplifyMode)) &&
+      activeTab !== channelTab
+    ) {
       setChannelTab(activeTab);
     }
-  }, [activeTab]);
+  }, [activeTab, simplifyMode, channelTab]);
+
+  useEffect(() => {
+    if (simplifyMode && channelTab === "dna") {
+      setChannelTab("episodes");
+    }
+  }, [simplifyMode, channelTab]);
 
   const switchTab = (tab: "episodes" | "topics" | "dna") => {
     setChannelTab(tab);
@@ -706,16 +725,18 @@ export function ChannelDetail({
             <span>Idea Lab & Topics</span>
             <small>{topics.length}</small>
           </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={channelTab === "dna"}
-            className={`channel-group-tab ${channelTab === "dna" ? "is-selected" : ""}`}
-            onClick={() => switchTab("dna")}
-          >
-            <FileText size={18} weight={channelTab === "dna" ? "fill" : "regular"} />
-            <span>Channel DNA & Identity</span>
-          </button>
+          {!simplifyMode ? (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={channelTab === "dna"}
+              className={`channel-group-tab ${channelTab === "dna" ? "is-selected" : ""}`}
+              onClick={() => switchTab("dna")}
+            >
+              <FileText size={18} weight={channelTab === "dna" ? "fill" : "regular"} />
+              <span>Channel DNA & Identity</span>
+            </button>
+          ) : null}
         </div>
 
         {/* Tab 1: Episodes */}
@@ -837,7 +858,7 @@ export function ChannelDetail({
         ) : null}
 
         {/* Tab 3: Channel DNA & Identity */}
-        {channelTab === "dna" ? (
+        {channelTab === "dna" && !simplifyMode ? (
           <div className="detail-grid" style={{ marginTop: "12px" }}>
             <section className={`panel dna-panel ${showDna ? "is-open" : ""}`}>
               <div className="panel-heading">

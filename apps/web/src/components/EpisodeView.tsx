@@ -50,6 +50,7 @@ export function EpisodeDetail({
   imagesPerBundle,
   onBack,
   onNotice,
+  simplifyMode = true,
 }: {
   channel: Channel;
   episodeId: string;
@@ -66,6 +67,7 @@ export function EpisodeDetail({
   imagesPerBundle: number;
   onBack: () => void;
   onNotice: (notice: NonNullable<Notice>) => void;
+  simplifyMode?: boolean;
 }) {
   const handleEpisodeError = useCallback((error: Error) => onNotice({ tone: "bad", message: error.message }), [onNotice]);
   const state = useEpisode(channel.channel_id, episodeId, handleEpisodeError);
@@ -544,45 +546,47 @@ export function EpisodeDetail({
         )}
       </section>
 
-      {/* 3-Stage Creation Workspace Tabs */}
-      <div className="channel-group-tabs" role="tablist" aria-label="Episode creation workspace" style={{ margin: "24px 0 26px" }}>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={workflowTab === "script"}
-          className={`channel-group-tab ${workflowTab === "script" ? "is-selected" : ""}`}
-          onClick={() => switchWorkflowTab("script")}
-        >
-          <FileText size={17} weight={workflowTab === "script" ? "fill" : "regular"} />
-          <span>1. Script & Plan</span>
-          {readiness.script ? <CheckCircle size={14} weight="fill" style={{ color: "var(--green)" }} /> : null}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={workflowTab === "visual"}
-          className={`channel-group-tab ${workflowTab === "visual" ? "is-selected" : ""}`}
-          onClick={() => switchWorkflowTab("visual")}
-        >
-          <Image size={17} weight={workflowTab === "visual" ? "fill" : "regular"} />
-          <span>2. Visual & Continuity</span>
-          {bundleImages.length > 0 ? <small>{bundleImages.length}</small> : null}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={workflowTab === "timeline"}
-          className={`channel-group-tab ${workflowTab === "timeline" ? "is-selected" : ""}`}
-          onClick={() => switchWorkflowTab("timeline")}
-        >
-          <FilmSlate size={17} weight={workflowTab === "timeline" ? "fill" : "regular"} />
-          <span>3. Timeline & Shots</span>
-          {scenes.length > 0 ? <small>{scenes.length}</small> : null}
-        </button>
-      </div>
+      {/* 3-Stage Creation Workspace Tabs (Hidden in Simplify Mode) */}
+      {!simplifyMode ? (
+        <div className="channel-group-tabs" role="tablist" aria-label="Episode creation workspace" style={{ margin: "24px 0 26px" }}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workflowTab === "script"}
+            className={`channel-group-tab ${workflowTab === "script" ? "is-selected" : ""}`}
+            onClick={() => switchWorkflowTab("script")}
+          >
+            <FileText size={17} weight={workflowTab === "script" ? "fill" : "regular"} />
+            <span>1. Script & Plan</span>
+            {readiness.script ? <CheckCircle size={14} weight="fill" style={{ color: "var(--green)" }} /> : null}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workflowTab === "visual"}
+            className={`channel-group-tab ${workflowTab === "visual" ? "is-selected" : ""}`}
+            onClick={() => switchWorkflowTab("visual")}
+          >
+            <Image size={17} weight={workflowTab === "visual" ? "fill" : "regular"} />
+            <span>2. Visual & Continuity</span>
+            {bundleImages.length > 0 ? <small>{bundleImages.length}</small> : null}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workflowTab === "timeline"}
+            className={`channel-group-tab ${workflowTab === "timeline" ? "is-selected" : ""}`}
+            onClick={() => switchWorkflowTab("timeline")}
+          >
+            <FilmSlate size={17} weight={workflowTab === "timeline" ? "fill" : "regular"} />
+            <span>3. Timeline & Shots</span>
+            {scenes.length > 0 ? <small>{scenes.length}</small> : null}
+          </button>
+        </div>
+      ) : null}
 
       {/* Stage 1: Script & Plan */}
-      {workflowTab === "script" ? (
+      {workflowTab === "script" && !simplifyMode ? (
         <div className="artifact-stack">
           {artifactConfig
             .filter((c) => c.filename !== "visual_bible.md")
@@ -609,7 +613,7 @@ export function EpisodeDetail({
       ) : null}
 
       {/* Stage 2: Visual & Continuity */}
-      {workflowTab === "visual" ? (
+      {workflowTab === "visual" && !simplifyMode ? (
         <div>
           {(() => {
             const config = artifactConfig.find((c) => c.filename === "visual_bible.md")!;
@@ -653,7 +657,7 @@ export function EpisodeDetail({
       ) : null}
 
       {/* Stage 3: Timeline & Shot Plan */}
-      {workflowTab === "timeline" ? (
+      {workflowTab === "timeline" && !simplifyMode ? (
         <section className="shot-plan-section">
           <div className="section-heading scene-heading" style={{ marginTop: "12px" }}>
             <div>

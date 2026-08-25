@@ -35,10 +35,20 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [stopped, setStopped] = useState(false);
   const [theme, setTheme] = useState<Theme>(() => window.localStorage.getItem("studio-theme") === "light" ? "light" : "dark");
+  const [simplifyMode, setSimplifyMode] = useState<boolean>(() => {
+    const saved = window.localStorage.getItem("studio-simplify-mode");
+    if (saved === null) return true;
+    return saved !== "false";
+  });
   const [imageBalance, setImageBalance] = useState<{ balance_vnd: number; rpm?: number } | null>(null);
   const [loadingBalance, setLoadingBalance] = useState(false);
   const [balanceError, setBalanceError] = useState<string | null>(null);
   const { channels, setChannels, refresh: refreshChannels } = useChannels();
+
+  const handleSimplifyToggle = (enabled: boolean) => {
+    setSimplifyMode(enabled);
+    window.localStorage.setItem("studio-simplify-mode", String(enabled));
+  };
   const handleTerminalTask = useCallback((task: Task) => {
     if (task.status === "COMPLETED") setNotice({ tone: "good", message: `${formatTaskType(task.task_type)} completed` });
     else if (task.status === "FAILED") setNotice({ tone: "bad", message: task.error || `${formatTaskType(task.task_type)} failed` });
@@ -293,6 +303,7 @@ export function App() {
             narrationWordsPerSecond={appConfig?.video_generation.narration_words_per_second ?? 2.3}
             imageGenerationEnabled={appConfig?.image_generation?.enabled ?? true}
             imagesPerBundle={appConfig?.image_generation?.images_per_bundle ?? 1}
+            simplifyMode={simplifyMode}
           />
         ) : null}
         {!loading && page === "tasks" ? <TasksView tasks={tasks} now={taskClock} onRefresh={refresh} onNotice={setNotice} /> : null}
@@ -319,6 +330,8 @@ export function App() {
             }}
             onChannelUpdated={(channel) => setChannels((current) => current.map((item) => item.channel_id === channel.channel_id ? channel : item))}
             onNotice={setNotice}
+            simplifyMode={simplifyMode}
+            onSimplifyChange={handleSimplifyToggle}
           />
         ) : null}
         <footer className="app-credit">
