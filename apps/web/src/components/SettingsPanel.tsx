@@ -161,6 +161,9 @@ export function SettingsView({
   const [narrationWordsPerSecond, setNarrationWordsPerSecond] = useState(
     appConfig?.video_generation.narration_words_per_second ?? 2.3
   );
+  const [maxConcurrentVideoTasks, setMaxConcurrentVideoTasks] = useState(
+    appConfig?.video_generation.max_concurrent_tasks ?? 2
+  );
   const [imageEnabled, setImageEnabled] = useState(appConfig?.image_generation?.enabled ?? true);
   const [imagesPerBundle, setImagesPerBundle] = useState(appConfig?.image_generation?.images_per_bundle ?? 1);
   const [imageModel, setImageModel] = useState(appConfig?.image_generation?.model ?? "gpt-image-2");
@@ -242,6 +245,7 @@ export function SettingsView({
     if (video) {
       setMaxSceneDuration(video.max_scene_duration_seconds ?? 8);
       setNarrationWordsPerSecond(video.narration_words_per_second ?? 2.3);
+      setMaxConcurrentVideoTasks(video.max_concurrent_tasks ?? 2);
     }
     if (appConfig?.image_generation) {
       setImageEnabled(appConfig.image_generation.enabled);
@@ -376,9 +380,10 @@ export function SettingsView({
       const next = await api.saveVideoSettings({
         max_scene_duration_seconds: maxSceneDuration,
         narration_words_per_second: narrationWordsPerSecond,
+        max_concurrent_tasks: maxConcurrentVideoTasks,
       });
       await onVideoSaved(next.video_generation);
-      onNotice({ tone: "good", message: "Video timing settings saved locally" });
+      onNotice({ tone: "good", message: "Video settings saved locally" });
     } catch (error) {
       onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Could not save video settings" });
     } finally {
@@ -1029,7 +1034,23 @@ export function SettingsView({
             </div>
             <StatusLine label="Max scene duration" value={`${maxDuration}s`} />
             <StatusLine label="Estimated speaking pace" value={`~${estimatedWpm} words/min`} />
+            <StatusLine label="Max concurrent episode builds" value={`${maxConcurrentVideoTasks} episodes`} />
             <form className="codex-form" onSubmit={(event) => void saveVideo(event)}>
+              <label>
+                Parallel Episode Builds (Queue Limit)
+                <select
+                  value={maxConcurrentVideoTasks}
+                  onChange={(event) => setMaxConcurrentVideoTasks(Number(event.target.value))}
+                >
+                  <option value="1">1 episode (Tuần tự / Tiết kiệm tài nguyên)</option>
+                  <option value="2">2 episodes (Mặc định - Khuyến nghị cho 32GB RAM)</option>
+                  <option value="3">3 episodes</option>
+                  <option value="4">4 episodes</option>
+                </select>
+                <small className="field-help">
+                  Số lượng Episode / Video build tối đa chạy đồng thời. Các Episode vượt quá giới hạn này sẽ tự động được xếp vào Hàng chờ (Queue) và hiển thị ở panel bên trái.
+                </small>
+              </label>
               <label>
                 Max Scene Duration (seconds)
                 <input

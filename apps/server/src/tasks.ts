@@ -74,6 +74,8 @@ type RenderCheckpoint = {
 const channelTaskTypes = new Set<TaskType>(["GENERATE_DNA", "SUGGEST_TOPICS"]);
 const audioTaskTypes = new Set<TaskType>(["GENERATE_AUDIO", "GENERATE_NARRATION"]);
 const imageTaskTypes = new Set<TaskType>(["GENERATE_BUNDLE_IMAGE"]);
+const videoTaskTypes = new Set<TaskType>(["GENERATE_VIDEO"]);
+const pipelineTaskTypes = new Set<TaskType>(["GENERATE_PIPELINE"]);
 const execFileAsync = promisify(execFile);
 const npxCommand = process.platform === "win32" ? process.execPath : "npx";
 const quizRenderer = new HyperframesRenderer();
@@ -91,6 +93,8 @@ export class TaskManager extends EventEmitter {
   private runningCount = 0;
   private runningAudioCount = 0;
   private runningImageCount = 0;
+  private runningVideoCount = 0;
+  private runningPipelineCount = 0;
   private readonly activeAudio = new Set<string>();
   private audioConfig: AppConfig["audio_generation"];
   private imageConfig: AppConfig["image_generation"];
@@ -183,21 +187,28 @@ export class TaskManager extends EventEmitter {
     this.activeImageControllers.clear();
     this.approvalRequests.clear();
     this.locks.clear();
+    this.runningCount = 0;
+    this.runningAudioCount = 0;
     this.runningImageCount = 0;
+    this.runningVideoCount = 0;
+    this.runningPipelineCount = 0;
     this.connectionStatus = this.codex.isConnected ? "connected" : "disconnected";
     await this.load();
   }
 
   updateAudioConfig(config: AppConfig["audio_generation"]): void {
     this.audioConfig = config;
+    void this.pump();
   }
 
   updateVideoConfig(config: AppConfig["video_generation"]): void {
     this.videoConfig = config;
+    void this.pump();
   }
 
   updateImageConfig(config: AppConfig["image_generation"]): void {
     this.imageConfig = config;
+    void this.pump();
   }
 
   updateCodexConfig(config: AppConfig["codex"]): void {
@@ -243,7 +254,16 @@ export class TaskManager extends EventEmitter {
   }
 
   hasActiveWork(): boolean {
-    return this.active.size > 0 || this.activeAudio.size > 0 || this.activeImageControllers.size > 0 || this.pipelineRuns.size > 0 || this.runningCount > 0 || this.runningAudioCount > 0 || this.runningImageCount > 0 || this.list().some((task) => ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(task.status));
+    return this.active.size > 0 ||
+      this.activeAudio.size > 0 ||
+      this.activeImageControllers.size > 0 ||
+      this.pipelineRuns.size > 0 ||
+      this.runningCount > 0 ||
+      this.runningAudioCount > 0 ||
+      this.runningImageCount > 0 ||
+      this.runningVideoCount > 0 ||
+      this.runningPipelineCount > 0 ||
+      this.list().some((task) => ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(task.status));
   }
 
   submit(taskType: TaskType, channelId: string, episodeId: string | null, sceneNumber?: number, requestedImageVariant?: number): Task {
@@ -350,15 +370,47 @@ export class TaskManager extends EventEmitter {
   }
 
   private async pump(): Promise<void> {
-    while (this.runningCount < this.maxConcurrent) {
-      const next = this.list().reverse().find((task) => task.status === "QUEUED" && !audioTaskTypes.has(task.task_type) && !imageTaskTypes.has(task.task_type) && !this.locks.has(task.lock_key));
+    const maxVideoConcurrent = this.videoConfig.max_concurrent_tasks ?? 2;
+
+    while (this.runningVideoCount < maxVideoConcurrent) {
+      const next = this.list().reverse().find((task) => task.status === "QUEUED" && task.task_type === "GENERATE_VIDEO" && !this.locks.has(task.lock_key));
       if (!next) break;
       this.locks.add(next.lock_key);
-      const isPipeline = next.task_type === "GENERATE_PIPELINE";
-      if (!isPipeline) this.runningCount += 1;
+      this.runningVideoCount += 1;
       void this.run(next).finally(() => {
         this.locks.delete(next.lock_key);
-        if (!isPipeline) this.runningCount -= 1;
+        this.runningVideoCount -= 1;
+        void this.pump();
+      });
+    }
+
+    while (this.runningPipelineCount < maxVideoConcurrent) {
+      const next = this.list().reverse().find((task) => task.status === "QUEUED" && task.task_type === "GENERATE_PIPELINE" && !this.locks.has(task.lock_key));
+      if (!next) break;
+      this.locks.add(next.lock_key);
+      this.runningPipelineCount += 1;
+      void this.run(next).finally(() => {
+        this.locks.delete(next.lock_key);
+        this.runningPipelineCount -= 1;
+        void this.pump();
+      });
+    }
+
+    while (this.runningCount < this.maxConcurrent) {
+      const next = this.list().reverse().find((task) =>
+        task.status === "QUEUED" &&
+        !audioTaskTypes.has(task.task_type) &&
+        !imageTaskTypes.has(task.task_type) &&
+        !videoTaskTypes.has(task.task_type) &&
+        !pipelineTaskTypes.has(task.task_type) &&
+        !this.locks.has(task.lock_key)
+      );
+      if (!next) break;
+      this.locks.add(next.lock_key);
+      this.runningCount += 1;
+      void this.run(next).finally(() => {
+        this.locks.delete(next.lock_key);
+        this.runningCount -= 1;
         void this.pump();
       });
     }

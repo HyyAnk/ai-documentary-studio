@@ -220,6 +220,18 @@ export function App() {
         page={page}
         setPage={navigate}
         activeTaskCount={activeTasks.length}
+        tasks={tasks}
+        channels={channels}
+        onCancelTask={async (taskId) => {
+          try {
+            await api.cancelTask(taskId);
+            setNotice({ tone: "good", message: "Task đã được hủy khỏi hàng chờ" });
+            await refreshTasks();
+          } catch (err) {
+            setNotice({ tone: "bad", message: err instanceof Error ? err.message : "Không thể hủy task" });
+          }
+        }}
+        onOpenEpisode={openEpisode}
         balanceInfo={imageBalance}
         loadingBalance={loadingBalance}
         balanceError={balanceError}
@@ -267,7 +279,7 @@ export function App() {
           }}
           onShutdown={() => void stopDashboard()}
         />
-        <TaskActivityBar tasks={activeTasks} realtimeStatus={realtimeStatus} now={taskClock} onOpenTasks={() => navigate("tasks")} />
+        <TaskActivityBar tasks={activeTasks} realtimeStatus={realtimeStatus} now={taskClock} onOpenTasks={() => navigate("tasks")} onOpenEpisode={openEpisode} />
         {loading ? <LoadingState /> : page === "dashboard" ? (
           <DashboardView
             channels={channels}
@@ -306,7 +318,16 @@ export function App() {
             simplifyMode={simplifyMode}
           />
         ) : null}
-        {!loading && page === "tasks" ? <TasksView tasks={tasks} now={taskClock} onRefresh={refresh} onNotice={setNotice} /> : null}
+        {!loading && page === "tasks" ? (
+          <TasksView
+            tasks={tasks}
+            channels={channels}
+            now={taskClock}
+            onRefresh={refresh}
+            onNotice={setNotice}
+            onOpenEpisode={openEpisode}
+          />
+        ) : null}
         {!loading && page === "settings" ? (
           <SettingsView
             channels={channels}

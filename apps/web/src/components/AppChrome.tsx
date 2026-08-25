@@ -1,12 +1,121 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowClockwise, Broadcast, CaretDown, Check, CheckCircle, CircleNotch, FileText, Gear, House, Image, ListChecks, MoonStars, SpeakerHigh, Sparkle, Sun, TerminalWindow, VideoCamera, Wallet, WarningCircle, X } from "@phosphor-icons/react";
-import type { Channel, CodexSettingsResponse } from "@studio/shared";
+import { ArrowClockwise, Broadcast, CaretDown, Check, CheckCircle, CircleNotch, FileText, Gear, House, Image, ListChecks, MoonStars, Queue, SpeakerHigh, Sparkle, Sun, TerminalWindow, VideoCamera, Wallet, WarningCircle, X } from "@phosphor-icons/react";
+import type { Channel, CodexSettingsResponse, Task } from "@studio/shared";
 import type { GitInfo, Notice, Page, Theme } from "./types";
+import { formatTaskType } from "../lib/utils";
+
+export function SidebarQueueWidget({
+  tasks = [],
+  channels = [],
+  onCancelTask,
+  onOpenTasks,
+  onOpenEpisode,
+}: {
+  tasks?: Task[];
+  channels?: Channel[];
+  onCancelTask?: (taskId: string) => void | Promise<void>;
+  onOpenTasks?: () => void;
+  onOpenEpisode?: (channelId: string, episodeId: string) => void;
+}) {
+  const queuedTasks = tasks.filter((task) => task.status === "QUEUED").reverse();
+  const runningTasks = tasks.filter((task) => task.status === "RUNNING");
+  const channelMap = new Map(channels.map((c) => [c.channel_id, c.display_name]));
+
+  const formatEpisodeLabel = (channelId: string, episodeId: string | null) => {
+    const chName = channelMap.get(channelId) || "Channel";
+    if (!episodeId) return chName;
+    return `${chName} · EP ${episodeId.slice(-4).toUpperCase()}`;
+  };
+
+  return (
+    <div className="sidebar-queue-widget" title="Danh sách tác vụ đang xếp hàng chờ">
+      <div className="sidebar-queue-header" onClick={onOpenTasks} style={{ cursor: "pointer" }}>
+        <div className="sidebar-queue-title">
+          <Queue size={14} weight="duotone" />
+          <span>Hàng chờ</span>
+        </div>
+        <div className="sidebar-queue-badges">
+          {runningTasks.length > 0 ? (
+            <span className="queue-badge running" title={`${runningTasks.length} tác vụ đang chạy`}>
+              <CircleNotch size={10} className="spin" />
+              <span>{runningTasks.length}</span>
+            </span>
+          ) : null}
+          {queuedTasks.length > 0 ? (
+            <span className="queue-badge queued" title={`${queuedTasks.length} tác vụ trong hàng chờ`}>
+              {queuedTasks.length} chờ
+            </span>
+          ) : runningTasks.length === 0 ? (
+            <span className="queue-badge empty">Trống</span>
+          ) : null}
+        </div>
+      </div>
+
+      {queuedTasks.length > 0 ? (
+        <div className="sidebar-queue-list">
+          {queuedTasks.map((task, index) => (
+            <div
+              key={task.task_id}
+              className="sidebar-queue-item"
+              title={`${formatTaskType(task.task_type)} - ${task.progress_message || "Đang xếp hàng chờ"}`}
+              onClick={() => {
+                if (task.channel_id && task.episode_id && onOpenEpisode) {
+                  onOpenEpisode(task.channel_id, task.episode_id);
+                } else if (onOpenTasks) {
+                  onOpenTasks();
+                }
+              }}
+            >
+              <div className="sidebar-queue-item-left">
+                <span className="sidebar-queue-pos">#{index + 1}</span>
+                <div className="sidebar-queue-info">
+                  <strong className="sidebar-queue-name">
+                    {formatEpisodeLabel(task.channel_id, task.episode_id)}
+                  </strong>
+                  <span className="sidebar-queue-type">
+                    {formatTaskType(task.task_type)}
+                  </span>
+                </div>
+              </div>
+              {onCancelTask ? (
+                <button
+                  type="button"
+                  className="sidebar-queue-cancel-btn"
+                  title="Hủy tác vụ khỏi hàng chờ"
+                  aria-label="Hủy tác vụ"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void onCancelTask(task.task_id);
+                  }}
+                >
+                  <X size={12} />
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : runningTasks.length > 0 ? (
+        <div className="sidebar-queue-running-hint" onClick={onOpenTasks} style={{ cursor: "pointer" }}>
+          <span className="status-pulse-dot" />
+          <span>{runningTasks.length} tác vụ đang chạy · 0 chờ</span>
+        </div>
+      ) : (
+        <div className="sidebar-queue-empty" onClick={onOpenTasks} style={{ cursor: "pointer" }}>
+          <span>Không có hàng chờ</span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Sidebar({
   page,
   setPage,
   activeTaskCount,
+  tasks = [],
+  channels = [],
+  onCancelTask,
+  onOpenEpisode,
   balanceInfo,
   loadingBalance = false,
   balanceError = null,
@@ -16,6 +125,10 @@ export function Sidebar({
   page: Page;
   setPage: (page: Page) => void;
   activeTaskCount: number;
+  tasks?: Task[];
+  channels?: Channel[];
+  onCancelTask?: (taskId: string) => void | Promise<void>;
+  onOpenEpisode?: (channelId: string, episodeId: string) => void;
   balanceInfo?: { balance_vnd: number; rpm?: number } | null;
   loadingBalance?: boolean;
   balanceError?: string | null;
@@ -63,6 +176,14 @@ export function Sidebar({
         </button>
       </nav>
       <div className="sidebar-bottom">
+        <SidebarQueueWidget
+          tasks={tasks}
+          channels={channels}
+          onCancelTask={onCancelTask}
+          onOpenTasks={() => setPage("tasks")}
+          onOpenEpisode={onOpenEpisode}
+        />
+
         <div
           className="sidebar-balance-widget"
           title="gpti2.store Image API balance (Tự động cập nhật mỗi 30s)"

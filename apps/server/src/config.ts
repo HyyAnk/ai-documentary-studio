@@ -29,6 +29,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     default_scene_duration_seconds: 6,
     narration_words_per_second: 2.3,
     aspect_ratio: "16:9",
+    max_concurrent_tasks: 2,
   },
   image_generation: {
     enabled: true,

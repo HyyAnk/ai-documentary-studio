@@ -507,6 +507,67 @@ describe("TaskManager locks", () => {
     expect(task2.accumulated_duration_seconds).toBeLessThanOrEqual(121);
     await waitFor(() => manager.get(task2.task_id).status === "FAILED" || manager.get(task2.task_id).status === "COMPLETED");
   });
+
+  it("enforces video generation concurrency limit (default 2) and queues exceeding tasks", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "documentary-video-concurrency-"));
+    roots.push(root);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await mkdir(path.join(root, "shared"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
+    const repository = new RepositoryService(root);
+    const channel = await repository.createChannel({ name: "Queue Channel", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });
+    const topics = Array.from({ length: 5 }, (_, index) => ({
+      topic_id: `topic_${index}`,
+      channel_id: channel.channel_id,
+      title: `Episode ${index}`,
+      premise: "Premise",
+      why_it_fits: "Fits",
+      hook: "Hook",
+      estimated_potential: "High",
+      generated_at: new Date().toISOString(),
+      selected: false,
+    }));
+    await repository.saveTopicRun(channel.channel_id, topics);
+    const ep1 = await repository.confirmTopic(channel.channel_id, topics[0]!.topic_id);
+    const ep2 = await repository.confirmTopic(channel.channel_id, topics[1]!.topic_id);
+    const ep3 = await repository.confirmTopic(channel.channel_id, topics[2]!.topic_id);
+
+    const logger = new StudioLogger(root);
+    await logger.init();
+    const videoConfig = { ...DEFAULT_CONFIG.video_generation, max_concurrent_tasks: 2 };
+    const manager = new TaskManager(repository, new ContextEngine(repository, logger), new FakeCodex() as never, 3, videoConfig, logger);
+    await manager.load();
+
+    let releaseTasks: () => void = () => undefined;
+    const holdPromise = new Promise<void>((resolve) => { releaseTasks = resolve; });
+    const internals = manager as unknown as {
+      update: (taskId: string, patch: Partial<Task>) => Promise<Task>;
+      finish: (taskId: string, status: string, error?: string | null) => Promise<Task>;
+      runVideoTask: (task: Task) => Promise<void>;
+    };
+    internals.runVideoTask = async (task: Task) => {
+      await internals.update(task.task_id, { status: "RUNNING" });
+      await holdPromise;
+      await internals.finish(task.task_id, "COMPLETED");
+    };
+
+    const task1 = manager.submit("GENERATE_VIDEO", channel.channel_id, ep1.episode_id);
+    const task2 = manager.submit("GENERATE_VIDEO", channel.channel_id, ep2.episode_id);
+    const task3 = manager.submit("GENERATE_VIDEO", channel.channel_id, ep3.episode_id);
+
+    // Wait a brief tick for task1 and task2 to enter RUNNING
+    await waitFor(() => manager.get(task1.task_id).status === "RUNNING" && manager.get(task2.task_id).status === "RUNNING");
+
+    // task3 should be held in QUEUED because max_concurrent_tasks is 2
+    expect(manager.get(task3.task_id).status).toBe("QUEUED");
+
+    // Release active tasks
+    releaseTasks();
+
+    // Now task3 should be picked and transition to RUNNING
+    await waitFor(() => manager.get(task3.task_id).status === "RUNNING" || manager.get(task3.task_id).status === "COMPLETED");
+  });
 });
 
 async function waitFor(predicate: () => boolean): Promise<void> {

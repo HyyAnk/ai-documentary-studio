@@ -626,6 +626,7 @@ export const AppConfigSchema = z.object({
     default_scene_duration_seconds: z.number().positive().default(6),
     narration_words_per_second: z.number().positive().default(2.3),
     aspect_ratio: z.string().default("16:9"),
+    max_concurrent_tasks: z.number().int().min(1).max(10).default(2),
   }),
   image_generation: z.object({
     enabled: z.boolean().default(true),
@@ -722,6 +723,7 @@ export type AudioSettingsInput = z.infer<typeof AudioSettingsInputSchema>;
 export const VideoSettingsInputSchema = z.object({
   max_scene_duration_seconds: z.number().positive().max(120).optional(),
   narration_words_per_second: z.number().positive().max(20).optional(),
+  max_concurrent_tasks: z.number().int().min(1).max(10).optional(),
 });
 export type VideoSettingsInput = z.infer<typeof VideoSettingsInputSchema>;
 
