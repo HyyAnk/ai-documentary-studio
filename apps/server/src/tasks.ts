@@ -707,17 +707,17 @@ export class TaskManager extends EventEmitter {
     };
     try {
       await this.update(task.task_id, { status: "RUNNING", started_at: nowIso(), queue_position: null, progress_message: "Starting production pipeline", progress_percent: 0 });
-      const researchChanged = await step("Research · verifying sources", 5, "GENERATE_RESEARCH", async () => !(await this.hasReadyArtifact(task.channel_id, episodeId, "research.md")));
-      const treatmentChanged = await step("Treatment · structuring the story", 20, "GENERATE_TREATMENT", async () => !(await this.hasReadyArtifact(task.channel_id, episodeId, "treatment.md")));
-      const scriptChanged = await step("Narration script · writing the argument", 35, "GENERATE_SCRIPT", async () => !(await this.hasReadyScript(task.channel_id, episodeId)));
-      const visualBibleChanged = await step("Visual bible · locking continuity", 50, "GENERATE_VISUAL_BIBLE", async () => !(await this.hasReadyArtifact(task.channel_id, episodeId, "visual_bible.md")));
+      const researchChanged = await step("Research · verifying sources", 3, "GENERATE_RESEARCH", async () => !(await this.hasReadyArtifact(task.channel_id, episodeId, "research.md")));
+      const treatmentChanged = await step("Treatment · structuring the story", 6, "GENERATE_TREATMENT", async () => !(await this.hasReadyArtifact(task.channel_id, episodeId, "treatment.md")));
+      const scriptChanged = await step("Narration script · writing the argument", 12, "GENERATE_SCRIPT", async () => !(await this.hasReadyScript(task.channel_id, episodeId)));
+      const visualBibleChanged = await step("Visual bible · locking continuity", 18, "GENERATE_VISUAL_BIBLE", async () => !(await this.hasReadyArtifact(task.channel_id, episodeId, "visual_bible.md")));
       const upstreamChanged = researchChanged || treatmentChanged || scriptChanged || visualBibleChanged;
 
       const scenes = await this.repository.readScenes(task.channel_id, episodeId);
       if (run.cancelled) throw new Error("Pipeline cancelled");
       const shotPlanFresh = await this.isShotPlanFresh(task.channel_id, episodeId);
       const regenerateShots = scenes.length === 0 || upstreamChanged || !shotPlanFresh;
-      await this.update(task.task_id, { progress_message: regenerateShots ? "Shot plan · generating sequences" : "Shot plan · already ready", progress_percent: 65 });
+      await this.update(task.task_id, { progress_message: regenerateShots ? "Shot plan · generating sequences" : "Shot plan · already ready", progress_percent: 25 });
       if (regenerateShots) {
         const script = await this.repository.getEpisodeFile(task.channel_id, episodeId, "script.md");
         const sections = extractNarrationSections(script.content);
@@ -726,7 +726,7 @@ export class TaskManager extends EventEmitter {
         const existingDrafts = await this.repository.readSequenceDrafts(episodeId);
         const resumePlan = planSequenceResume(sections.length, existingDrafts, script.modified_at, upstreamChanged);
         if (resumePlan.shouldClearDrafts) await this.repository.clearSequenceDrafts(episodeId);
-        await this.update(task.task_id, { progress_message: resumePlan.reusedSequenceNumbers.length ? `Shot plan · resuming ${resumePlan.reusedSequenceNumbers.length}/${sections.length} completed sequences` : "Shot plan · generating sequences", progress_percent: 65 });
+        await this.update(task.task_id, { progress_message: resumePlan.reusedSequenceNumbers.length ? `Shot plan · resuming ${resumePlan.reusedSequenceNumbers.length}/${sections.length} completed sequences` : "Shot plan · generating sequences", progress_percent: 25 });
         if (resumePlan.pendingSequenceNumbers.length === 0) {
           const committed = await this.repository.commitSequenceDrafts(task.channel_id, episodeId, sections.length);
           if (!committed) throw new Error("Shot plan failed: completed sequence drafts could not be committed");
@@ -931,9 +931,9 @@ export class TaskManager extends EventEmitter {
       const checkpoint = await readRenderCheckpoint(checkpointPath);
       const layoutReady = checkpoint?.source_fingerprint === sourceFingerprint && checkpoint.check.status === "passed";
       if (layoutReady) {
-        await this.update(task.task_id, { progress_message: "Video · layout and media checks already passed", progress_percent: 20 });
+        await this.update(task.task_id, { progress_message: "Video · layout and media checks already passed", progress_percent: 58 });
       } else {
-        await this.update(task.task_id, { progress_message: "Video · checking layout and media", progress_percent: 20 });
+        await this.update(task.task_id, { progress_message: "Video · checking layout and media", progress_percent: 58 });
         let checkOutput: string = "";
         const maxCheckAttempts = 2;
         const checkTimeoutMs = Number(process.env.PRODUCER_PAGE_NAVIGATION_TIMEOUT_MS || "300000");
@@ -954,7 +954,7 @@ export class TaskManager extends EventEmitter {
             const failure = error as Error & { stdout?: string };
             const errorReport = parseHyperframesCheckReport(failure.stdout);
             if (attempt < maxCheckAttempts && hasHyperframesContrastIssue(errorReport)) {
-              await this.update(task.task_id, { progress_message: "Video · auto-healing contrast issues...", progress_percent: 22 });
+              await this.update(task.task_id, { progress_message: "Video · auto-healing contrast issues...", progress_percent: 60 });
               await healCompositionContrast(renderRoot, errorReport);
               continue;
             }
@@ -964,7 +964,7 @@ export class TaskManager extends EventEmitter {
           const checkReport = parseHyperframesCheckReport(checkOutput);
           if (hasHyperframesContrastIssue(checkReport)) {
             if (attempt < maxCheckAttempts) {
-              await this.update(task.task_id, { progress_message: "Video · auto-healing contrast issues...", progress_percent: 22 });
+              await this.update(task.task_id, { progress_message: "Video · auto-healing contrast issues...", progress_percent: 60 });
               await healCompositionContrast(renderRoot, checkReport);
               continue;
             }
@@ -981,9 +981,9 @@ export class TaskManager extends EventEmitter {
         reusableRender = !existingProbe.issues.some((issue) => issue.severity === "blocker");
       }
       if (reusableRender) {
-        await this.update(task.task_id, { progress_message: "Video · reusing verified MP4", progress_percent: 75 });
+        await this.update(task.task_id, { progress_message: "Video · reusing verified MP4", progress_percent: 85 });
       } else {
-        await this.update(task.task_id, { progress_message: "Video · rendering MP4 with narration", progress_percent: 45 });
+        await this.update(task.task_id, { progress_message: "Video · rendering MP4 with narration", progress_percent: 65 });
         const browserTimeout = process.env.HYPERFRAMES_BROWSER_TIMEOUT_SECONDS || "300";
         const renderTimeoutMs = Number(process.env.HYPERFRAMES_RENDER_TIMEOUT_MS) || (120 * 60_000);
         const hyperframesEnv = {
@@ -1019,7 +1019,7 @@ export class TaskManager extends EventEmitter {
           }
         );
       }
-      await this.update(task.task_id, { progress_message: "Video · verifying MP4 and audio track", progress_percent: 90 });
+      await this.update(task.task_id, { progress_message: "Video · verifying MP4 and audio track", progress_percent: 95 });
       const probe = await inspectRenderedVideo(outputPath, { width: 1920, height: 1080, fps: this.videoConfig.fps });
       const renderBlocker = probe.issues.find((issue) => issue.severity === "blocker");
       if (renderBlocker) throw new RepositoryError(renderBlocker.message, "QUIZ_RENDER_QA_FAILED");
@@ -1093,18 +1093,18 @@ export class TaskManager extends EventEmitter {
     const missing = bundles.flatMap((bundle) => Array.from({ length: this.imageConfig.images_per_bundle }, (_, variant) => ({ bundle, variant })))
       .filter(({ bundle, variant }) => !reusableImages.has(`${bundle.bundle_id}:${variant}`));
     if (missing.length === 0) {
-      await this.update(task.task_id, { progress_message: "Style anchors · already ready", progress_percent: 58 });
+      await this.update(task.task_id, { progress_message: "Style anchors · already ready", progress_percent: 28 });
       return;
     }
 
-    await this.update(task.task_id, { progress_message: `Style anchors · generating ${missing.length} continuity image${missing.length === 1 ? "" : "s"}`, progress_percent: 58 });
+    await this.update(task.task_id, { progress_message: `Style anchors · generating ${missing.length} continuity image${missing.length === 1 ? "" : "s"}`, progress_percent: 28 });
     const children = missing.map(({ bundle, variant }) => this.submit("GENERATE_BUNDLE_IMAGE", task.channel_id, task.episode_id!, bundle.bundle_number, variant));
     children.forEach((child) => run.children.add(child.task_id));
     try {
       for (const [index, child] of children.entries()) {
         const completed = await this.waitForTaskTerminal(child.task_id, run);
         if (completed.status !== "COMPLETED") throw new Error(`Style anchor ${index + 1}/${children.length} failed: ${completed.error ?? completed.status}`);
-        await this.update(task.task_id, { progress_message: `Style anchors · ${index + 1}/${children.length} ready`, progress_percent: 58 + Math.round(((index + 1) / children.length) * 5) });
+        await this.update(task.task_id, { progress_message: `Style anchors · ${index + 1}/${children.length} ready`, progress_percent: 28 + Math.round(((index + 1) / children.length) * 6) });
       }
     } catch (error) {
       await Promise.all(children.filter((child) => ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(this.get(child.task_id).status)).map((child) => this.cancel(child.task_id).catch(() => undefined)));
@@ -1123,10 +1123,10 @@ export class TaskManager extends EventEmitter {
       activeEngine: this.activeEngine,
       antigravityClient: this.antigravity,
       onAssetProgress: async ({ completed, total, reused }: { completed: number; total: number; reused: boolean }) => {
-        await this.update(task.task_id, { progress_message: `Quiz · resolving assets ${completed}/${total}${reused ? " · reused" : ""}`, progress_percent: 76 + Math.round((completed / Math.max(1, total)) * 4) });
+        await this.update(task.task_id, { progress_message: `Quiz · resolving assets ${completed}/${total}${reused ? " · reused" : ""}`, progress_percent: 36 + Math.round((completed / Math.max(1, total)) * 9) });
       },
       onVoiceProgress: async ({ completed, total, reused }: { completed: number; total: number; reused: boolean }) => {
-        await this.update(task.task_id, { progress_message: `Quiz · ${reused ? "reusing" : "generating"} voice ${completed}/${total}`, progress_percent: 83 + Math.round((completed / Math.max(1, total)) * 3) });
+        await this.update(task.task_id, { progress_message: `Quiz · ${reused ? "reusing" : "generating"} voice ${completed}/${total}`, progress_percent: 46 + Math.round((completed / Math.max(1, total)) * 7) });
       },
       onVoicePacingClamp: (details: QuizVoicePacingClamp) => {
         this.logger.warn(`Quiz voice pacing clamp hit ${JSON.stringify(details)}`, { profileId: task.channel_id, workerId: task.task_id, step: "voice_pacing_clamp" });
@@ -1135,22 +1135,22 @@ export class TaskManager extends EventEmitter {
     let artifacts = await readQuizArtifacts(input);
     let episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
     if (!artifacts.quiz) {
-      await this.update(task.task_id, { progress_message: "Quiz · locking question facts", progress_percent: 68 });
+      await this.update(task.task_id, { progress_message: "Quiz · locking question facts", progress_percent: 33 });
       await generateQuiz(input);
       artifacts = await readQuizArtifacts(input);
     }
     if (!artifacts.director_plan) {
-      await this.update(task.task_id, { progress_message: "Quiz · directing question presentation", progress_percent: 72 });
+      await this.update(task.task_id, { progress_message: "Quiz · directing question presentation", progress_percent: 34 });
       await generateDirector(input);
       artifacts = await readQuizArtifacts(input);
     }
     if (!artifacts.asset_plan) {
-      await this.update(task.task_id, { progress_message: "Quiz · planning semantic assets", progress_percent: 76 });
+      await this.update(task.task_id, { progress_message: "Quiz · planning semantic assets", progress_percent: 35 });
       await planAssets(input);
       artifacts = await readQuizArtifacts(input);
     }
     if (!artifacts.asset_resolution || !artifacts.asset_plan || !(await isQuizAssetResolutionComplete({ repository: this.repository, channelId: task.channel_id, episodeId: task.episode_id!, plan: artifacts.asset_plan, resolution: artifacts.asset_resolution, activeEngine: this.activeEngine }))) {
-      await this.update(task.task_id, { progress_message: "Quiz · resolving semantic assets", progress_percent: 79 });
+      await this.update(task.task_id, { progress_message: "Quiz · resolving semantic assets", progress_percent: 36 });
       await resolveAssets(input);
       artifacts = await readQuizArtifacts(input);
     }
@@ -1162,20 +1162,20 @@ export class TaskManager extends EventEmitter {
       })
       : false;
     if (!artifacts.voice_plan || voicePaceNeedsRegeneration || !(await this.hasValidNarrationAsset(task.channel_id, task.episode_id!, episode.narration_asset_path)) || artifacts.voice_plan.segments.some((segment) => segment.duration_seconds === null)) {
-      await this.update(task.task_id, { progress_message: "Quiz · generating per-question voice", progress_percent: 83 });
+      await this.update(task.task_id, { progress_message: "Quiz · generating per-question voice", progress_percent: 46 });
       await generateVoice(input);
       artifacts = await readQuizArtifacts(input);
       episode = await this.repository.getEpisode(task.channel_id, task.episode_id!);
     }
     if (!artifacts.timeline) {
-      await this.update(task.task_id, { progress_message: "Quiz · compiling deterministic timeline", progress_percent: 86 });
+      await this.update(task.task_id, { progress_message: "Quiz · compiling deterministic timeline", progress_percent: 53 });
       await compileTimeline(input);
       artifacts = await readQuizArtifacts(input);
     }
     const maxHealingCycles = 3;
     for (let cycle = 1; cycle <= maxHealingCycles; cycle++) {
       if (!artifacts.assessment) {
-        await this.update(task.task_id, { progress_message: "Quiz · running pre-render QA", progress_percent: 89 });
+        await this.update(task.task_id, { progress_message: "Quiz · running pre-render QA", progress_percent: 54 });
         await runQa(input);
         artifacts = await readQuizArtifacts(input);
       }

@@ -26,12 +26,12 @@ export type EpisodeBuildSummary = {
 };
 
 const PIPELINE_STAGES = [
-  { id: "research", label: "Research", percent: 10 },
-  { id: "treatment", label: "Treatment", percent: 20 },
-  { id: "script", label: "Script", percent: 35 },
-  { id: "visual", label: "Visual Bible", percent: 50 },
-  { id: "shots", label: "Shots", percent: 65 },
-  { id: "audio", label: "Narration", percent: 80 },
+  { id: "research", label: "Research", percent: 3 },
+  { id: "treatment", label: "Treatment", percent: 6 },
+  { id: "script", label: "Script", percent: 12 },
+  { id: "visual", label: "Visual Bible", percent: 18 },
+  { id: "shots", label: "Shots", percent: 25 },
+  { id: "media", label: "Voice & Ảnh", percent: 55 },
   { id: "video", label: "Render Video", percent: 100 },
 ];
 
@@ -45,17 +45,18 @@ function calculateEpisodeProgress(task: Task | null, fallbackStatus: Task["statu
   }
   if (task.status === "QUEUED") return 0;
   switch (task.task_type) {
-    case "GENERATE_RESEARCH": return 10;
-    case "GENERATE_TREATMENT": return 20;
-    case "GENERATE_SCRIPT": return 35;
-    case "GENERATE_VISUAL_BIBLE": return 50;
+    case "GENERATE_RESEARCH": return 3;
+    case "GENERATE_TREATMENT": return 6;
+    case "GENERATE_SCRIPT": return 12;
+    case "GENERATE_VISUAL_BIBLE": return 18;
     case "GENERATE_SEQUENCE_SCENES":
-    case "GENERATE_SCENES": return 65;
+    case "GENERATE_SCENES": return 25;
+    case "GENERATE_BUNDLE_IMAGE": return 32;
     case "GENERATE_NARRATION":
-    case "GENERATE_AUDIO": return 80;
-    case "GENERATE_VIDEO": return 90;
-    case "GENERATE_PIPELINE": return 15;
-    default: return 25;
+    case "GENERATE_AUDIO": return 48;
+    case "GENERATE_VIDEO": return 70;
+    case "GENERATE_PIPELINE": return 5;
+    default: return 10;
   }
 }
 
@@ -200,9 +201,10 @@ function EpisodeProgressCard({
 
       {/* Visual Pipeline Stages */}
       <div className="ep-pipeline-stages">
-        {PIPELINE_STAGES.map((stage) => {
+        {PIPELINE_STAGES.map((stage, idx) => {
           const isDone = summary.progressPercent >= stage.percent || isCompleted;
-          const isCurrent = isRunning && summary.progressPercent >= (stage.percent - 15) && summary.progressPercent < stage.percent;
+          const prevPercent = idx === 0 ? 0 : PIPELINE_STAGES[idx - 1]!.percent;
+          const isCurrent = isRunning && summary.progressPercent >= prevPercent && summary.progressPercent < stage.percent;
           return (
             <div key={stage.id} className={`pipeline-stage-step ${isDone ? "is-done" : ""} ${isCurrent ? "is-current" : ""}`} title={`${stage.label} (~${stage.percent}%)`}>
               <span className="stage-dot" />
