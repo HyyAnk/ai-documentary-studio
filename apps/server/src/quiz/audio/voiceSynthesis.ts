@@ -103,10 +103,10 @@ export async function synthesizeQuizVoiceSegments(input: {
 
 export function quizVoiceTempo(role: VoicePlan["segments"][number]["role"]): number {
   if (role === "question" || role === "choice") return 1.1;
-  if (role === "reveal") return 1.08;
+  if (role === "reveal" || role === "intro") return 1.12;
   if (role === "explanation" || role === "fun_fact") return 1;
   if (role === "thinking_prompt") return 1.04;
-  if (role === "intro" || role === "midpoint" || role === "outro") return 1.06;
+  if (role === "midpoint" || role === "outro") return 1.06;
   return 1;
 }
 
@@ -132,12 +132,12 @@ export function quizVoiceFingerprint(segment: VoiceSegment, tempo: number, voice
 /** Only controls supported by the local Chatterbox adapter are used here. */
 export function voicePerformanceConfig(config: AppConfig["audio_generation"], role: VoiceSegmentRole): AppConfig["audio_generation"] {
   const settings: Record<VoiceSegmentRole, { exaggeration: number; cfg_weight: number }> = {
-    intro: { exaggeration: .70, cfg_weight: .45 },
+    intro: { exaggeration: .84, cfg_weight: .34 },
     question: { exaggeration: .62, cfg_weight: .48 },
     choice: { exaggeration: .56, cfg_weight: .50 },
     thinking_prompt: { exaggeration: .75, cfg_weight: .42 },
     countdown: { exaggeration: .60, cfg_weight: .48 },
-    reveal: { exaggeration: .78, cfg_weight: .36 },
+    reveal: { exaggeration: .86, cfg_weight: .30 },
     explanation: { exaggeration: .58, cfg_weight: .52 },
     fun_fact: { exaggeration: .62, cfg_weight: .50 },
     midpoint: { exaggeration: .70, cfg_weight: .45 },
@@ -152,7 +152,8 @@ async function renderPerformanceSegment(config: AppConfig["audio_generation"], s
   try {
     for (const [phraseIndex, phrase] of phrases.entries()) {
       const raw = await synthesizeWav(voicePerformanceConfig(config, segment.role), phrase.text, voice);
-      const paced = await paceQuizVoiceAudio(raw, quizVoiceTempo(segment.role), directory, segmentNumber * 100 + phraseIndex + 1, segment.role === "reveal" ? 1.5 : 0);
+      const gainDb = segment.role === "reveal" ? 2.0 : segment.role === "intro" ? 1.5 : 0;
+      const paced = await paceQuizVoiceAudio(raw, quizVoiceTempo(segment.role), directory, segmentNumber * 100 + phraseIndex + 1, gainDb);
       const phrasePath = path.join(directory, `segment-${String(segmentNumber).padStart(3, "0")}-phrase-${phraseIndex + 1}.wav`);
       await writeFile(phrasePath, paced);
       phrasePaths.push(phrasePath);
@@ -239,6 +240,7 @@ function pauseSeconds(pauseClass: VoicePauseClass, segmentNumber: number, phrase
   if (pauseClass === "long") return 1.0;
   const variation = ((segmentNumber + phraseIndex) % 3) * .018;
   if (pauseClass === "micro") return .09 + variation;
+  if (pauseClass === "anticipation") return .16 + variation;
   if (pauseClass === "phrase") return .15 + variation;
   return .2 + variation;
 }

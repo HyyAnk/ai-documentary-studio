@@ -1662,12 +1662,17 @@ export class TaskManager extends EventEmitter {
   private async retrySequenceScenes(active: ActiveRun, reason: string): Promise<void> {
     const channel = await this.repository.getChannel(active.task.channel_id);
     const isQuiz = channel.engine === "quiz";
+    const episode = active.task.episode_id ? await this.repository.getEpisode(active.task.channel_id, active.task.episode_id).catch(() => null) : null;
+    const isTrueFalse = isQuiz && episode?.quiz_config?.quiz_format === "true_false";
+    const choiceRequirement = isTrueFalse
+      ? "visible choices (strictly exactly 2 choices: True and False only; never add a 3rd option)"
+      : "visible choices (strictly maximum 3 choices: A, B, C only; never exceed 3)";
     const sequenceNumber = active.task.scene_number ?? 1;
     const script = await this.repository.getEpisodeFile(active.task.channel_id, active.task.episode_id!, "script.md");
     const section = extractNarrationSections(script.content)[sequenceNumber - 1];
     const exactNarration = section?.text.trim() ?? "";
     const strictContract = isQuiz
-      ? `Preserve every quiz field and return only a JSON array. Copy every word from the exact narration below verbatim and in order into one or more dialogue fields. Split only at natural boundaries; never paraphrase, shorten, add, or omit words. The final narration coverage must be at least 97.5%. Every beat must use a non-empty continuity_bundle_id exactly "CB-${String(sequenceNumber).padStart(2, "0")}", a non-empty continuity_note, and a distinct visual_prompt with the exact uppercase sections CAMERA, ACTION, LIGHTING, ATMOSPHERE, and CONTINUITY. Every non-intro/outro beat must repeat the same question, visible choices (strictly maximum 3 choices: A, B, C only; never exceed 3), canonical answer, and explanation for this question. Set answer to the exact text of one visible choice; do not return a bare mismatched label, invented choice, or a different answer per beat. Every beat must include complete quiz question, choices, answer, and explanation data.`
+      ? `Preserve every quiz field and return only a JSON array. Copy every word from the exact narration below verbatim and in order into one or more dialogue fields. Split only at natural boundaries; never paraphrase, shorten, add, or omit words. The final narration coverage must be at least 97.5%. Every beat must use a non-empty continuity_bundle_id exactly "CB-${String(sequenceNumber).padStart(2, "0")}", a non-empty continuity_note, and a distinct visual_prompt with the exact uppercase sections CAMERA, ACTION, LIGHTING, ATMOSPHERE, and CONTINUITY. Every non-intro/outro beat must repeat the same question, ${choiceRequirement}, canonical answer, and explanation for this question. Set answer to the exact text of one visible choice; do not return a bare mismatched label, invented choice, or a different answer per beat. Every beat must include complete quiz question, choices, answer, and explanation data.`
       : "Return only a JSON array. Copy every word from the exact narration below verbatim and in order into one or more dialogue fields. Split only at natural boundaries; never paraphrase, shorten, add, or omit words. The final narration coverage must be at least 97.5%. Every beat must use a non-empty continuity_bundle_id, a non-empty continuity_note, and a distinct visual_prompt with the exact uppercase sections CAMERA, ACTION, LIGHTING, ATMOSPHERE, and CONTINUITY.";
     const narrationBlock = exactNarration ? `\n\nEXACT NARRATION TO COVER VERBATIM:\n<NARRATION>\n${exactNarration}\n</NARRATION>` : "";
     const previousThreadId = active.threadId;

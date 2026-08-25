@@ -103,11 +103,32 @@ export function deriveQuizV2FromScenes(input: {
   const questions = [...grouped.entries()].sort(([a], [b]) => a - b).map(([number, questionScenes], index) => {
     const quizScenes = questionScenes.map((scene) => scene.quiz).filter((quiz): quiz is NonNullable<Scene["quiz"]> => Boolean(quiz));
     const question = quizScenes.find((quiz) => quiz.question.trim())?.question.trim() ?? "";
-    const choicesText = (quizScenes.find((quiz) => quiz.choices.length > 0)?.choices ?? []).slice(0, QUIZ_MAX_CHOICES_PER_QUESTION);
+    const format = normalizeQuestionFormat(input.format);
+    const maxChoices = format === "true_false" ? 2 : QUIZ_MAX_CHOICES_PER_QUESTION;
+    const minChoices = format === "true_false" ? 2 : QUIZ_MIN_CHOICES_PER_QUESTION;
+    const rawChoices = (quizScenes.find((quiz) => quiz.choices.length > 0)?.choices ?? []);
     const answer = quizScenes.find((quiz) => quiz.answer.trim())?.answer.trim() ?? "";
     const explanation = quizScenes.find((quiz) => quiz.explanation.trim())?.explanation.trim() ?? "";
-    if (!question || choicesText.length < QUIZ_MIN_CHOICES_PER_QUESTION || choicesText.length > QUIZ_MAX_CHOICES_PER_QUESTION || !answer || !explanation) {
-      throw new QuizDomainError("Question " + number + " is missing question, choices (must have 2–3 choices: A, B, or C), canonical answer, or explanation", "QUIZ_QUESTION_INCOMPLETE");
+
+    let choicesText: string[];
+    if (format === "true_false" && rawChoices.length > 2) {
+      const matchIdx = resolveVisibleQuizChoice(rawChoices, answer);
+      if (matchIdx !== null && matchIdx >= 2) {
+        choicesText = [rawChoices[0] ?? "", rawChoices[matchIdx]];
+      } else {
+        choicesText = rawChoices.slice(0, 2);
+      }
+    } else {
+      choicesText = rawChoices.slice(0, maxChoices);
+    }
+
+    if (!question || choicesText.length < minChoices || choicesText.length > maxChoices || !answer || !explanation) {
+      throw new QuizDomainError(
+        "Question " + number + " is missing question, choices (" +
+        (format === "true_false" ? "must have exactly 2 choices: True/False" : "must have 2–3 choices: A, B, or C") +
+        "), canonical answer, or explanation",
+        "QUIZ_QUESTION_INCOMPLETE"
+      );
     }
     const choices = choicesText.map((text, choiceIndex) => ({ id: "choice-" + String.fromCharCode(97 + choiceIndex), text: stripQuizChoiceLabel(text) }));
     const canonicalChoiceIndex = resolveVisibleQuizChoice(choices.map((choice) => choice.text), answer);
@@ -116,7 +137,6 @@ export function deriveQuizV2FromScenes(input: {
     if (new Set(normalizedChoices).size !== normalizedChoices.length) throw new QuizDomainError("Question " + number + " contains duplicate visible choices", "QUIZ_DUPLICATE_CHOICE");
     const sourceIds = [...new Set(questionScenes.flatMap((scene) => scene.source_ids))];
     const visualOpportunity = quizScenes.find((quiz) => quiz.image_prompt.trim())?.image_prompt.trim() ?? "";
-    const format = normalizeQuestionFormat(input.format);
     return {
       id: "question-" + String(index + 1).padStart(2, "0"),
       number: index + 1,

@@ -111,4 +111,40 @@ describe("Quiz V2 domain and Director", () => {
     };
     expect(() => deriveQuizV2FromScenes({ episodeId: "episode-1", language: "English", ageBand: "7-9", format: "multiple_choice", scenes: [sceneWith1Choice] })).toThrow("missing question, choices");
   });
+
+  it("handles true_false quiz format with strictly 2 choices and normalizes 3 choices", () => {
+    // Exact 2 choices for true_false
+    const trueFalseScene = scene(1, "True");
+    trueFalseScene.quiz = {
+      ...trueFalseScene.quiz!,
+      choices: ["True", "False"],
+      answer: "True",
+    };
+    const quiz = deriveQuizV2FromScenes({ episodeId: "episode-1", language: "English", ageBand: "7-9", format: "true_false", scenes: [trueFalseScene] });
+    expect(quiz.questions[0].format).toBe("true_false");
+    expect(quiz.questions[0].choices).toHaveLength(2);
+    expect(quiz.questions[0].choices.map((c) => c.text)).toEqual(["True", "False"]);
+    expect(quiz.questions[0].correct_choice_id).toBe("choice-a");
+
+    // 3 choices normalized down to 2 choices for true_false without throwing schema validation error
+    const threeChoiceTfScene = scene(1, "False");
+    threeChoiceTfScene.quiz = {
+      ...threeChoiceTfScene.quiz!,
+      choices: ["True", "False", "Neither"],
+      answer: "False",
+    };
+    const normalizedQuiz = deriveQuizV2FromScenes({ episodeId: "episode-1", language: "English", ageBand: "7-9", format: "true_false", scenes: [threeChoiceTfScene] });
+    expect(normalizedQuiz.questions[0].format).toBe("true_false");
+    expect(normalizedQuiz.questions[0].choices).toHaveLength(2);
+    expect(normalizedQuiz.questions[0].correct_choice_id).toBe("choice-b");
+
+    // 1 choice throws for true_false
+    const singleChoiceTfScene = scene(1, "True");
+    singleChoiceTfScene.quiz = {
+      ...singleChoiceTfScene.quiz!,
+      choices: ["True"],
+      answer: "True",
+    };
+    expect(() => deriveQuizV2FromScenes({ episodeId: "episode-1", language: "English", ageBand: "7-9", format: "true_false", scenes: [singleChoiceTfScene] })).toThrow("must have exactly 2 choices: True/False");
+  });
 });

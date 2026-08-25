@@ -87,6 +87,39 @@ describe("ContextEngine", () => {
     }
   });
 
+  it("enforces strict 2-choice prompt contract when quiz format is true_false", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "documentary-quiz-tf-context-"));
+    roots.push(root);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await mkdir(path.join(root, "shared"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
+    const repository = new RepositoryService(root);
+    const channel = await repository.createChannel({ name: "TF Channel", description: "", target_audience: "", language: "English", market: "", dna_mode: "example" });
+    const topic = { topic_id: "tf_topic", channel_id: channel.channel_id, title: "TF Topic", premise: "A test premise", why_it_fits: "A test fit", hook: "A test hook", estimated_potential: "High", generated_at: new Date().toISOString(), selected: false, quiz_format: "true_false" as const };
+    await repository.saveTopicRun(channel.channel_id, [topic, ...Array.from({ length: 4 }, (_, index) => ({ ...topic, topic_id: `tf_topic_${index + 2}`, title: `Other TF Topic ${index + 2}` }))]);
+    const episode = await repository.confirmTopic(channel.channel_id, topic.topic_id);
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "research.md", "# Research Dossier\n\nC01 verified source");
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "treatment.md", "# Documentary Treatment\n\n## Question 1\nTime budget and claim C01");
+    const logger = new StudioLogger(root, true);
+    await logger.init();
+    const engine = new ContextEngine(repository, logger);
+
+    const scriptContext = await engine.build("GENERATE_SCRIPT", channel.channel_id, episode.episode_id);
+    expect(scriptContext.prompt).toContain("strictly exactly 2 choices: True or False");
+    expect(scriptContext.prompt).toContain("Never provide more than 2 answer choices");
+
+    const treatmentContext = await engine.build("GENERATE_TREATMENT", channel.channel_id, episode.episode_id);
+    expect(treatmentContext.prompt).toContain("strictly exactly 2 choices: True or False");
+    expect(treatmentContext.prompt).toContain("Never generate more than 2 answer choices");
+
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "script.md", "# Quiz Script\n\n<!-- HUMOR_POLICY: v1 -->\n\n## Question 1\nScript content");
+    await repository.saveEpisodeFile(channel.channel_id, episode.episode_id, "visual_bible.md", "# Quiz Visual Bible\n\n## Safe motion\nAllowed\n\n## Continuity bundle CB-01 — Bundle\n- Anchor-frame prompt: A cartoon illustration");
+
+    const sceneContext = await engine.build("GENERATE_SCENES", channel.channel_id, episode.episode_id);
+    expect(sceneContext.prompt).toContain("Choices must have exactly 2 options (True and False only; never exceed 2 choices).");
+  });
+
   it("uses the absolute storage path for continuity image output", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "documentary-image-context-"));
     const storage = await mkdtemp(path.join(os.tmpdir(), "documentary-image-storage-"));

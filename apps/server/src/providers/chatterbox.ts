@@ -1,5 +1,6 @@
 import type { RepositoryService } from "../repository.js";
 import type { AudioProvider } from "./index.js";
+import { sanitizeTextForSpeech } from "../utils/speechSanitizer.js";
 
 export type ChatterboxTarget = {
   channelId: string;
@@ -38,8 +39,9 @@ export class ChatterboxProvider implements AudioProvider {
 }
 
 export async function synthesizeWav(config: ChatterboxConfig, text: string, voice = "default"): Promise<Uint8Array> {
+  const cleanText = sanitizeTextForSpeech(text);
   const body = {
-    text,
+    text: cleanText,
     ...(voice && voice !== "default" ? { voice_reference_path: voice } : {}),
     exaggeration: config.exaggeration,
     cfg_weight: config.cfg_weight,

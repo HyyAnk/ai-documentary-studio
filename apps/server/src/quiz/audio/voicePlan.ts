@@ -1,4 +1,5 @@
 import { VoicePlanSchema, type QuizV2, type VoicePhrase, type VoiceSegmentRole, type VoicePlan } from "@studio/shared";
+import { sanitizeTextForSpeech, splitSmartPunctuationPhrases } from "../../utils/speechSanitizer.js";
 
 export function buildQuizVoicePlan(quiz: QuizV2): VoicePlan {
   const copy = voiceCopy(quiz.language);
@@ -25,7 +26,7 @@ function withPhrases(segment: Omit<VoicePlan["segments"][number], "phrases">): V
 }
 
 export function performancePhrases(text: string, role: VoiceSegmentRole): VoicePhrase[] {
-  const normalized = text.trim().replace(/\s+/g, " ");
+  const normalized = sanitizeTextForSpeech(text.trim().replace(/\s+/g, " "));
   const chunks = role === "question" ? splitQuestionPhrases(normalized) : role === "choice" ? splitChoicePhrases(normalized) : splitPunctuationPhrases(normalized);
   return chunks.map((phrase, index) => ({
     text: phrase,
@@ -63,19 +64,18 @@ export function splitChoicePhrases(text: string): string[] {
   return phrases.length > 1 ? phrases : [text];
 }
 
-function splitPunctuationPhrases(text: string): string[] {
-  const parts = text.split(/(?<=[.?!,;:])\s+/).map((part) => part.trim()).filter(Boolean);
-  return parts.length > 1 ? parts : [text];
+export function splitPunctuationPhrases(text: string): string[] {
+  return splitSmartPunctuationPhrases(text);
 }
 
 function voiceCopy(language: string) {
   if (/^(vi|vietnamese|tiếng việt)/i.test(language.trim())) {
     return {
-      intro: "Chào mừng các bạn! Cùng chơi một quiz thật vui nào!",
+      intro: "Sẵn sàng chưa? Xem bạn trả lời đúng được bao nhiêu câu nhé!",
       question: (_number: number, text: string) => text,
       choices: (choices: string[]) => choices.length < 2 ? choices[0] : `${choices.slice(0, -1).join(", ")} hay ${choices.at(-1)}?`,
       thinking: ["Chọn nhanh nào!", "Đáp án là gì nhỉ?", "Nhanh tay nào!", "Bạn chọn cái nào?"],
-      reveal: (answer: string) => `Chính là ${answer}!`,
+      reveal: (answer: string) => `Đúng rồi! Chính là ${answer}!`,
       explanation: (text: string) => text,
       fact: (text: string) => text,
       midpoint: "",
@@ -83,11 +83,11 @@ function voiceCopy(language: string) {
     };
   }
   return {
-    intro: "Welcome, friends! Ready for a super fun quiz?",
+    intro: "Ready to test your brain? Let's jump right in!",
     question: (_number: number, text: string) => text,
     choices: (choices: string[]) => choices.length < 2 ? choices[0] : `${choices.slice(0, -1).join(", ")}, or ${choices.at(-1)}?`,
     thinking: ["Pick fast!", "Which one?", "What's your guess?", "Choose now!"],
-    reveal: (answer: string) => `It's ${answer}!`,
+    reveal: (answer: string) => `That's right! It's ${answer}!`,
     explanation: (text: string) => text,
     fact: (text: string) => text,
     midpoint: "",

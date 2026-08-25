@@ -5,6 +5,7 @@ import {
   type ProductionAssessment,
   type Scene,
 } from "@studio/shared";
+import { sanitizeTextForSpeech } from "./utils/speechSanitizer.js";
 
 const WORD_PATTERN = /[\p{L}\p{N}]+(?:[’'-][\p{L}\p{N}]+)*/gu;
 const AUDIO_CUE_PATTERN = /<!--\s*AUDIO[_ -]?CUE\s*:\s*(chuckle|laugh)\s*-->/gi;
@@ -81,7 +82,7 @@ export function countWords(value: string): number {
 }
 
 export function splitAtNarrativeBoundaries(dialogue: string, maxWords: number): string[] {
-  const value = dialogue.trim();
+  const value = sanitizeTextForSpeech(dialogue.trim());
   if (!value || countWords(value) <= maxWords) return value ? [value] : [];
   const units = value.match(/[^.!?;:]+(?:[.!?;:]|$)/g)?.map((unit) => unit.trim()).filter(Boolean) ?? [value];
   const chunks: string[] = [];

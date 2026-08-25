@@ -20,4 +20,7 @@
   - **LION CUB ZERO-TOLERANCE:** Never use the term "sư tử con" / "lion cub" / "baby lion" / "Simba" / "The Lion King" anywhere (in questions, choices, or baby animal quizzes). "Sư tử" (adult lion / African lion / pride of lions) is completely allowed.
   - **ALLOWED:** Anime & Manga characters and stories (Naruto, Son Goku / Dragon Ball, Doraemon, Luffy / One Piece, Conan...) are fully permitted and can be used normally.
   - For baby animal quizzes (e.g. "Guess the Baby Animal"), use safe alternatives (Kangaroo joey, Baby Penguin, Baby Giraffe, Baby Elephant, Panda cub, Baby Seal, Fox kit, etc.).
-
+- **Voice-Safe Spoken Text Rules:**
+  - Never use dotted single-letter abbreviations or scientific names that break TTS rhythm (write `T-Rex` instead of `T. rex`, `E-Coli` instead of `E. coli`, `C-Elegans` instead of `C. elegans`).
+  - Spell out titles and common abbreviations in spoken narration: write `Doctor` / `Bác sĩ` instead of `Dr.`, `Mister` instead of `Mr.`, `Tiến sĩ` instead of `TS.`, `Thạc sĩ` instead of `ThS.`, `vân vân` instead of `v.v.`, `for example` instead of `e.g.`, `that is` instead of `i.e.`.
+  - Format numbers, measurements, and symbols in conversational spoken style to prevent TTS hesitation or artificial pause artifacts.

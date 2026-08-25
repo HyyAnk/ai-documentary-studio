@@ -29,7 +29,7 @@ type Phase = "question" | "choices" | "think" | "countdown" | "reveal" | "explai
 export const CANDY_ARCADE_LAYOUT_DIMENSIONS = {
   baseline: { width: 800, height: 284 },
   media_left_choices_right: { width: 840, height: 580 },
-  visual_choices_three: { width: 501, height: 372, count: 3 },
+  visual_choices_three: { width: 501, height: 500, count: 3 },
 } as const;
 
 export function candyArcadeHeroAreaRatio(layout: keyof typeof CANDY_ARCADE_LAYOUT_DIMENSIONS): number {
@@ -311,8 +311,8 @@ function sfxSource(filename: string, assets?: Record<string, string>): string {
 function quizCopy(language: string) {
   const vietnamese = /^(vi|vietnamese|tiếng việt)/i.test(language.trim());
   return vietnamese
-    ? { ready: "Sẵn sàng chơi chưa?", questions: (count: number) => count === 1 ? "câu hỏi" : "câu hỏi đầy bất ngờ", question: "Câu", getReady: "Quan sát thật kỹ nhé!", choose: "Chọn một đáp án", time: "Sắp hết giờ!", correct: "Đúng rồi!", why: "Chính xác!", funFact: "Bạn có biết?", final: "Thử thách cuối", scorePrompt: "Bạn đúng được mấy câu?", playAgain: "Chơi lại nhé", exploreMore: "Còn nhiều câu hỏi thú vị phía trước" }
-    : { ready: "Ready to play?", questions: (count: number) => count === 1 ? "question" : "questions to explore", question: "Question", getReady: "Look closely and get ready!", choose: "Choose one", time: "Final seconds!", correct: "Correct answer!", why: "That's right!", funFact: "Did you know?", final: "Final challenge", scorePrompt: "How many did you get right?", playAgain: "Play again soon", exploreMore: "Many more questions to explore" };
+    ? { ready: "Sẵn sàng chơi chưa?", questions: (count: number) => count === 1 ? "câu hỏi" : "câu hỏi đầy bất ngờ", question: "Câu", getReady: "Quan sát thật kỹ nhé!", choose: "Chọn một đáp án", time: "Sắp hết giờ!", correct: "Đúng rồi!", why: "Bạn có biết?", funFact: "Bạn có biết?", final: "Thử thách cuối", scorePrompt: "Bạn đúng được mấy câu?", playAgain: "Chơi lại nhé", exploreMore: "Còn nhiều câu hỏi thú vị phía trước" }
+    : { ready: "Ready to play?", questions: (count: number) => count === 1 ? "question" : "questions to explore", question: "Question", getReady: "Look closely and get ready!", choose: "Choose one", time: "Final seconds!", correct: "That's right!", why: "Did you know?", funFact: "Did you know?", final: "Final challenge", scorePrompt: "How many did you get right?", playAgain: "Play again soon", exploreMore: "Many more questions to explore" };
 }
 
 function illustrationDataUri(subject: string, seed: number): string {
@@ -417,20 +417,20 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .shape-b { bottom: 10%; left: -4%; width: 360px; height: 250px; border-radius: 63% 37% 54% 46%; animation-delay: -7s; }
 .shape-c { right: 24%; bottom: -8%; width: 290px; height: 210px; opacity: .7; animation-delay: -12s; }
 .game-header { position: absolute; z-index: 6; top: 0; left: 40px; }
-.hanging-wood-sign { position: relative; z-index: 6; display: flex; flex-direction: column; align-items: center; width: 210px; transform-origin: 50% 0; animation: hanging-sign-enter .64s cubic-bezier(.18,1.42,.34,1) var(--clip-start) both, hanging-sign-sway 4.8s ease-in-out calc(var(--clip-start) + .64s) infinite alternate both; }
-.hanging-ropes { position: relative; display: flex; justify-content: space-between; width: 130px; height: 44px; pointer-events: none; }
+.hanging-wood-sign { position: relative; z-index: 6; display: flex; flex-direction: column; align-items: center; width: 235px; transform-origin: 50% 0; animation: hanging-sign-enter .64s cubic-bezier(.18,1.42,.34,1) var(--clip-start) both, hanging-sign-sway 4.8s ease-in-out calc(var(--clip-start) + .64s) infinite alternate both; }
+.hanging-ropes { position: relative; display: flex; justify-content: space-between; width: 155px; height: 44px; pointer-events: none; }
 .wood-rope { width: 9px; height: 100%; border-radius: 4px; background: repeating-linear-gradient(135deg, #D4A373 0px, #D4A373 5px, #A75C1C 5px, #A75C1C 10px); box-shadow: 2px 2px 5px rgba(13,35,71,.28); }
-.wood-sign-plank { position: relative; width: 200px; height: 200px; min-height: 200px; padding: 12px; border: 7px solid #48200A; border-radius: 38px; background: linear-gradient(180deg, #A25324 0%, #823E17 50%, #642B0D 100%); box-shadow: inset 0 4px 0 rgba(255,215,120,.5), inset 0 -5px 0 rgba(35,14,5,.6), 0 12px 0 var(--depth-shadow), 0 22px 32px rgba(10,25,60,.24); display: grid; place-items: center; }
+.wood-sign-plank { position: relative; width: 225px; height: 180px; min-height: 180px; padding: 12px; border: 7px solid #48200A; border-radius: 36px; background: linear-gradient(180deg, #A25324 0%, #823E17 50%, #642B0D 100%); box-shadow: inset 0 4px 0 rgba(255,215,120,.5), inset 0 -5px 0 rgba(35,14,5,.6), 0 12px 0 var(--depth-shadow), 0 22px 32px rgba(10,25,60,.24); display: grid; place-items: center; }
 .rope-bracket { position: absolute; top: -9px; width: 24px; height: 16px; border: 4px solid #331505; border-radius: 8px; background: #FFC436; box-shadow: inset 0 2px 0 #FFF, 0 2px 4px rgba(0,0,0,.3); }
-.bracket-left { left: 26px; }
-.bracket-right { right: 26px; }
-.wood-inner-panel { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; min-height: 154px; border-radius: 26px; border: 4px solid #3E1A07; background: linear-gradient(180deg, #6F3010 0%, #522208 100%); box-shadow: inset 0 4px 8px rgba(0,0,0,.55), inset 0 -3px 0 rgba(255,215,120,.22); }
-.question-number-val { font-family: "Fredoka", "SVN-Hello Headline", "Baloo 2", "Nunito", sans-serif; font-size: 88px; font-weight: 900; line-height: 1; color: #FFFDF0; text-shadow: 0 4px 0 #331505, 0 8px 18px rgba(0,0,0,.5); letter-spacing: -1px; }
+.bracket-left { left: 27px; }
+.bracket-right { right: 27px; }
+.wood-inner-panel { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; min-height: 134px; border-radius: 24px; border: 4px solid #3E1A07; background: linear-gradient(180deg, #6F3010 0%, #522208 100%); box-shadow: inset 0 4px 8px rgba(0,0,0,.55), inset 0 -3px 0 rgba(255,215,120,.22); }
+.question-number-val { font-family: "Fredoka", "SVN-Hello Headline", "Baloo 2", "Nunito", sans-serif; font-size: 82px; font-weight: 900; line-height: 1; color: #FFFDF0; text-shadow: 0 4px 0 #331505, 0 8px 18px rgba(0,0,0,.5); letter-spacing: -1px; }
 .wood-sign-star { position: absolute; pointer-events: none; }
 .wood-sign-star.star-tl { top: -12px; left: -12px; color: #FFD43F; font-size: 30px; text-shadow: 0 0 12px rgba(255,212,63,.85); transform: rotate(-15deg); }
 .wood-sign-star.star-br { bottom: -12px; right: -12px; color: #FFB703; font-size: 32px; text-shadow: 0 3px 0 #331505; transform: rotate(15deg); }
 .game-stage { position: relative; z-index: 3; display: grid; justify-items: center; align-content: start; width: 1580px; min-height: 945px; margin: 12px 40px 0 auto; }
-.question-title { position: relative; z-index: 3; max-width: 1520px; width: 100%; text-align: center; }
+.question-title { position: relative; z-index: 3; max-width: 1440px; width: 100%; justify-self: end; margin-left: auto; text-align: center; }
 .question-card-inner { position: relative; display: block; padding: 26px 64px 28px; border: 7px solid #FFC938; border-radius: 42px; background: linear-gradient(180deg, #FFFFFF 0%, #FFFDF7 28%, #FFF8EA 100%); box-shadow: inset 0 4px 0 rgba(255,255,255,0.95), inset 0 8px 0 rgba(56,189,248,0.25), inset 0 -5px 0 rgba(245,166,35,0.22), 0 16px 0 var(--depth-shadow), 0 26px 42px rgba(10,25,60,0.16); }
 .question-title h1 { margin: 0; color: #342245; font-family: "Fredoka", "SVN-Hello Headline", "Baloo 2", "Nunito", sans-serif; font-size: var(--question-size); font-weight: 800; line-height: var(--question-leading); letter-spacing: -0.5px; text-wrap: balance; text-shadow: 0 2px 0 rgba(255,255,255,0.8), 0 3px 0 rgba(16,35,75,0.08); }
 .keyword-highlight { color: #047857; text-shadow: 0 1px 0 rgba(255,255,255,0.8); }
@@ -447,14 +447,14 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .image-shine { position: absolute; z-index: 4; inset: 0; background: linear-gradient(125deg, rgba(255,255,255,.35), transparent 31%); pointer-events: none; }
 .game-stage > .hero-image { width: ${CANDY_ARCADE_LAYOUT_DIMENSIONS.baseline.width}px; height: ${CANDY_ARCADE_LAYOUT_DIMENSIONS.baseline.height}px; margin-top: 24px; }
 .hero-image img { transform-origin: center; animation: hero-ken-burn var(--scene-duration) ease-in-out var(--clip-start) 1 alternate both; }
-.layout-media_left_choices_right .game-stage { grid-template-columns: minmax(0, 1.08fr) minmax(520px, .92fr); grid-template-areas: "title title" "hero answers"; align-items: start; column-gap: 42px; row-gap: 22px; }
-.layout-media_left_choices_right .question-title { grid-area: title; width: 100%; }
-.layout-media_left_choices_right .game-stage > .hero-image { grid-area: hero; width: 100%; height: 380px; margin-top: 0; }
-.layout-media_left_choices_right .answer-grid { grid-area: answers; grid-template-columns: 1fr; width: 100%; margin-top: 0; gap: 14px; }
-.layout-media_left_choices_right .answer-card { min-height: 102px; padding: 14px 22px 14px 16px; font-size: 28px; }
+.layout-media_left_choices_right .game-stage { grid-template-columns: minmax(0, 1.08fr) minmax(520px, .92fr); grid-template-areas: "title title" "hero answers"; align-items: start; column-gap: 42px; row-gap: 20px; }
+.layout-media_left_choices_right .question-title { grid-area: title; width: 100%; max-width: 1440px; justify-self: end; margin-left: auto; }
+.layout-media_left_choices_right .game-stage > .hero-image { grid-area: hero; width: 100%; height: 580px; margin-top: 0; }
+.layout-media_left_choices_right .answer-grid { grid-area: answers; grid-template-columns: 1fr; width: 100%; margin-top: 0; gap: 16px; }
+.layout-media_left_choices_right .answer-card { min-height: 130px; padding: 18px 24px 18px 20px; font-size: 32px; }
 .layout-visual_choices_three .game-stage { grid-template-columns: 1fr; grid-template-areas: "title" "answers"; align-items: start; row-gap: 20px; }
-.layout-visual_choices_three .question-title { grid-area: title; width: 100%; }
-.layout-visual_choices_three .visual-answer-grid { grid-area: answers; width: 1540px; margin-top: 0; gap: 24px; }
+.layout-visual_choices_three .question-title { grid-area: title; width: 100%; max-width: 1440px; justify-self: end; margin-left: auto; }
+.layout-visual_choices_three .visual-answer-grid { grid-area: answers; width: 1560px; margin-top: 0; gap: 28px; }
 .phase-region { position: absolute; z-index: 5; left: 50%; bottom: 10px; width: 100%; height: 110px; transform: translateX(-50%); }
 .phase-region > .thinking-bar, .phase-region > .fact-card { position: absolute; z-index: 5; bottom: 0; left: 50%; margin-top: 0; transform: translateX(-50%); }
 .phase-region > .thinking-bar { width: min(82vw, 1540px); min-height: 84px; }
@@ -504,9 +504,9 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .fact-card p { margin: 8px 0 0; font-family: "Fredoka", "SVN-Hello Headline", "Baloo 2", "Nunito", sans-serif; font-size: 38px; font-weight: 900; line-height: 1.22; letter-spacing: -0.3px; }
 .visual-answer-grid { position: relative; z-index: 3; display: grid; grid-template-columns: repeat(3,1fr); gap: 28px; width: 1560px; margin-top: 28px; opacity: 0; animation: phase-enter .01s steps(1,end) calc(var(--clip-start) + var(--choices-at)) both; }
 .visual-answer-card { position: relative; z-index: 3; }
-.option-image { width: 100%; height: 372px; border-width: 12px; border-radius: 40px; animation: answer-float var(--scene-duration) ease-in-out calc(var(--clip-start) + var(--item-phase)) 1 alternate both; }
-.visual-answer-label { position: relative; z-index: 4; display: flex; align-items: center; gap: 13px; min-height: 82px; margin: -28px 22px 0; padding: 12px 18px; border: 5px solid rgba(17,39,84,.13); border-radius: 28px; background: var(--surface); box-shadow: 0 11px 0 var(--depth-shadow), inset 0 4px 0 rgba(255,255,255,.72); font-size: 29px; font-weight: 900; }
-.visual-answer-label > b { width: 48px; height: 48px; border-radius: 16px; font-size: 27px; }
+.option-image { width: 100%; height: 500px; border-width: 12px; border-radius: 40px; animation: answer-float var(--scene-duration) ease-in-out calc(var(--clip-start) + var(--item-phase)) 1 alternate both; }
+.visual-answer-label { position: relative; z-index: 4; display: flex; align-items: center; gap: 14px; min-height: 90px; margin: -30px 20px 0; padding: 14px 20px; border: 5px solid rgba(17,39,84,.13); border-radius: 30px; background: var(--surface); box-shadow: 0 12px 0 var(--depth-shadow), inset 0 4px 0 rgba(255,255,255,.72); font-size: 32px; font-weight: 900; }
+.visual-answer-label > b { width: 56px; height: 56px; border-radius: 18px; font-size: 30px; }
 .visual-answer-card.answer-correct { animation: visual-correct-card-reveal .62s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--reveal-at) + .14s) both; }
 .visual-answer-card.answer-correct .option-image { animation: answer-float var(--scene-duration) ease-in-out calc(var(--clip-start) + var(--item-phase)) 1 alternate both, visual-correct-border .62s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--reveal-at) + .14s) both; }
 .visual-answer-card.answer-incorrect { animation: incorrect-card-settle .38s ease-out calc(var(--clip-start) + var(--reveal-at)) both; }
