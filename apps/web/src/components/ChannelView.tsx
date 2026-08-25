@@ -316,37 +316,37 @@ export function TopicLayoutPreviewButton({ quizFormat }: { quizFormat: string })
   const layoutInfo = isVisualChoices
     ? {
         id: "visual_choices_three",
-        name: "3 Tranh ảnh (A, B, C)",
-        badge: "🎨 3 Lựa chọn hình ảnh",
+        name: "3 Visual Choices (A, B, C)",
+        badge: "🎨 3 Visual Choices",
         tagClass: "tag-visual",
         btnClass: "is-visual-choices",
         icon: "🎨",
-        format: quizFormat === "image_guess" ? "Đoán hình (Image Guess)" : "Tìm hình khác (Odd One Out)",
-        desc: "Mỗi đáp án A, B, C là 1 hình ảnh minh họa vuông riêng biệt (501×500px), xếp ngang 3 cột sinh động.",
-        assets: "3 ảnh tranh riêng cho A, B, C",
+        format: quizFormat === "image_guess" ? "Image Guess" : "Odd One Out",
+        desc: "Each option (A, B, C) is a dedicated square illustration (501×500px), displayed side-by-side in 3 columns.",
+        assets: "3 separate option illustrations",
       }
     : isTrueFalse
     ? {
         id: "media_left_choices_right",
-        name: "Đúng / Sai (2 đáp án)",
-        badge: "⚖️ Đúng / Sai (2 Lựa chọn)",
+        name: "True / False (2 choices)",
+        badge: "⚖️ True / False (2 Choices)",
         tagClass: "tag-tf",
         btnClass: "is-true-false",
         icon: "⚖️",
-        format: "Đúng / Sai (True / False)",
-        desc: "1 ảnh Hero lớn (580px) bên trái và 2 thẻ lựa chọn Đúng / Sai to bản, trực quan bên phải.",
-        assets: "1 ảnh Hero lớn",
+        format: "True / False",
+        desc: "1 large Hero illustration (580px) on the left with 2 prominent TRUE / FALSE cards on the right.",
+        assets: "1 large Hero illustration",
       }
     : {
         id: "media_left_choices_right",
-        name: "Ảnh lớn trái + Đáp án phải",
-        badge: "🖼️ Ảnh trái + Đáp án phải",
+        name: "Media Left + Choices Right",
+        badge: "🖼️ Media Left + Choices Right",
         tagClass: "tag-media",
         btnClass: "is-media-left",
         icon: "🖼️",
-        format: "Trắc nghiệm kiến thức (Multiple Choice)",
-        desc: "1 hình ảnh Hero lớn (580px) bên trái và danh sách thẻ đáp án chữ xếp dọc bên phải.",
-        assets: "1 ảnh Hero lớn",
+        format: "Multiple Choice / Knowledge",
+        desc: "1 large Hero illustration (580px) on the left with vertical multiple-choice text cards on the right.",
+        assets: "1 large Hero illustration",
       };
 
   return (
@@ -388,22 +388,22 @@ export function TopicLayoutPreviewButton({ quizFormat }: { quizFormat: string })
             <div className="wireframe-screen">
               <div className="wf-top-row">
                 <span className="wf-sign">Q1</span>
-                <div className="wf-title">Tiêu đề câu hỏi...</div>
+                <div className="wf-title">Question prompt goes here...</div>
               </div>
 
               {isVisualChoices ? (
                 <div className="wf-visual-row">
                   <div className="wf-visual-card">
-                    <div className="wf-visual-img">🖼️ Ảnh A</div>
-                    <div className="wf-visual-lbl"><b>A</b> <span>Lựa chọn A</span></div>
+                    <div className="wf-visual-img">🖼️ Option A</div>
+                    <div className="wf-visual-lbl"><b>A</b> <span>Choice A</span></div>
                   </div>
                   <div className="wf-visual-card">
-                    <div className="wf-visual-img">🖼️ Ảnh B</div>
-                    <div className="wf-visual-lbl"><b>B</b> <span>Lựa chọn B</span></div>
+                    <div className="wf-visual-img">🖼️ Option B</div>
+                    <div className="wf-visual-lbl"><b>B</b> <span>Choice B</span></div>
                   </div>
                   <div className="wf-visual-card">
-                    <div className="wf-visual-img">🖼️ Ảnh C</div>
-                    <div className="wf-visual-lbl"><b>C</b> <span>Lựa chọn C</span></div>
+                    <div className="wf-visual-img">🖼️ Option C</div>
+                    <div className="wf-visual-lbl"><b>C</b> <span>Choice C</span></div>
                   </div>
                 </div>
               ) : isTrueFalse ? (
@@ -414,10 +414,10 @@ export function TopicLayoutPreviewButton({ quizFormat }: { quizFormat: string })
                   </div>
                   <div className="wf-choices-col wf-choices-tf">
                     <div className="wf-choice-pill wf-tf-true">
-                      <b className="wf-badge-true">✓</b> <span>ĐÚNG (True)</span>
+                      <b className="wf-badge-true">✓</b> <span>TRUE</span>
                     </div>
                     <div className="wf-choice-pill wf-tf-false">
-                      <b className="wf-badge-false">✗</b> <span>SAI (False)</span>
+                      <b className="wf-badge-false">✗</b> <span>FALSE</span>
                     </div>
                   </div>
                 </div>
@@ -428,22 +428,22 @@ export function TopicLayoutPreviewButton({ quizFormat }: { quizFormat: string })
                     <div className="wf-hero-lbl">HERO IMAGE (580px)</div>
                   </div>
                   <div className="wf-choices-col">
-                    <div className="wf-choice-pill"><b>A</b> <span>Đáp án A</span></div>
-                    <div className="wf-choice-pill"><b>B</b> <span>Đáp án B</span></div>
-                    <div className="wf-choice-pill"><b>C</b> <span>Đáp án C</span></div>
+                    <div className="wf-choice-pill"><b>A</b> <span>Choice A</span></div>
+                    <div className="wf-choice-pill"><b>B</b> <span>Choice B</span></div>
+                    <div className="wf-choice-pill"><b>C</b> <span>Choice C</span></div>
                   </div>
                 </div>
               )}
 
               <div className="wf-timer-bar">
-                <div className="wf-timer-fill">★ Đếm ngược thời gian (Thinking Bar)</div>
+                <div className="wf-timer-fill">★ Countdown Timer (Thinking Bar)</div>
               </div>
             </div>
           </div>
 
           <div className="popover-meta-footer">
             <div><span>Format:</span> <strong>{layoutInfo.format}</strong></div>
-            <div><span>Minh họa:</span> <strong>{layoutInfo.assets}</strong></div>
+            <div><span>Assets:</span> <strong>{layoutInfo.assets}</strong></div>
           </div>
         </div>
       ) : null}
