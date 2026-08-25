@@ -1,4 +1,4 @@
-import { Archive, ArrowLeft, ArrowUpRight, CaretDown, CircleNotch, FileText, FilmSlate, FloppyDisk, Lightbulb, Palette, PencilSimple, Plus, Play, Sparkle, Trash, X } from "@phosphor-icons/react";
+import { Archive, ArrowLeft, ArrowUpRight, CaretDown, CircleNotch, Eye, FileText, FilmSlate, FloppyDisk, Lightbulb, Palette, PencilSimple, Plus, Play, Sparkle, Trash, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ALL_QUIZ_IMAGE_STYLES, QUIZ_IMAGE_STYLE_LABELS, QUIZ_MAX_QUESTION_COUNT, QUIZ_MIN_QUESTION_COUNT, QUIZ_SECONDS_PER_QUESTION, type Channel, type Episode, type QuizImageStyle, type Task, type TopicCandidate } from "@studio/shared";
 import { api } from "../api";
@@ -304,6 +304,149 @@ export function VisualStylesMenu({ channel, onRefresh, onNotice }: { channel: Ch
   );
 }
 
+export function TopicLayoutPreviewButton({ quizFormat }: { quizFormat: string }) {
+  const isVisualChoices = quizFormat === "image_guess" || quizFormat === "odd_one_out";
+  const isTrueFalse = quizFormat === "true_false";
+  const [showPreview, setShowPreview] = useState(false);
+
+  const layoutInfo = isVisualChoices
+    ? {
+        id: "visual_choices_three",
+        name: "3 Tranh ảnh (A, B, C)",
+        badge: "🎨 3 Lựa chọn hình ảnh",
+        tagClass: "tag-visual",
+        btnClass: "is-visual-choices",
+        icon: "🎨",
+        format: quizFormat === "image_guess" ? "Đoán hình (Image Guess)" : "Tìm hình khác (Odd One Out)",
+        desc: "Mỗi đáp án A, B, C là 1 hình ảnh minh họa vuông riêng biệt (501×500px), xếp ngang 3 cột sinh động.",
+        assets: "3 ảnh tranh riêng cho A, B, C",
+      }
+    : isTrueFalse
+    ? {
+        id: "media_left_choices_right",
+        name: "Đúng / Sai (2 đáp án)",
+        badge: "⚖️ Đúng / Sai (2 Lựa chọn)",
+        tagClass: "tag-tf",
+        btnClass: "is-true-false",
+        icon: "⚖️",
+        format: "Đúng / Sai (True / False)",
+        desc: "1 ảnh Hero lớn (580px) bên trái và 2 thẻ lựa chọn Đúng / Sai to bản, trực quan bên phải.",
+        assets: "1 ảnh Hero lớn",
+      }
+    : {
+        id: "media_left_choices_right",
+        name: "Ảnh lớn trái + Đáp án phải",
+        badge: "🖼️ Ảnh trái + Đáp án phải",
+        tagClass: "tag-media",
+        btnClass: "is-media-left",
+        icon: "🖼️",
+        format: "Trắc nghiệm kiến thức (Multiple Choice)",
+        desc: "1 hình ảnh Hero lớn (580px) bên trái và danh sách thẻ đáp án chữ xếp dọc bên phải.",
+        assets: "1 ảnh Hero lớn",
+      };
+
+  return (
+    <div
+      className="topic-layout-trigger-wrap"
+      onMouseEnter={() => setShowPreview(true)}
+      onMouseLeave={() => setShowPreview(false)}
+      onFocus={() => setShowPreview(true)}
+      onBlur={() => setShowPreview(false)}
+    >
+      <button
+        type="button"
+        className={`topic-layout-badge-btn ${layoutInfo.btnClass}`}
+        aria-label={`Layout: ${layoutInfo.name}`}
+        onClick={(e) => {
+          e.preventDefault();
+          setShowPreview((prev) => !prev);
+        }}
+      >
+        <span className="topic-layout-badge-icon">{layoutInfo.icon}</span>
+        <span className="topic-layout-badge-text">{layoutInfo.name}</span>
+        <Eye size={12} className="topic-layout-eye" />
+      </button>
+
+      {showPreview ? (
+        <div className="topic-layout-popover" role="tooltip">
+          <div className="popover-arrow" />
+          <div className="popover-header">
+            <div className="popover-badge-row">
+              <span className={`popover-tag ${layoutInfo.tagClass}`}>
+                {layoutInfo.badge}
+              </span>
+              <code className="popover-code">{layoutInfo.id}</code>
+            </div>
+            <p className="popover-desc">{layoutInfo.desc}</p>
+          </div>
+
+          <div className="popover-wireframe-wrap">
+            <div className="wireframe-screen">
+              <div className="wf-top-row">
+                <span className="wf-sign">Q1</span>
+                <div className="wf-title">Tiêu đề câu hỏi...</div>
+              </div>
+
+              {isVisualChoices ? (
+                <div className="wf-visual-row">
+                  <div className="wf-visual-card">
+                    <div className="wf-visual-img">🖼️ Ảnh A</div>
+                    <div className="wf-visual-lbl"><b>A</b> <span>Lựa chọn A</span></div>
+                  </div>
+                  <div className="wf-visual-card">
+                    <div className="wf-visual-img">🖼️ Ảnh B</div>
+                    <div className="wf-visual-lbl"><b>B</b> <span>Lựa chọn B</span></div>
+                  </div>
+                  <div className="wf-visual-card">
+                    <div className="wf-visual-img">🖼️ Ảnh C</div>
+                    <div className="wf-visual-lbl"><b>C</b> <span>Lựa chọn C</span></div>
+                  </div>
+                </div>
+              ) : isTrueFalse ? (
+                <div className="wf-media-row">
+                  <div className="wf-hero-box">
+                    <div className="wf-hero-icon">🖼️</div>
+                    <div className="wf-hero-lbl">HERO IMAGE (580px)</div>
+                  </div>
+                  <div className="wf-choices-col wf-choices-tf">
+                    <div className="wf-choice-pill wf-tf-true">
+                      <b className="wf-badge-true">✓</b> <span>ĐÚNG (True)</span>
+                    </div>
+                    <div className="wf-choice-pill wf-tf-false">
+                      <b className="wf-badge-false">✗</b> <span>SAI (False)</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="wf-media-row">
+                  <div className="wf-hero-box">
+                    <div className="wf-hero-icon">🖼️</div>
+                    <div className="wf-hero-lbl">HERO IMAGE (580px)</div>
+                  </div>
+                  <div className="wf-choices-col">
+                    <div className="wf-choice-pill"><b>A</b> <span>Đáp án A</span></div>
+                    <div className="wf-choice-pill"><b>B</b> <span>Đáp án B</span></div>
+                    <div className="wf-choice-pill"><b>C</b> <span>Đáp án C</span></div>
+                  </div>
+                </div>
+              )}
+
+              <div className="wf-timer-bar">
+                <div className="wf-timer-fill">★ Đếm ngược thời gian (Thinking Bar)</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="popover-meta-footer">
+            <div><span>Format:</span> <strong>{layoutInfo.format}</strong></div>
+            <div><span>Minh họa:</span> <strong>{layoutInfo.assets}</strong></div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function TopicCard({
   topic,
   channelStyles = ALL_QUIZ_IMAGE_STYLES,
@@ -326,7 +469,10 @@ export function TopicCard({
   const availableStyles = channelStyles && channelStyles.length > 0 ? channelStyles : ALL_QUIZ_IMAGE_STYLES;
 
   return <article className="topic-card">
-    <div className="topic-number">Topic candidate</div>
+    <div className="topic-card-top-bar">
+      <div className="topic-number">Topic candidate</div>
+      <TopicLayoutPreviewButton quizFormat={topic.quiz_format} />
+    </div>
     <h3>{topic.title}</h3>
     <p className="topic-premise">{topic.premise}</p>
     <div className="topic-detail"><span>Why it fits</span><p>{topic.why_it_fits}</p></div>
