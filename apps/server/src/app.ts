@@ -60,17 +60,21 @@ import { assertQuizRenderReady, compileTimeline, generateDirector, generateQuiz,
 
 const VOICE_PREVIEW_TEXT = "This is a preview of this narrator voice for AI Documentary Studio.";
 
-async function createVoiceWithPreview(repository: RepositoryService, name: string, reference: Uint8Array, audioConfig: AppConfig["audio_generation"]) {
-  let profile: Awaited<ReturnType<RepositoryService["createVoiceProfile"]>> | null = null;
+async function createVoiceWithPreview(
+  repository: RepositoryService,
+  name: string,
+  reference: Uint8Array,
+  audioConfig: AppConfig["audio_generation"],
+  logger?: StudioLogger,
+) {
+  const profile = await repository.createVoiceProfile(name, reference, reference);
   try {
-    profile = await repository.createVoiceProfile(name, reference, new Uint8Array());
-    const sample = await synthesizeWav(audioConfig, VOICE_PREVIEW_TEXT, repository.resolveContextPath(profile.reference_path));
+    const sample = await synthesizeWav(audioConfig, VOICE_PREVIEW_TEXT, repository.resolveContextPath(profile.reference_path), 60_000);
     await repository.updateVoiceSample(profile.voice_id, sample);
-    return repository.getVoice(profile.voice_id);
   } catch (error) {
-    if (profile) await repository.deleteVoiceProfile(profile.voice_id).catch(() => undefined);
-    throw error;
+    logger?.warn(`Could not synthesize voice preview for "${name}": ${error instanceof Error ? error.message : String(error)}`);
   }
+  return repository.getVoice(profile.voice_id);
 }
 
 export type StudioApp = {
@@ -124,7 +128,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     channel_path: repository.roots.channels,
     configured: storageConfigured,
   });
-  const server = Fastify({ logger: false });
+  const server = Fastify({ logger: false, bodyLimit: 50 * 1024 * 1024 });
   const clients = new Set<{ send: (payload: string) => void; readyState: number; OPEN: number }>();
 
   await server.register(cors, { origin: true });
@@ -378,7 +382,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     if (audio.length < 12 || audio.toString("ascii", 0, 4) !== "RIFF" || audio.toString("ascii", 8, 12) !== "WAVE") {
       throw new RepositoryError("Voice reference must be a WAV file", "INVALID_AUDIO");
     }
-    return createVoiceWithPreview(repository, input.name, audio, config.audio_generation);
+    return createVoiceWithPreview(repository, input.name, audio, config.audio_generation, logger);
   });
   server.delete("/api/voices/:voiceId", async (request) => {
     await repository.deleteVoiceProfile((request.params as { voiceId: string }).voiceId);
@@ -412,7 +416,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     }
     const channelId = (request.params as { channelId: string }).channelId;
     const channel = await repository.getChannel(channelId);
-    const voice = await createVoiceWithPreview(repository, `${channel.display_name} (uploaded)`, audio, config.audio_generation);
+    const voice = await createVoiceWithPreview(repository, `${channel.display_name} (uploaded)`, audio, config.audio_generation, logger);
     const assigned = await repository.assignVoice(channelId, voice.voice_id);
     return { path: assigned.voice_reference_path, modified_at: new Date().toISOString(), voice, channel: assigned };
   });

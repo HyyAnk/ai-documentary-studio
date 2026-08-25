@@ -17,13 +17,15 @@ export function generateContrastSelfHealingCss(report: HyperframesCheckReport | 
     ".keyword-highlight { color: #047857 !important; text-shadow: 0 1px 0 rgba(255,255,255,0.9) !important; font-weight: 900 !important; }",
     ".question-title h1 { color: #1e1b4b !important; text-shadow: 0 2px 0 rgba(255,255,255,0.9), 0 3px 0 rgba(16,35,75,0.12) !important; }",
     ".answer-card span, .visual-answer-label span { color: #0f172a !important; }",
-    ".answer-card > b, .visual-answer-label > b { color: #ffffff !important; text-shadow: 0 1px 2px rgba(0,0,0,0.5) !important; }",
+    ".answer-card > b, .visual-answer-label > b { color: #0f172a !important; text-shadow: none !important; }",
     ".fact-card p { color: #1e293b !important; }",
     ".fact-card span { color: #0f766e !important; }",
     ".question-number-val { color: #ffffff !important; text-shadow: 0 3px 0 #1f0b02, 0 5px 12px rgba(0,0,0,0.75) !important; }",
     ".marker-val { color: #ffffff !important; text-shadow: 0 2px 4px rgba(0,0,0,0.85) !important; }",
     ".mini-badge { color: #ffffff !important; text-shadow: 0 1px 2px rgba(0,0,0,0.4) !important; }",
-    ".choice span { color: #0f172a !important; }"
+    ".choice span { color: #0f172a !important; }",
+    ".badge-cta { color: #172a59 !important; border-color: #172a59 !important; }",
+    ".badge-comment, .badge-like, .badge-sub { color: #172a59 !important; }"
   );
 
   // If specific text findings were reported, target elements specifically

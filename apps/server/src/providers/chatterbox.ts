@@ -38,7 +38,7 @@ export class ChatterboxProvider implements AudioProvider {
   }
 }
 
-export async function synthesizeWav(config: ChatterboxConfig, text: string, voice = "default"): Promise<Uint8Array> {
+export async function synthesizeWav(config: ChatterboxConfig, text: string, voice = "default", timeoutMs = 15 * 60 * 1000): Promise<Uint8Array> {
   const cleanText = sanitizeTextForSpeech(text);
   const body = {
     text: cleanText,
@@ -52,7 +52,7 @@ export async function synthesizeWav(config: ChatterboxConfig, text: string, voic
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(15 * 60 * 1000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
     throw new AudioServiceUnavailableError();

@@ -61,6 +61,24 @@ MODEL_ERROR: Optional[str] = None
 MODEL_KIND = "turbo" if os.getenv("CHATTERBOX_MODEL", "turbo").strip().lower() == "turbo" else "original"
 MODEL_SUPPORTS_PARALINGUISTICS = MODEL_KIND == "turbo"
 
+def patch_chatterbox_float32():
+    try:
+        import numpy as np
+        from chatterbox.models.t3.modules.cond_enc import T3Cond
+        orig_to = T3Cond.to
+        def safe_to(self, *, device=None, dtype=None):
+            for k, v in self.__dict__.items():
+                if torch.is_tensor(v):
+                    is_fp = v.dtype in (torch.float16, torch.float32, torch.float64, torch.bfloat16)
+                    target_dtype = dtype if dtype is not None else (torch.float32 if v.dtype == torch.float64 else None)
+                    setattr(self, k, v.to(device=device, dtype=target_dtype if is_fp else None))
+            return self
+        T3Cond.to = safe_to
+    except Exception as exc:
+        logger.warning("Could not patch T3Cond: %s", exc)
+
+patch_chatterbox_float32()
+
 logger.info("Starting Chatterbox sidecar device=%s model=%s paralinguistic_tags=%s mode=local", DEVICE, MODEL_KIND, MODEL_SUPPORTS_PARALINGUISTICS, extra={"step": "startup"})
 try:
     if MODEL_KIND == "turbo":
@@ -124,8 +142,9 @@ async def synthesize_audio(request: SynthesizeRequest) -> Response:
     try:
         audio = await __import__("asyncio").to_thread(synthesize, request)
     except Exception as error:
-        logger.error("Synthesis failed: %s", error, extra={"step": "synthesize"})
-        raise HTTPException(status_code=503, detail="Audio service unavailable") from error
+        import traceback
+        logger.error("Synthesis failed: %s\n%s", error, traceback.format_exc(), extra={"step": "synthesize"})
+        raise HTTPException(status_code=503, detail=f"Audio service unavailable: {error}") from error
     logger.info("Generated WAV bytes=%s", len(audio), extra={"step": "synthesize"})
     return Response(content=audio, media_type="audio/wav", headers={"cache-control": "no-store"})
 

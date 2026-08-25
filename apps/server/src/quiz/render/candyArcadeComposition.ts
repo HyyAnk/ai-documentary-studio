@@ -480,8 +480,8 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .answer-card { position: relative; z-index: 3; display: flex; align-items: center; min-height: 148px; gap: 19px; padding: 20px 30px 20px 20px; overflow: hidden; border: 5px solid rgba(17,39,84,.14); border-radius: 38px; background: var(--surface); box-shadow: 0 14px 0 var(--depth-shadow), inset 0 4px 0 rgba(255,255,255,.7); font-size: 34px; font-weight: 900; }
 .answer-card::after { position: absolute; right: -35px; bottom: -41px; width: 118px; height: 118px; border-radius: 50%; background: var(--muted); content: ""; }
 .answer-card > b, .visual-answer-label > b { position: relative; z-index: 4; display: grid; flex: 0 0 auto; place-items: center; width: 66px; height: 66px; border-radius: 23px; background: var(--badge); color: var(--on-accent); box-shadow: inset 0 -5px 0 rgba(13,35,71,.14); font-size: 35px; }
-.answer-card:nth-child(2) > b { background: var(--accent); }
-.answer-card:nth-child(3) > b { background: #F6B83D; }
+.answer-card:nth-child(2) > b, .visual-answer-card:nth-child(2) .visual-answer-label > b { background: var(--accent); }
+.answer-card:nth-child(3) > b, .visual-answer-card:nth-child(3) .visual-answer-label > b { background: #F6B83D; }
 .answer-card span { position: relative; z-index: 4; flex: 1 1 auto; min-width: 0; padding-right: 54px; line-height: 1.1; }
 .answer-card img { position: relative; z-index: 4; width: 62px; height: 62px; border-radius: 18px; object-fit: cover; animation: answer-float var(--scene-duration) ease-in-out calc(var(--clip-start) + var(--item-phase)) 1 alternate both; }
 .choice-tier-long span, .choice-tier-very_long span { font-size: 28px; }
@@ -559,8 +559,8 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .intro-stars, .outro-stars { margin-top: 35px; color: #172A59; font-size: 43px; }
 .outro-cta-badges { display: flex; gap: 18px; margin-top: 24px; align-items: center; justify-content: center; }
 .badge-cta { display: inline-flex; align-items: center; gap: 8px; padding: 10px 22px; border-radius: 999px; background: #FFFFFF; color: #172A59; font-size: 24px; font-weight: 900; box-shadow: 0 8px 0 rgba(13,35,71,.18); border: 3px solid #172A59; }
-.badge-comment { background: #29B9A8; color: #FFFFFF; }
-.badge-like { background: #FF6277; color: #FFFFFF; }
+.badge-comment { background: #29B9A8; color: #172A59; }
+.badge-like { background: #FF6277; color: #172A59; }
 .badge-sub { background: #FFC436; color: #172A59; }
 .intro-dot { position: absolute; z-index: 1; border-radius: 50%; background: #fff; opacity: .47; }.dot-a { top: 126px; left: 250px; width: 158px; height: 158px; }.dot-b { right: 235px; bottom: 149px; width: 128px; height: 128px; }
 .brand-mascot { position: absolute; z-index: 4; right: 255px; bottom: 95px; display: grid; place-items: center; width: 179px; height: 179px; border: 10px solid #fff; border-radius: 53px; background: #29B9A8; color: #172A59; box-shadow: 0 20px 0 rgba(13,35,71,.2); font-size: 93px; transform: rotate(-8deg); }
