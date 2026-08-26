@@ -18,10 +18,10 @@ Make children and families feel clever, curious, and ready for one more question
 Rotate formats across a five-topic suggestion run:
 
 - Knowledge quiz: one question, three answer choices, one explainable answer.
-- Image guess: show a friendly visual clue before revealing the subject.
+- Image guess: show 1 large hero visual clue (left) before guessing the subject/category with text choices (right).
 - Multiple choice: A/B/C with a spoken pause and a visual countdown.
 - True or false: one simple claim, then a playful correction.
-- Odd one out: three items (A, B, C), one does not belong, followed by the rule.
+- Odd one out: three visual choice items (A, B, C), one does not belong, followed by the rule.
 
 ## Question design
 

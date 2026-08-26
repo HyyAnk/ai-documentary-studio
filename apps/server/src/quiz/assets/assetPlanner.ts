@@ -10,11 +10,11 @@ export function planQuizAssets(quiz: QuizV2, director: DirectorPlan, visualStyle
   for (const beat of director.beats) {
     const question = quiz.questions.find((candidate) => candidate.id === beat.question_id);
     if (!question) continue;
-    if (beat.asset_intents.includes("question_illustration") && question.visual_opportunity) {
+    if (beat.asset_intents.includes("question_illustration") && (question.visual_opportunity || question.question)) {
       assets.push({
         asset_id: "asset-" + question.id + "-hero",
         question_id: question.id,
-        subject: compactQuizAssetSubject(question.visual_opportunity, question.question),
+        subject: compactQuizAssetSubject(question.visual_opportunity || "", question.question),
         purpose: "hero_question_image",
         style: "cute_illustration",
         aspect_ratio: "16:9",
@@ -52,7 +52,7 @@ export function planQuizAssets(quiz: QuizV2, director: DirectorPlan, visualStyle
         style: "cute_illustration",
         aspect_ratio: "1:1",
         transparent_background: true,
-        required: question.format === "image_guess",
+        required: true,
         semantic_key: question.id + ":choice:" + choice.id,
         consistency_group_id: groupId,
       }));

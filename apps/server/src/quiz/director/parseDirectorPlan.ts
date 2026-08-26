@@ -14,7 +14,7 @@ export function parseDirectorPlanOutput(output: string, quiz: QuizV2): DirectorP
 export function createDefaultDirectorPlan(quiz: QuizV2): DirectorPlan {
   const minimumThinking: Record<QuizV2["age_band"], number> = { "4-6": 7.5, "7-9": 7, "10-12": 6.8, family: 7 };
   const beats: DirectorPlan["beats"] = quiz.questions.map((question, index): DirectorPlan["beats"][number] => {
-    const archetype = question.format === "image_guess" || question.format === "odd_one_out" ? "visual_multiple_choice" : question.format === "true_false" ? "true_false" : index % 3 === 1 ? "illustrated_multiple_choice" : "text_multiple_choice";
+    const archetype = question.format === "odd_one_out" ? "visual_multiple_choice" : question.format === "true_false" ? "true_false" : (question.format === "image_guess" || index % 3 === 1) ? "illustrated_multiple_choice" : "text_multiple_choice";
     const isFinal = index === quiz.questions.length - 1;
     const isMidpoint = index === Math.floor(quiz.questions.length / 2);
     const beatIntents: DirectorPlan["beats"][number]["beat_intents"] = ["question_enter", "choice_reveal", "thinking", "countdown", "answer_reveal", "explanation", ...(question.fun_fact ? ["fun_fact" as const] : []), ...(isFinal ? ["celebrate" as const] : []), "transition"];

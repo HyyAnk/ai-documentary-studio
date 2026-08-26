@@ -16,7 +16,7 @@ const quiz = QuizV2Schema.parse({
   language: "English",
   questions: [
     { id: "question-01", number: 1, format: "multiple_choice", difficulty: 1, question: "Which ocean is the largest on Earth?", choices: [{ id: "choice-a", text: "Pacific Ocean" }, { id: "choice-b", text: "Atlantic Ocean" }, { id: "choice-c", text: "Arctic Ocean" }], correct_choice_id: "choice-b", explanation: "The Pacific Ocean covers the largest area.", fun_fact: "", source_ids: ["C01"], visual_opportunity: "A bright globe with the Pacific Ocean", validation: { semantic_status: "validated", source_coverage: true, fact_locked: true } },
-    { id: "question-02", number: 2, format: "image_guess", difficulty: 2, question: "Which animal can sprint the fastest?", choices: [{ id: "choice-a", text: "Cheetah" }, { id: "choice-b", text: "Turtle" }, { id: "choice-c", text: "Elephant" }], correct_choice_id: "choice-a", explanation: "Cheetahs sprint very quickly for short distances.", fun_fact: "", source_ids: ["C02"], visual_opportunity: "A friendly cheetah", validation: { semantic_status: "validated", source_coverage: true, fact_locked: true } },
+    { id: "question-02", number: 2, format: "odd_one_out", difficulty: 2, question: "Which animal can sprint the fastest?", choices: [{ id: "choice-a", text: "Cheetah" }, { id: "choice-b", text: "Turtle" }, { id: "choice-c", text: "Elephant" }], correct_choice_id: "choice-a", explanation: "Cheetahs sprint very quickly for short distances.", fun_fact: "", source_ids: ["C02"], visual_opportunity: "A friendly cheetah", validation: { semantic_status: "validated", source_coverage: true, fact_locked: true } },
   ],
 });
 
@@ -58,7 +58,8 @@ describe("Candy Arcade visual template", () => {
 
   it("selects semantic layouts and deterministic readable text tiers", () => {
     expect(resolveLayout("auto", "illustrated_multiple_choice", "multiple_choice")).toBe("media_left_choices_right");
-    expect(resolveLayout("auto", "visual_multiple_choice", "image_guess")).toBe("visual_choices_three");
+    expect(resolveLayout("auto", "illustrated_multiple_choice", "image_guess")).toBe("media_left_choices_right");
+    expect(resolveLayout("auto", "visual_multiple_choice", "odd_one_out")).toBe("visual_choices_three");
     expect(textLayout("Which ocean is the largest on Earth?", "question").fits).toBe(true);
     expect(textLayout("x".repeat(190), "question").fits).toBe(false);
   });

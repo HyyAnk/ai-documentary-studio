@@ -27,7 +27,7 @@ const quiz = QuizV2Schema.parse({
   questions: [{
     id: "question-01",
     number: 1,
-    format: "image_guess",
+    format: "odd_one_out",
     difficulty: 2,
     question: "Which animal is shown?",
     choices: [{ id: "choice-a", text: "Tiger" }, { id: "choice-b", text: "Dolphin" }],

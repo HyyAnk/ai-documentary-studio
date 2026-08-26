@@ -74,7 +74,7 @@ export function resolvePalette(requested: QuizPaletteId, questionIndex: number, 
 
 export function resolveLayout(requested: QuizLayoutId, archetype: string, format: string): Exclude<QuizLayoutId, "auto"> {
   if (requested !== "auto") return requested;
-  if (archetype === "visual_multiple_choice" || format === "image_guess" || format === "odd_one_out") return "visual_choices_three";
+  if (archetype === "visual_multiple_choice" || format === "odd_one_out") return "visual_choices_three";
   return "media_left_choices_right";
 }
 

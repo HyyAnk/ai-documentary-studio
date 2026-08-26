@@ -309,7 +309,8 @@ export function VisualStylesMenu({ channel, onRefresh, onNotice }: { channel: Ch
 }
 
 export function TopicLayoutPreviewButton({ quizFormat }: { quizFormat: string }) {
-  const isVisualChoices = quizFormat === "image_guess" || quizFormat === "odd_one_out";
+  const isVisualChoices = quizFormat === "odd_one_out";
+  const isImageGuess = quizFormat === "image_guess";
   const isTrueFalse = quizFormat === "true_false";
   const [showPreview, setShowPreview] = useState(false);
 
@@ -321,9 +322,21 @@ export function TopicLayoutPreviewButton({ quizFormat }: { quizFormat: string })
         tagClass: "tag-visual",
         btnClass: "is-visual-choices",
         icon: "🎨",
-        format: quizFormat === "image_guess" ? "Image Guess" : "Odd One Out",
+        format: "Odd One Out",
         desc: "Each option (A, B, C) is a dedicated square illustration (501×500px), displayed side-by-side in 3 columns.",
         assets: "3 separate option illustrations",
+      }
+    : isImageGuess
+    ? {
+        id: "media_left_choices_right",
+        name: "Image Guess (Media Left + Choices Right)",
+        badge: "🖼️ Image Guess",
+        tagClass: "tag-media",
+        btnClass: "is-media-left",
+        icon: "🖼️",
+        format: "Image Guess",
+        desc: "1 large Hero clue illustration (580px) on the left with vertical multiple-choice text cards on the right.",
+        assets: "1 large Hero clue illustration",
       }
     : isTrueFalse
     ? {

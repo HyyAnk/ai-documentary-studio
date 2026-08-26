@@ -49,9 +49,11 @@ describe("Candy Arcade visual regression contract", () => {
     expect(html).toContain('<div class="timer-progress"></div><span class="timer-marker" data-layout-allow-occlusion data-layout-allow-overlap>');
     expect(html).toContain('<b class="marker-val val-query" data-layout-allow-overlap>?</b><b class="marker-val val-5" data-layout-allow-overlap>5</b>');
     expect(html).not.toContain('<div class="timer-progress"><span class="timer-marker');
-    expect(html).toContain("@keyframes quiz-timer-marker-slide { from { left: 100%; } to { left: 0%; } }");
-    expect(thinkingBarCss).toContain("animation: phase-hold var(--timer-duration) steps(1,end)");
-    expect(timerProgressCss).toContain("animation: quiz-timer-drain var(--timer-duration) linear");
+    expect(html).toContain(".val-5 { animation: number-countdown-tick 1s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--cd5-at)) both; }");
+    expect(html).toContain(".val-4 { animation: number-countdown-tick 1s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--cd4-at)) both; }");
+    expect(html).toContain(".val-3 { animation: number-countdown-tick 1s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--cd3-at)) both; }");
+    expect(html).toContain(".val-2 { animation: number-countdown-tick 1s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--cd2-at)) both; }");
+    expect(html).toContain(".val-1 { animation: number-countdown-final 1s cubic-bezier(.18,1.42,.34,1) calc(var(--clip-start) + var(--cd1-at)) both; }");
 
     for (const progress of [0, .25, .5, .75, 1]) {
       const fillEdge = 1 - progress;
@@ -116,13 +118,15 @@ describe("Candy Arcade visual regression contract", () => {
   it("renders prominent 3D glossy circular badges and distinct choice-coded stroke borders for kids", () => {
     const html = renderHtml();
     expect(html).toContain("border-radius: 50%");
-    expect(html).toContain("--choice-stroke: #FF3366");
-    expect(html).toContain("--choice-stroke: #0284C7");
-    expect(html).toContain("--choice-stroke: #EA580C");
-    expect(html).toMatch(/\.answer-card > b[^}]*width: 100px/);
-    expect(html).toMatch(/\.answer-card > b[^}]*font-size: 50px/);
-    expect(html).toMatch(/\.answer-card > b[^}]*margin-left: -48px/);
-    expect(html).toContain("border: 6px solid var(--choice-stroke)");
+    expect(html).toContain("--choice-depth-shadow: #C2410C");
+    expect(html).toContain("--choice-depth-shadow: #9D174D");
+    expect(html).toContain("--choice-depth-shadow: #075985");
+    expect(html).toContain("--choice-depth-shadow: #3F6212");
+    expect(html).toContain(".answer-card::before { content: \"\"; position: absolute; inset: 6px 14px 6px 20px; border: 2.5px dashed rgba(255, 255, 255, 0.75);");
+    expect(html).toMatch(/\.answer-card > b[^}]*width: 108px/);
+    expect(html).toMatch(/\.answer-card > b[^}]*font-size: 54px/);
+    expect(html).toMatch(/\.answer-card > b[^}]*margin-left: -58px/);
+    expect(html).toContain("border: 7px solid var(--choice-stroke)");
     expect(html).toContain(".answer-card > b::after");
   });
 });
