@@ -225,10 +225,10 @@ export function App() {
         onCancelTask={async (taskId) => {
           try {
             await api.cancelTask(taskId);
-            setNotice({ tone: "good", message: "Task đã được hủy khỏi hàng chờ" });
+            setNotice({ tone: "good", message: "Task cancelled from queue" });
             await refreshTasks();
           } catch (err) {
-            setNotice({ tone: "bad", message: err instanceof Error ? err.message : "Không thể hủy task" });
+            setNotice({ tone: "bad", message: err instanceof Error ? err.message : "Failed to cancel task" });
           }
         }}
         onOpenEpisode={openEpisode}

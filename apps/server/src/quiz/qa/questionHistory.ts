@@ -76,7 +76,7 @@ export function evaluateQuestionMatch(
     return {
       isDuplicate: true,
       similarity: 1.0,
-      reason: "Trùng khớp 100% nội dung câu hỏi",
+      reason: "Exact 100% match with historical question",
     };
   }
 
@@ -91,7 +91,7 @@ export function evaluateQuestionMatch(
     return {
       isDuplicate: true,
       similarity: Number(similarity.toFixed(2)),
-      reason: `Cùng đáp án chính và ý tưởng câu hỏi tương tự (${Math.round(similarity * 100)}%)`,
+      reason: `Same correct answer with similar question concept (${Math.round(similarity * 100)}%)`,
     };
   }
 
@@ -99,7 +99,7 @@ export function evaluateQuestionMatch(
     return {
       isDuplicate: true,
       similarity: Number(similarity.toFixed(2)),
-      reason: `Độ tương đồng cao (${Math.round(similarity * 100)}%)`,
+      reason: `High semantic similarity (${Math.round(similarity * 100)}%)`,
     };
   }
 

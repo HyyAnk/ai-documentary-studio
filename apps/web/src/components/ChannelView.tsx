@@ -477,7 +477,7 @@ export function TopicCard({
       <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
         <div className="topic-number">Topic candidate</div>
         {topic.theme_hint ? (
-          <span className="topic-theme-badge" title={`Gợi ý theo chủ đề: ${topic.theme_hint}`}>
+          <span className="topic-theme-badge" title={`Suggested by topic: ${topic.theme_hint}`}>
             🎯 {topic.theme_hint}
           </span>
         ) : null}

@@ -278,9 +278,9 @@ export function SettingsView({
         ttl_days: ttlDays,
         auto_remix: autoRemix,
       });
-      onNotice({ tone: "good", message: "Đã lưu cài đặt Question History & Anti-Duplicate thành công!" });
+      onNotice({ tone: "good", message: "Saved Question History & Anti-Duplicate settings successfully!" });
     } catch (error) {
-      onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Lưu cài đặt thất bại" });
+      onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Failed to save history settings" });
     } finally {
       setSavingHistory(false);
     }
@@ -1071,13 +1071,13 @@ export function SettingsView({
                   value={maxConcurrentVideoTasks}
                   onChange={(event) => setMaxConcurrentVideoTasks(Number(event.target.value))}
                 >
-                  <option value="1">1 episode (Tuần tự / Tiết kiệm tài nguyên)</option>
-                  <option value="2">2 episodes (Mặc định - Khuyến nghị cho 32GB RAM)</option>
+                  <option value="1">1 episode (Sequential / Resource-saving)</option>
+                  <option value="2">2 episodes (Default - Recommended for 32GB RAM)</option>
                   <option value="3">3 episodes</option>
                   <option value="4">4 episodes</option>
                 </select>
                 <small className="field-help">
-                  Số lượng Episode / Video build tối đa chạy đồng thời. Các Episode vượt quá giới hạn này sẽ tự động được xếp vào Hàng chờ (Queue) và hiển thị ở panel bên trái.
+                  Maximum number of concurrent episode video builds. Tasks exceeding this limit are queued automatically in the sidebar.
                 </small>
               </label>
               <label>
@@ -1250,11 +1250,11 @@ export function SettingsView({
                   checked={historyEnabled}
                   onChange={(event) => setHistoryEnabled(event.target.checked)}
                 />
-                <span>Kích hoạt History Check (Đối chiếu lịch sử câu hỏi)</span>
+                <span>Enable Question History Duplicate Check</span>
               </label>
 
               <label>
-                Pass History Threshold (Số câu trùng tối đa được phép tự động Pass)
+                Pass History Threshold (Maximum allowed duplicates to auto-pass)
                 <input
                   type="number"
                   min="0"
@@ -1264,12 +1264,12 @@ export function SettingsView({
                   onChange={(event) => setPassThreshold(Number(event.target.value))}
                 />
                 <small className="field-help">
-                  Ví dụ: Nhập 2 nghĩa là nếu video chỉ trùng từ 2 câu trở xuống thì hệ thống vẫn cho phép tự động build tiếp mà không dừng lại.
+                  Example: 2 means if an episode has 2 or fewer duplicate questions, the pipeline continues building automatically without pausing.
                 </small>
               </label>
 
               <label>
-                Thời gian lưu trữ lịch sử (TTL tính bằng Ngày)
+                History Retention Period (TTL in Days)
                 <input
                   type="number"
                   min="1"
@@ -1279,7 +1279,7 @@ export function SettingsView({
                   onChange={(event) => setTtlDays(Number(event.target.value))}
                 />
                 <small className="field-help">
-                  Mặc định: 30 ngày. Các câu hỏi vượt quá số ngày này sẽ được tự động dọn dẹp để tối ưu hóa bộ nhớ.
+                  Default: 30 days. Questions older than this period are pruned automatically to optimize memory.
                 </small>
               </label>
 
@@ -1289,7 +1289,7 @@ export function SettingsView({
                   checked={autoRemix}
                   onChange={(event) => setAutoRemix(event.target.checked)}
                 />
-                <span>Tự động Remix bằng AI khi phát hiện câu hỏi bị trùng</span>
+                <span>Auto-remix duplicate questions with AI during generation</span>
               </label>
 
               <button className="primary-button" disabled={savingHistory}>

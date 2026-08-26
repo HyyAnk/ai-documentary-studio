@@ -85,7 +85,11 @@ export function EpisodeDetail({
   const [globalPromptExpanded, setGlobalPromptExpanded] = useState<boolean | null>(false);
   const [historyCheck, setHistoryCheck] = useState<QuestionHistoryCheckResult | null>(null);
   const [isRemixing, setIsRemixing] = useState(false);
-  const initialWorkflowTab = (activeTab === "script" || activeTab === "visual" || activeTab === "timeline" || activeTab === "remix") ? activeTab : "timeline";
+  const initialWorkflowTab = (activeTab === "script" || activeTab === "visual" || activeTab === "timeline" || activeTab === "remix")
+    ? activeTab
+    : simplifyMode
+    ? "remix"
+    : "timeline";
   const [workflowTab, setWorkflowTab] = useState<"script" | "visual" | "timeline" | "remix">(initialWorkflowTab);
 
   const loadHistoryCheck = useCallback(async () => {
@@ -101,15 +105,21 @@ export function EpisodeDetail({
     void loadHistoryCheck();
   }, [loadHistoryCheck, quizV2?.quiz, scenes.length]);
 
+  useEffect(() => {
+    if (simplifyMode && workflowTab !== "remix") {
+      setWorkflowTab("remix");
+    }
+  }, [simplifyMode]);
+
   const handleRemix = async () => {
     try {
       setIsRemixing(true);
       const res = await api.remixQuizQuestions(channel.channel_id, episodeId);
       setHistoryCheck(res.history_check);
       await load();
-      onNotice({ tone: "good", message: `Đã remix thành công ${res.remixed_count} câu hỏi và kiểm tra lại lịch sử!` });
+      onNotice({ tone: "good", message: `Successfully remixed ${res.remixed_count} questions and re-checked history!` });
     } catch (error) {
-      onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Remix câu hỏi thất bại" });
+      onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Question remix failed" });
     } finally {
       setIsRemixing(false);
     }
@@ -575,9 +585,9 @@ export function EpisodeDetail({
         )}
       </section>
 
-      {/* 4-Stage Creation Workspace Tabs (Hidden in Simplify Mode) */}
-      {!simplifyMode ? (
-        <div className="channel-group-tabs" role="tablist" aria-label="Episode creation workspace" style={{ margin: "24px 0 26px" }}>
+      {/* Workspace Tabs: In Simplify Mode, Question Remix is ALWAYS shown. In Full Mode, all 4 tabs are shown */}
+      <div className="channel-group-tabs" role="tablist" aria-label="Episode creation workspace" style={{ margin: "24px 0 26px" }}>
+        {!simplifyMode ? (
           <button
             type="button"
             role="tab"
@@ -589,45 +599,49 @@ export function EpisodeDetail({
             <span>1. Script & Plan</span>
             {readiness.script ? <CheckCircle size={14} weight="fill" style={{ color: "var(--green)" }} /> : null}
           </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={workflowTab === "remix"}
-            className={`channel-group-tab ${workflowTab === "remix" ? "is-selected" : ""}`}
-            onClick={() => switchWorkflowTab("remix")}
-          >
-            <ArrowsClockwise size={17} weight={workflowTab === "remix" ? "bold" : "regular"} />
-            <span>Question Remix</span>
-            {historyCheck?.duplicate_count ? (
-              <span className={`tab-badge ${historyCheck.passed ? "badge-success" : "badge-warning"}`}>
-                {historyCheck.duplicate_count}
-              </span>
-            ) : null}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={workflowTab === "visual"}
-            className={`channel-group-tab ${workflowTab === "visual" ? "is-selected" : ""}`}
-            onClick={() => switchWorkflowTab("visual")}
-          >
-            <Image size={17} weight={workflowTab === "visual" ? "fill" : "regular"} />
-            <span>2. Visual & Continuity</span>
-            {bundleImages.length > 0 ? <small>{bundleImages.length}</small> : null}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={workflowTab === "timeline"}
-            className={`channel-group-tab ${workflowTab === "timeline" ? "is-selected" : ""}`}
-            onClick={() => switchWorkflowTab("timeline")}
-          >
-            <FilmSlate size={17} weight={workflowTab === "timeline" ? "fill" : "regular"} />
-            <span>3. Timeline & Shots</span>
-            {scenes.length > 0 ? <small>{scenes.length}</small> : null}
-          </button>
-        </div>
-      ) : null}
+        ) : null}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={workflowTab === "remix"}
+          className={`channel-group-tab ${workflowTab === "remix" ? "is-selected" : ""}`}
+          onClick={() => switchWorkflowTab("remix")}
+        >
+          <ArrowsClockwise size={17} weight={workflowTab === "remix" ? "bold" : "regular"} />
+          <span>Question Remix</span>
+          {historyCheck?.duplicate_count ? (
+            <span className={`tab-badge ${historyCheck.passed ? "badge-success" : "badge-warning"}`}>
+              {historyCheck.duplicate_count}
+            </span>
+          ) : null}
+        </button>
+        {!simplifyMode ? (
+          <>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={workflowTab === "visual"}
+              className={`channel-group-tab ${workflowTab === "visual" ? "is-selected" : ""}`}
+              onClick={() => switchWorkflowTab("visual")}
+            >
+              <Image size={17} weight={workflowTab === "visual" ? "fill" : "regular"} />
+              <span>2. Visual & Continuity</span>
+              {bundleImages.length > 0 ? <small>{bundleImages.length}</small> : null}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={workflowTab === "timeline"}
+              className={`channel-group-tab ${workflowTab === "timeline" ? "is-selected" : ""}`}
+              onClick={() => switchWorkflowTab("timeline")}
+            >
+              <FilmSlate size={17} weight={workflowTab === "timeline" ? "fill" : "regular"} />
+              <span>3. Timeline & Shots</span>
+              {scenes.length > 0 ? <small>{scenes.length}</small> : null}
+            </button>
+          </>
+        ) : null}
+      </div>
 
       {/* Stage 1: Script & Plan */}
       {workflowTab === "script" && !simplifyMode ? (
@@ -656,8 +670,8 @@ export function EpisodeDetail({
         </div>
       ) : null}
 
-      {/* Stage: Question Remix & History Check */}
-      {workflowTab === "remix" && !simplifyMode ? (
+      {/* Stage: Question Remix & History Check (ALWAYS visible when on remix tab, never hidden by simplifyMode) */}
+      {workflowTab === "remix" ? (
         <section className="remix-section panel" style={{ marginTop: "12px" }}>
           <div className="section-heading" style={{ marginBottom: "20px" }}>
             <div>
@@ -695,13 +709,13 @@ export function EpisodeDetail({
               <div>
                 <strong className="summary-title">
                   {historyCheck?.passed
-                    ? "Đạt điều kiện History Check"
-                    : `Phát hiện ${historyCheck?.duplicate_count || 0} câu hỏi bị trùng lặp với lịch sử`}
+                    ? "Passed History Duplicate Check"
+                    : `Detected ${historyCheck?.duplicate_count || 0} duplicate question(s) in history`}
                 </strong>
                 <p className="summary-desc">
                   {historyCheck
-                    ? `Tổng số câu: ${historyCheck.total_questions} | Câu trùng: ${historyCheck.duplicate_count} | Ngưỡng cho phép pass: <= ${historyCheck.pass_threshold} câu`
-                    : "Đang tải dữ liệu History Check..."}
+                    ? `Total: ${historyCheck.total_questions} questions | Duplicates: ${historyCheck.duplicate_count} | Pass threshold: <= ${historyCheck.pass_threshold}`
+                    : "Loading history check data..."}
                 </p>
               </div>
             </div>
@@ -715,7 +729,7 @@ export function EpisodeDetail({
           {historyCheck && historyCheck.items.length > 0 ? (
             <div className="remix-questions-list">
               <h3 style={{ margin: "24px 0 12px", fontSize: "15px", fontWeight: 600 }}>
-                Chi tiết đối chiếu từng câu hỏi ({historyCheck.items.length})
+                Detailed Question History Comparison ({historyCheck.items.length})
               </h3>
               <div className="remix-cards-grid">
                 {historyCheck.items.map((item, index) => {
@@ -728,21 +742,21 @@ export function EpisodeDetail({
                     >
                       <div className="remix-card-header">
                         <div className="remix-card-number">
-                          <span className="q-badge">Câu #{index + 1}</span>
+                          <span className="q-badge">Question #{index + 1}</span>
                           <span className={`match-status-badge is-${item.status}`}>
-                            {isDupe ? "⚠️ Trùng với lịch sử" : isRemixed ? "✨ Đã Remix" : "✓ Câu hỏi mới"}
+                            {isDupe ? "⚠️ Duplicate in History" : isRemixed ? "✨ Remixed" : "✓ New Question"}
                           </span>
                         </div>
                         {item.matched_entry ? (
                           <span className="similarity-pill">
-                            Độ trùng: {Math.round(item.similarity_score * 100)}%
+                            Similarity: {Math.round(item.similarity_score * 100)}%
                           </span>
                         ) : null}
                       </div>
 
                       <div className="remix-card-body">
                         <div className="remix-col current-col">
-                          <label className="col-label">Câu hỏi hiện tại trong Video:</label>
+                          <label className="col-label">Current Question in Episode:</label>
                           <p className="remix-question-text">"{item.current_question_text}"</p>
                           <div className="remix-choices-list">
                             {item.current_choices.map((c, i) => (
@@ -759,19 +773,19 @@ export function EpisodeDetail({
                         {item.matched_entry ? (
                           <div className="remix-col history-col">
                             <label className="col-label">
-                              Trùng với video cũ: <strong>{item.matched_entry.episode_title}</strong>
+                              Matched past video: <strong>{item.matched_entry.episode_title}</strong>
                             </label>
                             <p className="remix-question-text history-text">
                               "{item.matched_entry.question_text}"
                             </p>
                             <div className="matched-meta">
-                              <span>📅 Ngày render: {new Date(item.matched_entry.rendered_at).toLocaleDateString("vi-VN")}</span>
+                              <span>📅 Rendered: {new Date(item.matched_entry.rendered_at).toLocaleDateString("en-US")}</span>
                               <span className="match-reason-tag">{item.match_reason}</span>
                             </div>
                           </div>
                         ) : (
                           <div className="remix-col history-col is-empty-match">
-                            <p className="clean-note">✓ Không tìm thấy câu hỏi tương tự trong 30 ngày qua.</p>
+                            <p className="clean-note">✓ No similar questions found in past 30 days.</p>
                           </div>
                         )}
                       </div>
@@ -782,7 +796,7 @@ export function EpisodeDetail({
             </div>
           ) : (
             <div className="artifact-empty" style={{ padding: "40px 0" }}>
-              <p>Chưa có thông tin đối chiếu câu hỏi. Nhấn <strong>Generate script / Quiz</strong> ở bước 1 để đối chiếu.</p>
+              <p>No question history comparison available. Click <strong>Generate script / Quiz</strong> in Step 1 to perform check.</p>
             </div>
           )}
         </section>

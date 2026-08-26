@@ -143,7 +143,7 @@ export async function remixQuizQuestions(input: QuizOrchestratorInput, requested
   if (rephrasedQuestions.length === 0) {
     rephrasedQuestions = questionsToRemix.map((q) => ({
       ...q,
-      question: q.question.startsWith("Đố bạn ") ? q.question.replace("Đố bạn ", "Khám phá xem ") : `Thử thách mới: ${q.question}`,
+      question: q.question.startsWith("Quiz: ") ? q.question.replace("Quiz: ", "Can you solve: ") : `Challenge: ${q.question}`,
     }));
   }
 

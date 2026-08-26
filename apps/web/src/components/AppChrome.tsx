@@ -28,25 +28,25 @@ export function SidebarQueueWidget({
   };
 
   return (
-    <div className="sidebar-queue-widget" title="Danh sách tác vụ đang xếp hàng chờ">
+    <div className="sidebar-queue-widget" title="Task Queue">
       <div className="sidebar-queue-header" onClick={onOpenTasks} style={{ cursor: "pointer" }}>
         <div className="sidebar-queue-title">
           <Queue size={14} weight="duotone" />
-          <span>Hàng chờ</span>
+          <span>Queue</span>
         </div>
         <div className="sidebar-queue-badges">
           {runningTasks.length > 0 ? (
-            <span className="queue-badge running" title={`${runningTasks.length} tác vụ đang chạy`}>
+            <span className="queue-badge running" title={`${runningTasks.length} running tasks`}>
               <CircleNotch size={10} className="spin" />
               <span>{runningTasks.length}</span>
             </span>
           ) : null}
           {queuedTasks.length > 0 ? (
-            <span className="queue-badge queued" title={`${queuedTasks.length} tác vụ trong hàng chờ`}>
-              {queuedTasks.length} chờ
+            <span className="queue-badge queued" title={`${queuedTasks.length} queued tasks`}>
+              {queuedTasks.length} queued
             </span>
           ) : runningTasks.length === 0 ? (
-            <span className="queue-badge empty">Trống</span>
+            <span className="queue-badge empty">Idle</span>
           ) : null}
         </div>
       </div>
@@ -57,7 +57,7 @@ export function SidebarQueueWidget({
             <div
               key={task.task_id}
               className="sidebar-queue-item"
-              title={`${formatTaskType(task.task_type)} - ${task.progress_message || "Đang xếp hàng chờ"}`}
+              title={`${formatTaskType(task.task_type)} - ${task.progress_message || "Queued"}`}
               onClick={() => {
                 if (task.channel_id && task.episode_id && onOpenEpisode) {
                   onOpenEpisode(task.channel_id, task.episode_id);
@@ -81,8 +81,8 @@ export function SidebarQueueWidget({
                 <button
                   type="button"
                   className="sidebar-queue-cancel-btn"
-                  title="Hủy tác vụ khỏi hàng chờ"
-                  aria-label="Hủy tác vụ"
+                  title="Cancel queued task"
+                  aria-label="Cancel task"
                   onClick={(e) => {
                     e.stopPropagation();
                     void onCancelTask(task.task_id);
@@ -97,11 +97,11 @@ export function SidebarQueueWidget({
       ) : runningTasks.length > 0 ? (
         <div className="sidebar-queue-running-hint" onClick={onOpenTasks} style={{ cursor: "pointer" }}>
           <span className="status-pulse-dot" />
-          <span>{runningTasks.length} tác vụ đang chạy · 0 chờ</span>
+          <span>{runningTasks.length} running · 0 queued</span>
         </div>
       ) : (
         <div className="sidebar-queue-empty" onClick={onOpenTasks} style={{ cursor: "pointer" }}>
-          <span>Không có hàng chờ</span>
+          <span>Queue is empty</span>
         </div>
       )}
     </div>
@@ -186,7 +186,7 @@ export function Sidebar({
 
         <div
           className="sidebar-balance-widget"
-          title="gpti2.store Image API balance (Tự động cập nhật mỗi 30s)"
+          title="Image API Balance (Auto-refreshed every 30s)"
           style={{ cursor: !balanceInfo && onOpenSettings ? "pointer" : "default" }}
           onClick={() => {
             if (!balanceInfo && onOpenSettings) onOpenSettings();
@@ -200,8 +200,8 @@ export function Sidebar({
             <button
               type="button"
               className="sidebar-balance-refresh-btn"
-              title="Cập nhật số dư API (Tự động mỗi 30s)"
-              aria-label="Cập nhật số dư API"
+              title="Refresh API balance"
+              aria-label="Refresh API balance"
               disabled={loadingBalance}
               onClick={(e) => {
                 e.stopPropagation();
@@ -214,13 +214,13 @@ export function Sidebar({
           <div className="sidebar-balance-amount">
             {balanceInfo !== null && balanceInfo !== undefined ? (
               <>
-                <strong>{balanceInfo.balance_vnd.toLocaleString("vi-VN")}</strong>
-                <span className="sidebar-balance-unit">đ</span>
+                <strong>{balanceInfo.balance_vnd.toLocaleString("en-US")}</strong>
+                <span className="sidebar-balance-unit">VND</span>
               </>
             ) : balanceError ? (
-              <span className="sidebar-balance-error" title={balanceError}>Chưa có Key</span>
+              <span className="sidebar-balance-error" title={balanceError}>No API Key</span>
             ) : (
-              <span className="sidebar-balance-loading">Đang tải…</span>
+              <span className="sidebar-balance-loading">Loading…</span>
             )}
           </div>
           {balanceInfo?.rpm ? (

@@ -351,8 +351,8 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
       has_api_key: Boolean(config.image_generation.api_key),
     },
     models: [
-      { id: "gpt-image-2", label: "GPT Image 2 (50đ / ảnh)" },
-      { id: "nano-banana-2", label: "Nano Banana 2 (100đ / ảnh - 2K)" },
+      { id: "gpt-image-2", label: "GPT Image 2 (50 VND / img)" },
+      { id: "nano-banana-2", label: "Nano Banana 2 (100 VND / img - 2K)" },
     ],
   }));
   server.get("/api/image/balance", async () => {
