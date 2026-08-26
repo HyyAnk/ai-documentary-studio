@@ -532,22 +532,15 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .layout-media_left_choices_right .question-title { grid-area: title; width: 100%; max-width: 1440px; justify-self: end; margin-left: auto; }
 .layout-media_left_choices_right .game-stage > .hero-image { grid-area: hero; width: 100%; height: 580px; margin-top: 0; }
 .layout-media_left_choices_right .answer-grid { grid-area: answers; grid-template-columns: 1fr; width: 100%; height: 580px; margin-top: 0; padding-top: 20px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-start; }
-.layout-media_left_choices_right .answer-grid.answer-count-2 { gap: 36px; height: 580px; padding-top: 18px; }
-.layout-media_left_choices_right .answer-count-2 .answer-card { height: 160px; min-height: 160px; margin-left: 90px; padding: 18px 44px 18px 48px; }
-.layout-media_left_choices_right .answer-count-2 .answer-card::before { inset: 8px 18px 8px 30px; border-width: 3.5px; }
-.layout-media_left_choices_right .answer-count-2 .answer-card > b { width: 196px; height: 196px; margin-left: -104px; font-size: 98px; border-width: 10px; }
-.layout-media_left_choices_right .answer-count-2 .answer-card span { font-size: 54px; font-weight: 900; }
-.layout-media_left_choices_right .answer-count-2 .choice-tier-medium span { font-size: 46px; }
-.layout-media_left_choices_right .answer-count-2 .choice-tier-long span { font-size: 38px; }
-.layout-media_left_choices_right .answer-count-2 .choice-tier-very_long span, .layout-media_left_choices_right .answer-count-2 .choice-tier-overflow span { font-size: 30px; }
-.layout-media_left_choices_right .answer-grid.answer-count-3 { gap: 28px; height: 580px; padding-top: 20px; }
-.layout-media_left_choices_right .answer-count-3 .answer-card { height: 116px; min-height: 116px; margin-left: 78px; padding: 12px 34px 12px 42px; }
-.layout-media_left_choices_right .answer-count-3 .answer-card::before { inset: 6px 14px 6px 24px; border-width: 3px; }
-.layout-media_left_choices_right .answer-count-3 .answer-card > b { width: 154px; height: 154px; margin-left: -82px; font-size: 78px; border-width: 9px; }
-.layout-media_left_choices_right .answer-count-3 .answer-card span { font-size: 48px; }
-.layout-media_left_choices_right .answer-count-3.choice-tier-medium span, .layout-media_left_choices_right .choice-tier-medium.answer-card span { font-size: 40px; }
-.layout-media_left_choices_right .answer-count-3.choice-tier-long span, .layout-media_left_choices_right .choice-tier-long.answer-card span { font-size: 32px; }
-.layout-media_left_choices_right .answer-count-3.choice-tier-very_long span, .layout-media_left_choices_right .choice-tier-very_long.answer-card span, .layout-media_left_choices_right .choice-tier-overflow.answer-card span { font-size: 26px; }
+.layout-media_left_choices_right .answer-grid.answer-count-2 { gap: 44px; height: 580px; padding-top: 104px; }
+.layout-media_left_choices_right .answer-count-2 .answer-card, .layout-media_left_choices_right .answer-count-3 .answer-card { height: 116px; min-height: 116px; margin-left: 76px; padding: 12px 34px 12px 42px; }
+.layout-media_left_choices_right .answer-count-2 .answer-card::before, .layout-media_left_choices_right .answer-count-3 .answer-card::before { inset: 6px 14px 6px 24px; border-width: 3px; }
+.layout-media_left_choices_right .answer-count-2 .answer-card > b, .layout-media_left_choices_right .answer-count-3 .answer-card > b { width: 138px; height: 138px; margin-left: -74px; font-size: 72px; border-width: 8px; }
+.layout-media_left_choices_right .answer-count-2 .answer-card span, .layout-media_left_choices_right .answer-count-3 .answer-card span { font-size: 48px; }
+.layout-media_left_choices_right .answer-count-2.choice-tier-medium span, .layout-media_left_choices_right .answer-count-3.choice-tier-medium span, .layout-media_left_choices_right .choice-tier-medium.answer-card span { font-size: 40px; }
+.layout-media_left_choices_right .answer-count-2.choice-tier-long span, .layout-media_left_choices_right .answer-count-3.choice-tier-long span, .layout-media_left_choices_right .choice-tier-long.answer-card span { font-size: 32px; }
+.layout-media_left_choices_right .answer-count-2.choice-tier-very_long span, .layout-media_left_choices_right .answer-count-2.choice-tier-overflow span, .layout-media_left_choices_right .answer-count-3.choice-tier-very_long span, .layout-media_left_choices_right .answer-count-3.choice-tier-overflow span, .layout-media_left_choices_right .choice-tier-very_long.answer-card span, .layout-media_left_choices_right .choice-tier-overflow.answer-card span { font-size: 26px; }
+.layout-media_left_choices_right .answer-grid.answer-count-3 { gap: 44px; height: 580px; padding-top: 24px; }
 .layout-media_left_choices_right .answer-grid.answer-count-4, .layout-media_left_choices_right .answer-grid.answer-count-5, .layout-media_left_choices_right .answer-grid.answer-count-6 { gap: 18px; height: 580px; padding-top: 16px; }
 .layout-media_left_choices_right .answer-count-4 .answer-card, .layout-media_left_choices_right .answer-count-5 .answer-card, .layout-media_left_choices_right .answer-count-6 .answer-card { height: 98px; min-height: 98px; margin-left: 64px; padding: 8px 24px 8px 32px; }
 .layout-media_left_choices_right .answer-count-4 .answer-card::before, .layout-media_left_choices_right .answer-count-5 .answer-card::before, .layout-media_left_choices_right .answer-count-6 .answer-card::before { inset: 5px 12px 5px 20px; border-width: 2.5px; }

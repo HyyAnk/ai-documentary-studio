@@ -130,8 +130,8 @@ describe("Candy Arcade visual regression contract", () => {
     expect(html).toContain("-webkit-text-stroke: 4px var(--choice-stroke-shadow)");
     expect(html).toContain("--choice-text-color: #78350F");
     expect(html).toContain("--choice-text-color: #831843");
-    expect(html).toContain(".layout-media_left_choices_right .answer-grid.answer-count-2 { gap: 36px; height: 580px; padding-top: 18px; }");
-    expect(html).toContain(".layout-media_left_choices_right .answer-count-2 .answer-card > b { width: 196px; height: 196px; margin-left: -104px; font-size: 98px;");
-    expect(html).toContain(".layout-media_left_choices_right .answer-count-3 .answer-card > b { width: 154px; height: 154px; margin-left: -82px; font-size: 78px;");
+    expect(html).toContain(".layout-media_left_choices_right .answer-grid.answer-count-2 { gap: 44px; height: 580px; padding-top: 104px; }");
+    expect(html).toContain(".layout-media_left_choices_right .answer-grid.answer-count-3 { gap: 44px; height: 580px; padding-top: 24px; }");
+    expect(html).toContain(".layout-media_left_choices_right .answer-count-2 .answer-card > b, .layout-media_left_choices_right .answer-count-3 .answer-card > b { width: 138px; height: 138px; margin-left: -74px; font-size: 72px;");
   });
 });
