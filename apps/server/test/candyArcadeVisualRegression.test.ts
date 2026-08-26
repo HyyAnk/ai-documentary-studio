@@ -113,4 +113,17 @@ describe("Candy Arcade visual regression contract", () => {
     expect(html).toContain("answer-float var(--scene-duration)");
     expect(html).toContain("visual-correct-border");
   });
+
+  it("renders prominent 3D glossy circular badges and distinct choice-coded stroke borders for kids", () => {
+    const html = renderHtml();
+    expect(html).toContain("border-radius: 50%");
+    expect(html).toContain("--choice-stroke: #FF3366");
+    expect(html).toContain("--choice-stroke: #0284C7");
+    expect(html).toContain("--choice-stroke: #EA580C");
+    expect(html).toMatch(/\.answer-card > b[^}]*width: 100px/);
+    expect(html).toMatch(/\.answer-card > b[^}]*font-size: 50px/);
+    expect(html).toMatch(/\.answer-card > b[^}]*margin-left: -48px/);
+    expect(html).toContain("border: 6px solid var(--choice-stroke)");
+    expect(html).toContain(".answer-card > b::after");
+  });
 });
