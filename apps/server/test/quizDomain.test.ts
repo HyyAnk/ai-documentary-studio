@@ -80,9 +80,88 @@ describe("Quiz V2 domain and Director", () => {
     expect(result.issues.some((issue) => issue.code === "director_midpoint_missing")).toBe(true);
   });
 
-  it("flags answer-position bias before a quiz is rendered", () => {
-    const quiz = deriveQuizV2FromScenes({ episodeId: "episode-1", language: "English", ageBand: "7-9", format: "multiple_choice", scenes: Array.from({ length: 5 }, (_, index) => scene(index + 1)) });
-    const assessment = assessQuiz({ quiz });
+  it("automatically rebalances choices so consecutive questions never share the same answer position", () => {
+    const quiz = deriveQuizV2FromScenes({
+      episodeId: "episode-1",
+      language: "English",
+      ageBand: "7-9",
+      format: "multiple_choice",
+      scenes: [scene(1, "Tiger"), scene(2, "Tiger"), scene(3, "Tiger"), scene(4, "Tiger"), scene(5, "Tiger")],
+    });
+    const correctIndices = quiz.questions.map((q) => q.choices.findIndex((c) => c.id === q.correct_choice_id));
+    for (let i = 1; i < correctIndices.length; i++) {
+      expect(correctIndices[i]).not.toBe(correctIndices[i - 1]);
+    }
+    // Verify each question's correct choice text remains "Tiger"
+    for (const q of quiz.questions) {
+      const correctChoice = q.choices.find((c) => c.id === q.correct_choice_id);
+      expect(correctChoice?.text).toBe("Tiger");
+    }
+  });
+
+  it("flags consecutive same answer position in QA assessment if manually constructed", () => {
+    const rawQuiz = {
+      schema_version: 2 as const,
+      episode_id: "episode-1",
+      age_band: "7-9" as const,
+      language: "English",
+      questions: [
+        {
+          id: "question-01",
+          number: 1,
+          format: "multiple_choice" as const,
+          difficulty: 1,
+          question: "Question 1",
+          choices: [{ id: "choice-a", text: "Alpha" }, { id: "choice-b", text: "Beta" }, { id: "choice-c", text: "Gamma" }],
+          correct_choice_id: "choice-a",
+          explanation: "Explanation 1",
+          fun_fact: "",
+          source_ids: ["C01"],
+          visual_opportunity: "Hero image",
+          validation: { semantic_status: "validated" as const, source_coverage: true, fact_locked: true },
+        },
+        {
+          id: "question-02",
+          number: 2,
+          format: "multiple_choice" as const,
+          difficulty: 2,
+          question: "Question 2",
+          choices: [{ id: "choice-a", text: "One" }, { id: "choice-b", text: "Two" }, { id: "choice-c", text: "Three" }],
+          correct_choice_id: "choice-a",
+          explanation: "Explanation 2",
+          fun_fact: "",
+          source_ids: ["C02"],
+          visual_opportunity: "Hero image",
+          validation: { semantic_status: "validated" as const, source_coverage: true, fact_locked: true },
+        },
+      ],
+    };
+    const assessment = assessQuiz({ quiz: rawQuiz });
+    expect(assessment.issues.some((issue) => issue.code === "quiz_consecutive_same_answer_position" && issue.severity === "warning")).toBe(true);
+  });
+
+  it("flags answer-position bias when correct answers are heavily concentrated in one position", () => {
+    const rawQuiz = {
+      schema_version: 2 as const,
+      episode_id: "episode-1",
+      age_band: "7-9" as const,
+      language: "English",
+      questions: Array.from({ length: 6 }, (_, index) => ({
+        id: `question-0${index + 1}`,
+        number: index + 1,
+        format: "multiple_choice" as const,
+        difficulty: 1,
+        question: `Question ${index + 1}`,
+        choices: [{ id: "choice-a", text: "Alpha" }, { id: "choice-b", text: "Beta" }, { id: "choice-c", text: "Gamma" }],
+        correct_choice_id: index < 5 ? "choice-a" : "choice-b",
+        explanation: `Explanation ${index + 1}`,
+        fun_fact: "",
+        source_ids: [`C0${index + 1}`],
+        visual_opportunity: "Hero image",
+        validation: { semantic_status: "validated" as const, source_coverage: true, fact_locked: true },
+      })),
+    };
+    const assessment = assessQuiz({ quiz: rawQuiz });
     expect(assessment.issues.some((issue) => issue.code === "quiz_answer_position_bias" && issue.severity === "warning")).toBe(true);
   });
 

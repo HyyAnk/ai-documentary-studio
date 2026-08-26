@@ -182,17 +182,17 @@ export class ContextEngine {
     const isTrueFalse = isQuiz && episode?.quiz_config?.quiz_format === "true_false";
     const treatmentChoicesContract = isTrueFalse
       ? "Answer choices (strictly exactly 2 choices: True or False / Đúng hoặc Sai — never add a 3rd option)"
-      : "Answer choices (strictly maximum 3 choices: A, B, or C only)";
+      : "Answer choices (strictly maximum 3 choices: A, B, or C only; vary and balance the correct answer position across A, B, and C so no two consecutive questions share the same correct choice position)";
     const scriptChoicesContract = isTrueFalse
       ? "choices (strictly exactly 2 choices: True or False / Đúng hoặc Sai)"
-      : "choices (strictly maximum 3 options: A, B, or C only)";
+      : "choices (strictly maximum 3 options: A, B, or C only; vary and balance the correct answer position so no two consecutive questions share the same answer letter)";
     const maxChoicesLimitText = isTrueFalse ? "2" : "3";
     const sequenceBeatChoicesContract = isTrueFalse
       ? "Choices array must contain exactly 2 choices (True and False only; never add a 3rd option)."
-      : "Choices array must contain at most 3 choices (A, B, C only; never exceed 3 options).";
+      : "Choices array must contain at most 3 choices (A, B, C only; never exceed 3 options; never place the correct answer in the same letter position for two consecutive questions).";
     const sceneBeatChoicesContract = isTrueFalse
       ? "Choices must have exactly 2 options (True and False only; never exceed 2 choices)."
-      : "Choices must have at most 3 options (A, B, C only; never exceed 3 choices).";
+      : "Choices must have at most 3 options (A, B, C only; never exceed 3 choices; never place the correct answer in the same letter position for two consecutive questions).";
 
     const outputContract = isQuiz && taskType === "GENERATE_RESEARCH"
       ? `Return only a completed Markdown quiz research dossier. The episode has exactly ${quizQuestionCount} questions. Build an answer ledger with exactly ${quizQuestionCount} entries, one entry for every question in order, and assign each entry one unique claim ID exactly once from C01 through ${quizLastClaimId}. Do not stop early, merge questions, reuse a claim ID, or invent extra question numbers. Every ledger entry must include Question number, Claim ID, canonical answer, one ultra-concise child-friendly explanation (strictly 1 punchy fun fact under 10 words and under 70 characters, single clause, direct and crisp with no filler or preamble), direct authoritative URL(s), and a note about ambiguity or safety. Include at least ${quizSourceMinimum} distinct direct authoritative URLs and enough evidence for every answer. Before returning, silently check that every ID in the complete sequence C01, C02, ... ${quizLastClaimId} appears in the ledger and that each question has evidence.`

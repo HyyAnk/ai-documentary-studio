@@ -43,9 +43,23 @@ export function assessQuiz(input: QuizAssessmentInput): QuizAssessment {
   });
   semanticProblems.forEach(add);
   const positionCounts = new Map<number, number>();
+  let previousCorrectIndex: number | null = null;
   for (const question of input.quiz.questions) {
     const correctIndex = question.choices.findIndex((choice) => choice.id === question.correct_choice_id);
-    if (correctIndex >= 0) positionCounts.set(correctIndex, (positionCounts.get(correctIndex) ?? 0) + 1);
+    if (correctIndex >= 0) {
+      positionCounts.set(correctIndex, (positionCounts.get(correctIndex) ?? 0) + 1);
+      if (question.choices.length >= 3 && previousCorrectIndex !== null && correctIndex === previousCorrectIndex) {
+        add({
+          code: "quiz_consecutive_same_answer_position",
+          severity: "warning",
+          message: `Question ${question.number} has the same correct answer position (${String.fromCharCode(65 + correctIndex)}) as the previous question.`,
+          next_action: "Rebalance choice order so consecutive questions do not share the same correct choice letter.",
+          question_ids: [question.id],
+          stage: "semantic",
+        });
+      }
+      previousCorrectIndex = correctIndex;
+    }
   }
   const mostCommonPosition = Math.max(0, ...positionCounts.values());
   if (input.quiz.questions.length >= 5 && mostCommonPosition / input.quiz.questions.length > .6) {

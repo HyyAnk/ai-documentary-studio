@@ -4,6 +4,7 @@ import {
   QUIZ_MAX_CHOICES_PER_QUESTION,
   QUIZ_MIN_CHOICES_PER_QUESTION,
   type QuizConfig,
+  type QuizQuestion,
   type QuizQuestionFormat,
   type QuizV2,
   type Scene,
@@ -152,7 +153,75 @@ export function deriveQuizV2FromScenes(input: {
       validation: { semantic_status: "validated", source_coverage: sourceIds.length > 0, fact_locked: true },
     };
   });
-  return validateQuizV2({ schema_version: 2, episode_id: input.episodeId, age_band: input.ageBand, language: input.language, questions });
+  const balancedQuestions = balanceQuizChoicePositions(questions);
+  return validateQuizV2({ schema_version: 2, episode_id: input.episodeId, age_band: input.ageBand, language: input.language, questions: balancedQuestions });
+}
+
+/**
+ * Ensures balanced choice positions across questions and strictly prevents
+ * two consecutive questions from sharing the same correct answer position
+ * (e.g. choice A followed by choice A) for layouts with 3 choices.
+ */
+export function balanceQuizChoicePositions(questions: QuizQuestion[]): QuizQuestion[] {
+  let previousCorrectIndex: number | null = null;
+  const positionCounts: number[] = [0, 0, 0];
+
+  return questions.map((question) => {
+    if (question.choices.length < 3) {
+      const currentIdx = question.choices.findIndex((c) => c.id === question.correct_choice_id);
+      if (currentIdx >= 0) {
+        positionCounts[currentIdx] = (positionCounts[currentIdx] ?? 0) + 1;
+        previousCorrectIndex = currentIdx;
+      }
+      return question;
+    }
+
+    const currentCorrectIdx = question.choices.findIndex((c) => c.id === question.correct_choice_id);
+    if (currentCorrectIdx < 0) return question;
+
+    const correctChoiceText = question.choices[currentCorrectIdx]!.text;
+    const otherChoicesTexts = question.choices.filter((_, idx) => idx !== currentCorrectIdx).map((c) => c.text);
+
+    let targetCorrectIdx = currentCorrectIdx;
+
+    if (previousCorrectIndex !== null && currentCorrectIdx === previousCorrectIndex) {
+      const candidates: number[] = [];
+      for (let i = 0; i < question.choices.length; i++) {
+        if (i !== previousCorrectIndex) {
+          candidates.push(i);
+        }
+      }
+      candidates.sort((a, b) => {
+        const countDiff = (positionCounts[a] ?? 0) - (positionCounts[b] ?? 0);
+        if (countDiff !== 0) return countDiff;
+        return a - b;
+      });
+      targetCorrectIdx = candidates[0] ?? ((currentCorrectIdx + 1) % question.choices.length);
+    }
+
+    const newChoicesTexts = new Array<string>(question.choices.length);
+    newChoicesTexts[targetCorrectIdx] = correctChoiceText;
+    let otherIdx = 0;
+    for (let i = 0; i < question.choices.length; i++) {
+      if (i !== targetCorrectIdx) {
+        newChoicesTexts[i] = otherChoicesTexts[otherIdx++] ?? "";
+      }
+    }
+
+    const newChoices = newChoicesTexts.map((text, idx) => ({
+      id: "choice-" + String.fromCharCode(97 + idx),
+      text,
+    }));
+
+    positionCounts[targetCorrectIdx] = (positionCounts[targetCorrectIdx] ?? 0) + 1;
+    previousCorrectIndex = targetCorrectIdx;
+
+    return {
+      ...question,
+      choices: newChoices,
+      correct_choice_id: newChoices[targetCorrectIdx]!.id,
+    };
+  });
 }
 
 function normalizeQuestionFormat(format: QuizConfig["quiz_format"]): QuizQuestionFormat {

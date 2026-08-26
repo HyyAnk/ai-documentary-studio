@@ -208,7 +208,7 @@ function answerCards(question: QuizV2["questions"][number], assets: Record<strin
     const layout = textLayout(choice.text, "choice");
     const optionAsset = assetFor(assets, `asset-${question.id}-${choice.id}`);
     const phaseSeconds = ambientPhaseSeconds("float", index, question.id);
-    return `<div class="answer-card ${state} choice-tier-${layout.tier}" style="--item-phase:${phaseSeconds}s" data-layout-allow-occlusion data-layout-allow-overflow><b data-layout-allow-occlusion data-text="${String.fromCharCode(65 + index)}">${String.fromCharCode(65 + index)}</b>${optionAsset ? `<img src="${escAttr(optionAsset)}" alt="">` : ""}<span data-layout-allow-occlusion data-text="${escAttr(choice.text)}">${esc(choice.text)}</span>${state === "answer-correct" ? "<i class=\"answer-check\" data-layout-ignore aria-hidden=\"true\">✓</i>" : ""}</div>`;
+    return `<div class="answer-card ${state} choice-tier-${layout.tier}" style="--item-phase:${phaseSeconds}s" data-layout-allow-occlusion data-layout-allow-overflow><b data-layout-allow-occlusion data-text="${String.fromCharCode(65 + index)}">${String.fromCharCode(65 + index)}</b>${optionAsset ? `<img src="${escAttr(optionAsset)}" alt="">` : ""}<span data-layout-allow-occlusion data-text="${escAttr(choice.text)}">${esc(choice.text)}</span></div>`;
   }).join("")}</div>`;
 }
 
@@ -217,7 +217,7 @@ function visualAnswerCards(question: QuizV2["questions"][number], assets: Record
     const state = "answer-" + visualAnswerState(choice.id, question.correct_choice_id, "reveal");
     const layout = textLayout(choice.text, "choice");
     const phaseSeconds = ambientPhaseSeconds("float", index, question.id);
-    return `<div class="visual-answer-card ${state} choice-tier-${layout.tier}" style="--item-phase:${phaseSeconds}s" data-layout-allow-occlusion data-layout-allow-overflow>${imageCard(assetFor(assets, `asset-${question.id}-${choice.id}`), choice.text, "option-image", index + question.number * 10)}<div class="visual-answer-label" data-layout-allow-overflow><b data-layout-allow-occlusion data-text="${String.fromCharCode(65 + index)}">${String.fromCharCode(65 + index)}</b><span data-layout-allow-occlusion data-text="${escAttr(choice.text)}">${esc(choice.text)}</span></div>${state === "answer-correct" ? "<i class=\"answer-check\" data-layout-ignore aria-hidden=\"true\">✓</i>" : ""}</div>`;
+    return `<div class="visual-answer-card ${state} choice-tier-${layout.tier}" style="--item-phase:${phaseSeconds}s" data-layout-allow-occlusion data-layout-allow-overflow>${imageCard(assetFor(assets, `asset-${question.id}-${choice.id}`), choice.text, "option-image", index + question.number * 10)}<div class="visual-answer-label" data-layout-allow-overflow><b data-layout-allow-occlusion data-text="${String.fromCharCode(65 + index)}">${String.fromCharCode(65 + index)}</b><span data-layout-allow-occlusion data-text="${escAttr(choice.text)}">${esc(choice.text)}</span></div></div>`;
   }).join("")}</div>`;
 }
 
@@ -532,7 +532,7 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .layout-media_left_choices_right .question-title { grid-area: title; width: 100%; max-width: 1440px; justify-self: end; margin-left: auto; }
 .layout-media_left_choices_right .game-stage > .hero-image { grid-area: hero; width: 100%; height: 580px; margin-top: 0; }
 .layout-media_left_choices_right .answer-grid { grid-area: answers; grid-template-columns: 1fr; width: 100%; height: 580px; margin-top: 0; padding-top: 20px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-start; }
-.layout-media_left_choices_right .answer-grid.answer-count-2 { gap: 44px; height: 580px; padding-top: 104px; }
+.layout-media_left_choices_right .answer-grid.answer-count-2 { gap: 50px; height: 580px; padding-top: 100px; }
 .layout-media_left_choices_right .answer-count-2 .answer-card, .layout-media_left_choices_right .answer-count-3 .answer-card { height: 116px; min-height: 116px; margin-left: 76px; padding: 12px 34px 12px 42px; }
 .layout-media_left_choices_right .answer-count-2 .answer-card::before, .layout-media_left_choices_right .answer-count-3 .answer-card::before { inset: 6px 14px 6px 24px; border-width: 3px; }
 .layout-media_left_choices_right .answer-count-2 .answer-card > b, .layout-media_left_choices_right .answer-count-3 .answer-card > b { width: 138px; height: 138px; margin-left: -74px; font-size: 72px; border-width: 8px; }
@@ -540,7 +540,7 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .layout-media_left_choices_right .answer-count-2.choice-tier-medium span, .layout-media_left_choices_right .answer-count-3.choice-tier-medium span, .layout-media_left_choices_right .choice-tier-medium.answer-card span { font-size: 40px; }
 .layout-media_left_choices_right .answer-count-2.choice-tier-long span, .layout-media_left_choices_right .answer-count-3.choice-tier-long span, .layout-media_left_choices_right .choice-tier-long.answer-card span { font-size: 32px; }
 .layout-media_left_choices_right .answer-count-2.choice-tier-very_long span, .layout-media_left_choices_right .answer-count-2.choice-tier-overflow span, .layout-media_left_choices_right .answer-count-3.choice-tier-very_long span, .layout-media_left_choices_right .answer-count-3.choice-tier-overflow span, .layout-media_left_choices_right .choice-tier-very_long.answer-card span, .layout-media_left_choices_right .choice-tier-overflow.answer-card span { font-size: 26px; }
-.layout-media_left_choices_right .answer-grid.answer-count-3 { gap: 44px; height: 580px; padding-top: 24px; }
+.layout-media_left_choices_right .answer-grid.answer-count-3 { gap: 50px; height: 580px; padding-top: 18px; }
 .layout-media_left_choices_right .answer-grid.answer-count-4, .layout-media_left_choices_right .answer-grid.answer-count-5, .layout-media_left_choices_right .answer-grid.answer-count-6 { gap: 18px; height: 580px; padding-top: 16px; }
 .layout-media_left_choices_right .answer-count-4 .answer-card, .layout-media_left_choices_right .answer-count-5 .answer-card, .layout-media_left_choices_right .answer-count-6 .answer-card { height: 98px; min-height: 98px; margin-left: 64px; padding: 8px 24px 8px 32px; }
 .layout-media_left_choices_right .answer-count-4 .answer-card::before, .layout-media_left_choices_right .answer-count-5 .answer-card::before, .layout-media_left_choices_right .answer-count-6 .answer-card::before { inset: 5px 12px 5px 20px; border-width: 2.5px; }
