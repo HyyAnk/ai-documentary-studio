@@ -11,7 +11,7 @@ describe("Contrast Self-Healing & Auto-Correction", () => {
       ok: false,
       contrast: {
         findings: [
-          { severity: "warning", message: "Contrast is 2.49:1; WCAG AA requires 3:1.", text: "space", ratio: 2.49, requiredRatio: 3, time: 50.75 },
+          { severity: "error", message: "Contrast is 1.85:1; WCAG AA requires 3:1.", text: "space", ratio: 1.85, requiredRatio: 3, time: 50.75 },
         ],
       },
     };
@@ -62,7 +62,7 @@ describe("Contrast Self-Healing & Auto-Correction", () => {
         ok: false,
         contrast: {
           findings: [
-            { severity: "warning", message: "Contrast is 2.49:1; WCAG AA requires 3:1.", text: "space", ratio: 2.49, requiredRatio: 3 },
+            { severity: "error", message: "Contrast is 1.85:1; WCAG AA requires 3:1.", text: "space", ratio: 1.85, requiredRatio: 3 },
           ],
         },
       };
