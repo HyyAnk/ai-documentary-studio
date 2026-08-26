@@ -1,4 +1,4 @@
-import { CircleNotch, Eye, EyeSlash, FileText, FloppyDisk, HardDrives, Info, Play, Plus, SlidersHorizontal, Sparkle, SpeakerHigh, TerminalWindow, Trash, VideoCamera } from "@phosphor-icons/react";
+import { ArrowsClockwise, CircleNotch, Eye, EyeSlash, FileText, FloppyDisk, HardDrives, Info, Play, Plus, SlidersHorizontal, Sparkle, SpeakerHigh, TerminalWindow, Trash, VideoCamera } from "@phosphor-icons/react";
 import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import type { AppConfig, Channel, CodexSettingsResponse, AntigravitySettingsResponse, StorageInfo, VoiceProfile } from "@studio/shared";
 import { api } from "../api";
@@ -175,6 +175,11 @@ export function SettingsView({
   const [maxConcurrentImageTasks, setMaxConcurrentImageTasks] = useState(
     appConfig?.image_generation?.max_concurrent_tasks ?? 3
   );
+  const [historyEnabled, setHistoryEnabled] = useState(appConfig?.question_history?.enabled ?? true);
+  const [passThreshold, setPassThreshold] = useState(appConfig?.question_history?.pass_threshold ?? 2);
+  const [ttlDays, setTtlDays] = useState(appConfig?.question_history?.ttl_days ?? 30);
+  const [autoRemix, setAutoRemix] = useState(appConfig?.question_history?.auto_remix ?? false);
+  const [savingHistory, setSavingHistory] = useState(false);
   const [selectedChannelId, setSelectedChannelId] = useState(channels[0]?.channel_id ?? "");
   const [voices, setVoices] = useState<VoiceProfile[]>([]);
   const [voiceName, setVoiceName] = useState("");
@@ -255,7 +260,31 @@ export function SettingsView({
       setHasImageApiKey(Boolean(appConfig.image_generation.has_api_key || appConfig.image_generation.api_key));
       setImageApiKey(appConfig.image_generation.api_key ?? "");
     }
+    if (appConfig?.question_history) {
+      setHistoryEnabled(appConfig.question_history.enabled ?? true);
+      setPassThreshold(appConfig.question_history.pass_threshold ?? 2);
+      setTtlDays(appConfig.question_history.ttl_days ?? 30);
+      setAutoRemix(appConfig.question_history.auto_remix ?? false);
+    }
   }, [appConfig]);
+
+  const saveHistory = async (event: FormEvent) => {
+    event.preventDefault();
+    try {
+      setSavingHistory(true);
+      await api.saveHistorySettings({
+        enabled: historyEnabled,
+        pass_threshold: passThreshold,
+        ttl_days: ttlDays,
+        auto_remix: autoRemix,
+      });
+      onNotice({ tone: "good", message: "Đã lưu cài đặt Question History & Anti-Duplicate thành công!" });
+    } catch (error) {
+      onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Lưu cài đặt thất bại" });
+    } finally {
+      setSavingHistory(false);
+    }
+  };
 
   const saveStorage = async (event: FormEvent) => {
     event.preventDefault();
@@ -1200,6 +1229,73 @@ export function SettingsView({
                   </button>
                 ) : null}
               </div>
+            </form>
+          </section>
+
+          <section className="panel history-settings-panel">
+            <div className="panel-heading">
+              <div>
+                <p className="eyebrow">Content Quality & Anti-Duplicate</p>
+                <h2>Question History & Duplicate Gate</h2>
+              </div>
+              <ArrowsClockwise size={22} />
+            </div>
+            <StatusLine label="History check" value={historyEnabled ? "Enabled" : "Disabled"} />
+            <StatusLine label="Pass history threshold" value={`<= ${passThreshold} duplicate questions`} />
+            <StatusLine label="Retention period (TTL)" value={`${ttlDays} days`} />
+            <form className="codex-form" onSubmit={(event) => void saveHistory(event)}>
+              <label className="checkbox-label" style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={historyEnabled}
+                  onChange={(event) => setHistoryEnabled(event.target.checked)}
+                />
+                <span>Kích hoạt History Check (Đối chiếu lịch sử câu hỏi)</span>
+              </label>
+
+              <label>
+                Pass History Threshold (Số câu trùng tối đa được phép tự động Pass)
+                <input
+                  type="number"
+                  min="0"
+                  max="20"
+                  step="1"
+                  value={passThreshold}
+                  onChange={(event) => setPassThreshold(Number(event.target.value))}
+                />
+                <small className="field-help">
+                  Ví dụ: Nhập 2 nghĩa là nếu video chỉ trùng từ 2 câu trở xuống thì hệ thống vẫn cho phép tự động build tiếp mà không dừng lại.
+                </small>
+              </label>
+
+              <label>
+                Thời gian lưu trữ lịch sử (TTL tính bằng Ngày)
+                <input
+                  type="number"
+                  min="1"
+                  max="365"
+                  step="1"
+                  value={ttlDays}
+                  onChange={(event) => setTtlDays(Number(event.target.value))}
+                />
+                <small className="field-help">
+                  Mặc định: 30 ngày. Các câu hỏi vượt quá số ngày này sẽ được tự động dọn dẹp để tối ưu hóa bộ nhớ.
+                </small>
+              </label>
+
+              <label className="checkbox-label" style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={autoRemix}
+                  onChange={(event) => setAutoRemix(event.target.checked)}
+                />
+                <span>Tự động Remix bằng AI khi phát hiện câu hỏi bị trùng</span>
+              </label>
+
+              <button className="primary-button" disabled={savingHistory}>
+                {savingHistory ? <CircleNotch className="spin" size={16} /> : <FloppyDisk size={16} />}
+                <span>Save History Settings</span>
+              </button>
             </form>
           </section>
         </div>

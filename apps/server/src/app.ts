@@ -20,12 +20,15 @@ import {
   EpisodeSettingsInputSchema,
   SaveTextInputSchema,
   SceneSchema,
+  SuggestTopicsInputSchema,
   TopicConfirmInputSchema,
   UpdateChannelInputSchema,
   StoragePathInputSchema,
   VoiceReferenceUploadSchema,
   VideoSettingsInputSchema,
   ImageSettingsInputSchema,
+  RemixQuestionsInputSchema,
+  SaveHistorySettingsInputSchema,
   type AppConfig,
   type StorageInfo,
   type TaskEvent,
@@ -42,6 +45,7 @@ import {
   saveImageSettings,
   saveStorageRoot,
   saveVideoSettings,
+  saveHistorySettings,
 } from "./config.js";
 import { CodexAppServerClient } from "./codex.js";
 import { AntigravityClient } from "./antigravity.js";
@@ -56,7 +60,7 @@ import { assessProduction, countWords, extractNarration, extractNarrationChunks,
 import { parseContinuityBundles } from "./visualBundles.js";
 import { loadServerEnv } from "./env.js";
 import { checkGpti2Balance } from "./providers/gpti2Image.js";
-import { assertQuizRenderReady, compileTimeline, generateDirector, generateQuiz, generateVoice, planAssets, planVoice, readQuizArtifacts, resolveAssets, runQa } from "./quiz/pipeline/orchestrator.js";
+import { assertQuizRenderReady, compileTimeline, generateDirector, generateQuiz, generateVoice, planAssets, planVoice, readQuizArtifacts, remixQuizQuestions, resolveAssets, runQa } from "./quiz/pipeline/orchestrator.js";
 
 const VOICE_PREVIEW_TEXT = "This is a preview of this narrator voice for AI Documentary Studio.";
 
@@ -335,6 +339,11 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     tasks.updateVideoConfig(config.video_generation);
     return { video_generation: config.video_generation };
   });
+  server.post("/api/history/settings", async (request) => {
+    const input = SaveHistorySettingsInputSchema.parse(request.body);
+    config = await saveHistorySettings(rootDirectory, input);
+    return { question_history: config.question_history };
+  });
   server.get("/api/image/settings", async () => ({
     settings: {
       ...config.image_generation,
@@ -434,7 +443,9 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
   server.get("/api/channels/:channelId/topics", async (request) => ({ topics: await repository.listTopics((request.params as { channelId: string }).channelId) }));
   server.post("/api/channels/:channelId/topics/suggest", async (request, reply) => {
     const channelId = (request.params as { channelId: string }).channelId;
-    const task = tasks.submit("SUGGEST_TOPICS", channelId, null);
+    const payload = request.body && typeof request.body === "object" && !Array.isArray(request.body) ? request.body : {};
+    const input = SuggestTopicsInputSchema.parse(payload);
+    const task = tasks.submit("SUGGEST_TOPICS", channelId, null, undefined, undefined, input.topic_hint);
     return reply.code(202).send({ task });
   });
   server.post("/api/channels/:channelId/topics/:topicId/confirm", async (request, reply) => {
@@ -524,6 +535,27 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
   server.post("/api/channels/:channelId/episodes/:episodeId/quiz-v2/qa", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };
     return runQa({ repository, config, channelId: params.channelId, episodeId: params.episodeId });
+  });
+  server.get("/api/channels/:channelId/episodes/:episodeId/quiz-v2/history-check", async (request) => {
+    const params = request.params as { channelId: string; episodeId: string };
+    const artifacts = await readQuizArtifacts({ repository, config, channelId: params.channelId, episodeId: params.episodeId });
+    return { history_check: artifacts.history_check };
+  });
+  server.post("/api/channels/:channelId/episodes/:episodeId/quiz-v2/remix", async (request) => {
+    const params = request.params as { channelId: string; episodeId: string };
+    const payload = request.body && typeof request.body === "object" && !Array.isArray(request.body) ? request.body : {};
+    const input = RemixQuestionsInputSchema.parse(payload);
+    return remixQuizQuestions(
+      {
+        repository,
+        config,
+        channelId: params.channelId,
+        episodeId: params.episodeId,
+        activeEngine: tasks.getActiveEngine(),
+        antigravityClient: antigravity,
+      },
+      input.question_ids
+    );
   });
   server.post("/api/channels/:channelId/episodes/:episodeId/quiz-v2/render", async (request, reply) => {
     const params = request.params as { channelId: string; episodeId: string };

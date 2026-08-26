@@ -8,6 +8,7 @@ import {
   VideoSettingsInputSchema,
   AntigravitySettingsInputSchema,
   EngineSettingsInputSchema,
+  SaveHistorySettingsInputSchema,
   type AppConfig,
   type AudioSettingsInput,
   type CodexSettingsInput,
@@ -15,6 +16,7 @@ import {
   type VideoSettingsInput,
   type AntigravitySettingsInput,
   type EngineSettingsInput,
+  type SaveHistorySettingsInput,
 } from "@studio/shared";
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -70,6 +72,12 @@ export const DEFAULT_CONFIG: AppConfig = {
     merge_gap_ms: 300,
     match_target_duration: true,
   },
+  question_history: {
+    enabled: true,
+    pass_threshold: 2,
+    ttl_days: 30,
+    auto_remix: false,
+  },
 };
 
 export type StorageSettings = {
@@ -109,6 +117,7 @@ export async function loadConfig(rootDirectory: string): Promise<AppConfig> {
     const localAudioSettings = localAudio.audio_generation && typeof localAudio.audio_generation === "object" ? localAudio.audio_generation as Record<string, unknown> : {};
     const trackedImages = raw.image_generation && typeof raw.image_generation === "object" ? raw.image_generation as Record<string, unknown> : {};
     const localImageSettings = localImage.image_generation && typeof localImage.image_generation === "object" ? localImage.image_generation as Record<string, unknown> : {};
+    const trackedHistory = raw.question_history && typeof raw.question_history === "object" ? raw.question_history as Record<string, unknown> : {};
     return AppConfigSchema.parse({
       ...DEFAULT_CONFIG,
       ...raw,
@@ -117,6 +126,7 @@ export async function loadConfig(rootDirectory: string): Promise<AppConfig> {
       antigravity: { ...DEFAULT_CONFIG.antigravity, ...trackedAgy, api_key: "", ...localAgySettings },
       audio_generation: { ...DEFAULT_CONFIG.audio_generation, ...trackedAudio, ...localAudioSettings },
       image_generation: { ...DEFAULT_CONFIG.image_generation, ...trackedImages, ...localImageSettings },
+      question_history: { ...DEFAULT_CONFIG.question_history, ...trackedHistory },
     });
   } catch {
     await mkdir(path.dirname(configPath), { recursive: true });
@@ -137,6 +147,17 @@ export async function loadConfig(rootDirectory: string): Promise<AppConfig> {
       image_generation: { ...DEFAULT_CONFIG.image_generation, ...localImageSettings },
     });
   }
+}
+
+export async function saveHistorySettings(rootDirectory: string, input: SaveHistorySettingsInput): Promise<AppConfig> {
+  const parsed = SaveHistorySettingsInputSchema.parse(input);
+  const current = await loadConfig(rootDirectory);
+  const next = { ...current.question_history, ...parsed };
+  const configPath = path.join(rootDirectory, ".documentary-studio", "config.json");
+  await mkdir(path.dirname(configPath), { recursive: true });
+  const raw = await readJsonFile(configPath);
+  await writeFile(configPath, `${JSON.stringify({ ...raw, question_history: next }, null, 2)}\n`, "utf8");
+  return loadConfig(rootDirectory);
 }
 
 export async function saveCodexSettings(rootDirectory: string, input: CodexSettingsInput): Promise<AppConfig> {

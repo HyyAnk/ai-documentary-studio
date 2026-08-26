@@ -90,6 +90,7 @@ export class TaskManager extends EventEmitter {
   private readonly assemblingEpisodes = new Set<string>();
   private readonly activeImageControllers = new Map<string, AbortController>();
   private readonly imageVariants = new Map<string, number>();
+  private readonly topicHints = new Map<string, string>();
   private runningCount = 0;
   private runningAudioCount = 0;
   private runningImageCount = 0;
@@ -132,7 +133,7 @@ export class TaskManager extends EventEmitter {
     super();
     this.activeEngine = activeEngine;
     this.videoConfig = typeof videoConfigOrMaxSceneDuration === "number"
-      ? { provider: "hyperframes", model: "", hyperframes_command: "npx hyperframes", render_quality: "draft", fps: 30, max_scene_duration_seconds: videoConfigOrMaxSceneDuration, default_scene_duration_seconds: 6, narration_words_per_second: 2.3, aspect_ratio: "16:9" }
+      ? { ...DEFAULT_CONFIG.video_generation, max_scene_duration_seconds: videoConfigOrMaxSceneDuration }
       : videoConfigOrMaxSceneDuration;
     this.audioConfig = audioConfig;
     this.imageConfig = imageConfig;
@@ -184,6 +185,7 @@ export class TaskManager extends EventEmitter {
     if (this.hasActiveWork()) throw new RepositoryError("Finish active tasks before changing storage", "STORAGE_BUSY");
     this.tasks.clear();
     this.imageVariants.clear();
+    this.topicHints.clear();
     this.activeImageControllers.clear();
     this.approvalRequests.clear();
     this.locks.clear();
@@ -266,7 +268,7 @@ export class TaskManager extends EventEmitter {
       this.list().some((task) => ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(task.status));
   }
 
-  submit(taskType: TaskType, channelId: string, episodeId: string | null, sceneNumber?: number, requestedImageVariant?: number): Task {
+  submit(taskType: TaskType, channelId: string, episodeId: string | null, sceneNumber?: number, requestedImageVariant?: number, topicHint?: string): Task {
     if (taskType === "GENERATE_BUNDLE_IMAGE" && !this.imageConfig.enabled) throw new RepositoryError("Image generation is disabled in Settings", "IMAGE_GENERATION_DISABLED");
     const imageVariant = taskType === "GENERATE_BUNDLE_IMAGE" && episodeId && sceneNumber
       ? requestedImageVariant ?? this.list().filter((item) => item.task_type === "GENERATE_BUNDLE_IMAGE" && item.episode_id === episodeId && item.scene_number === sceneNumber && ["QUEUED", "RUNNING", "WAITING_APPROVAL"].includes(item.status)).length % Math.max(1, this.imageConfig.images_per_bundle)
@@ -323,6 +325,7 @@ export class TaskManager extends EventEmitter {
       accumulated_duration_seconds: accumulatedDuration,
     });
     if (taskType === "GENERATE_BUNDLE_IMAGE") this.imageVariants.set(task.task_id, imageVariant);
+    if (taskType === "SUGGEST_TOPICS" && topicHint?.trim()) this.topicHints.set(task.task_id, topicHint.trim());
     this.tasks.set(task.task_id, task);
     void this.persist(task);
     this.emitTask(task);
@@ -335,6 +338,7 @@ export class TaskManager extends EventEmitter {
     if (task.status === "QUEUED") {
       await this.update(taskId, { status: "CANCELLED", completed_at: nowIso(), progress_message: "Cancelled before start" });
       this.imageVariants.delete(taskId);
+      this.topicHints.delete(taskId);
       void this.pump();
       return this.get(taskId);
     }
@@ -465,7 +469,8 @@ export class TaskManager extends EventEmitter {
     const context = { profileId: task.channel_id, workerId: task.task_id, step: `run_task:${task.task_type}` };
     try {
       await this.update(task.task_id, { status: "RUNNING", started_at: nowIso(), queue_position: null, progress_message: "Preparing scoped context" });
-      const manifest = await this.contextEngine.build(task.task_type, task.channel_id, task.episode_id, this.findSceneNumber(task.task_id), this.imageVariants.get(task.task_id) ?? 0);
+      const topicHint = this.topicHints.get(task.task_id);
+      const manifest = await this.contextEngine.build(task.task_type, task.channel_id, task.episode_id, this.findSceneNumber(task.task_id), this.imageVariants.get(task.task_id) ?? 0, topicHint);
       const isAntigravity = this.activeEngine === "antigravity" && Boolean(this.antigravity);
       const client = isAntigravity ? this.antigravity! : this.codex;
       const engineName = isAntigravity ? "Antigravity" : "Codex";
@@ -1050,6 +1055,13 @@ export class TaskManager extends EventEmitter {
       }));
       const videoPath = await this.repository.writeVideoArtifact(task.channel_id, task.episode_id, await readFile(outputPath));
       await this.repository.saveVideoMetadata(task.channel_id, task.episode_id, videoPath, Number(duration.toFixed(3)), manifestPath);
+      if (completeQuizV2?.quiz && completeQuizV2.quiz.questions.length > 0) {
+        try {
+          await this.repository.appendQuestionHistory(task.channel_id, task.episode_id, completeQuizV2.quiz.questions);
+        } catch {
+          // Ignore non-fatal question history save error
+        }
+      }
       await this.update(task.task_id, { progress_message: "Quiz video ready", progress_percent: 100 });
       await this.finish(task.task_id, "COMPLETED", null, [videoPath, manifestPath]);
       this.logger.ok("Quiz video rendered", { ...context, step: "render_video" });
@@ -1461,7 +1473,8 @@ export class TaskManager extends EventEmitter {
         await this.repository.saveChannelDna(task.channel_id, extractMarkdown(output, "# Channel DNA"));
         outputFiles = [`channels/${(await this.repository.getChannel(task.channel_id)).slug}/channel_dna.md`];
       } else if (task.task_type === "SUGGEST_TOPICS") {
-        const candidates = parseTopicCandidates(output, task.channel_id);
+        const topicHint = this.topicHints.get(task.task_id);
+        const candidates = parseTopicCandidates(output, task.channel_id, topicHint);
         await this.repository.saveTopicRun(task.channel_id, candidates);
         outputFiles = [`channels/${(await this.repository.getChannel(task.channel_id)).slug}/topics/`];
       } else if (task.task_type === "GENERATE_RESEARCH") {
@@ -1751,6 +1764,7 @@ export class TaskManager extends EventEmitter {
     this.completionWaiters.delete(taskId);
     await this.update(taskId, { status, error, completed_at: nowIso(), output_files: outputFiles.length ? outputFiles : this.get(taskId).output_files, progress_message: status === "COMPLETED" ? "Completed" : error ?? status, progress_percent: status === "COMPLETED" ? 100 : this.get(taskId).progress_percent });
     this.imageVariants.delete(taskId);
+    this.topicHints.delete(taskId);
     const isAntigravity = this.activeEngine === "antigravity";
     const cleanupConfig = isAntigravity ? this.antigravityCleanupConfig : this.codexCleanupConfig;
     const shouldDelete = Boolean(threadId && cleanupConfig.auto_delete_threads && (status === "COMPLETED" || ((status === "FAILED" || status === "CANCELLED") && cleanupConfig.failed_thread_retention_days === 0)));
@@ -1987,7 +2001,7 @@ function parseJson(output: string, context = "Codex"): unknown {
   }
 }
 
-function parseTopicCandidates(output: string, channelId: string) {
+function parseTopicCandidates(output: string, channelId: string, topicHint?: string) {
   const raw = parseJson(output);
   const list = Array.isArray(raw) ? raw : (raw as { candidates?: unknown[] }).candidates;
   if (!Array.isArray(list) || list.length !== 5) throw new Error("Codex topic output must contain exactly 5 candidates");
@@ -1995,6 +2009,8 @@ function parseTopicCandidates(output: string, channelId: string) {
   const ages = ["4-6", "7-9", "10-12", "family"] as const;
   return list.map((item, index) => {
     const candidate = item as Record<string, unknown>;
+    const rawThemeHint = candidate.theme_hint ? String(candidate.theme_hint).trim() : undefined;
+    const themeHint = rawThemeHint || (topicHint && index < 2 ? topicHint : undefined);
     return {
       topic_id: makeId(`topic${index + 1}`),
       channel_id: channelId,
@@ -2009,6 +2025,7 @@ function parseTopicCandidates(output: string, channelId: string) {
       question_count: Math.max(QUIZ_MIN_QUESTION_COUNT, Math.min(QUIZ_MAX_QUESTION_COUNT, Number(candidate.question_count) || 8)),
       age_band: ages.includes(String(candidate.age_band) as typeof ages[number]) ? String(candidate.age_band) as typeof ages[number] : "7-9",
       visual_style: "mixed" as const,
+      ...(themeHint ? { theme_hint: themeHint } : {}),
     };
   });
 }

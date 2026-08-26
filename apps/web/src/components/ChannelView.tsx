@@ -474,7 +474,14 @@ export function TopicCard({
 
   return <article className="topic-card">
     <div className="topic-card-top-bar">
-      <div className="topic-number">Topic candidate</div>
+      <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+        <div className="topic-number">Topic candidate</div>
+        {topic.theme_hint ? (
+          <span className="topic-theme-badge" title={`Gợi ý theo chủ đề: ${topic.theme_hint}`}>
+            🎯 {topic.theme_hint}
+          </span>
+        ) : null}
+      </div>
       <TopicLayoutPreviewButton quizFormat={topic.quiz_format} />
     </div>
     <h3>{topic.title}</h3>
@@ -576,6 +583,7 @@ export function ChannelDetail({
   const dnaTask = latestTask(channelTasks, ["GENERATE_DNA"]);
   const topicTaskActive = Boolean(topicTask && isTaskActive(topicTask));
   const [topicClock, setTopicClock] = useState(() => Date.now());
+  const [topicHint, setTopicHint] = useState("");
   const observedTerminalTasks = useRef(new Set<string>());
   const loadVersion = useRef(0);
 
@@ -603,13 +611,19 @@ export function ChannelDetail({
   useEffect(() => { if (!channelTasks.some(isTaskActive)) return; const timer = window.setInterval(() => setTopicClock(Date.now()), 1000); return () => window.clearInterval(timer); }, [channelTasks.some(isTaskActive)]);
   useEffect(() => { const newlyTerminal = channelTasks.filter((task) => isTaskTerminal(task) && !observedTerminalTasks.current.has(task.task_id)); if (newlyTerminal.length === 0) return; newlyTerminal.forEach((task) => observedTerminalTasks.current.add(task.task_id)); void load().then(onRefresh).catch((error: Error) => onNotice({ tone: "bad", message: error.message })); }, [channelTasks.map((task) => `${task.task_id}:${task.status}`).join("|"), load, onNotice, onRefresh]);
 
-  const suggest = async () => {
+  const suggest = async (overrideHint?: string) => {
     if (topicTaskActive) return;
     setBusy("topics");
+    const hintToUse = (overrideHint !== undefined ? overrideHint : topicHint).trim();
     try {
-      const result = await api.suggestTopics(channel.channel_id);
+      const result = await api.suggestTopics(channel.channel_id, hintToUse || undefined);
       onTaskSubmitted(result.task);
-      onNotice({ tone: "good", message: "Generating 5 lightweight topic ideas..." });
+      onNotice({
+        tone: "good",
+        message: hintToUse
+          ? `Generating 5 topic ideas (2 on "${hintToUse}" + 3 random)...`
+          : "Generating 5 lightweight topic ideas...",
+      });
       switchTab("topics");
     } catch (error) {
       onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Could not generate topics" });
@@ -816,14 +830,29 @@ export function ChannelDetail({
                 <p className="eyebrow">Brainstorm & Curation</p>
                 <h2>Topic Ideas ({topics.length})</h2>
               </div>
-              <button
-                className="primary-button"
-                disabled={busy === "topics" || topicTaskActive || channel.status === "ARCHIVED"}
-                onClick={() => void suggest()}
-              >
-                {busy === "topics" || topicTaskActive ? <CircleNotch className="spin" size={17} /> : <Sparkle size={17} />}
-                <span>{topicTaskActive ? "Generating…" : "Suggest 5 topics"}</span>
-              </button>
+              <div className="topic-suggest-group">
+                <input
+                  type="text"
+                  className="text-input topic-hint-input"
+                  placeholder="Suggest Keyword"
+                  value={topicHint}
+                  onChange={(event) => setTopicHint(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !topicTaskActive && busy !== "topics" && channel.status !== "ARCHIVED") {
+                      void suggest();
+                    }
+                  }}
+                  disabled={busy === "topics" || topicTaskActive || channel.status === "ARCHIVED"}
+                />
+                <button
+                  className="primary-button"
+                  disabled={busy === "topics" || topicTaskActive || channel.status === "ARCHIVED"}
+                  onClick={() => void suggest()}
+                >
+                  {busy === "topics" || topicTaskActive ? <CircleNotch className="spin" size={17} /> : <Sparkle size={17} />}
+                  <span>{topicTaskActive ? "Generating…" : "Suggest 5 topics"}</span>
+                </button>
+              </div>
             </div>
 
             {topicTask ? <TopicProgress task={topicTask} now={topicClock} /> : null}
@@ -833,7 +862,7 @@ export function ChannelDetail({
                 compact
                 icon={<Lightbulb size={23} />}
                 title="No topic candidates yet"
-                copy="Let AI generate 5 tailored video concepts aligned with your Channel DNA."
+                copy="Let AI generate 5 tailored video concepts aligned with your Channel DNA, or enter a topic hint above."
                 action="Suggest topics"
                 disabled={topicTaskActive}
                 busy={topicTaskActive}

@@ -2497,6 +2497,56 @@ h3 {
 /* ==========================================================================
    Topic Candidate Cards (Suggestions)
    ========================================================================== */
+.topic-suggest-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.topic-hint-input {
+  min-width: 240px;
+  max-width: 320px;
+  height: 38px;
+  font-size: 13px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.topic-hint-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.topic-hint-input::placeholder {
+  color: var(--muted, #8492a6);
+  font-size: 12.5px;
+  opacity: 0.75;
+}
+
+.topic-theme-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #d97706;
+  line-height: 1.3;
+  white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .topic-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -5731,3 +5781,281 @@ h3 {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ==========================================================================
+   Question Remix & History Check
+   ========================================================================== */
+
+.remix-section {
+  padding: 24px;
+}
+
+.history-check-summary-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-radius: var(--radius-md, 8px);
+  margin-bottom: 24px;
+  gap: 16px;
+  border: 1px solid var(--line);
+}
+
+.history-check-summary-banner.is-passed {
+  background: rgba(16, 185, 129, 0.08);
+  border-color: rgba(16, 185, 129, 0.25);
+}
+
+.history-check-summary-banner.is-blocked {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.summary-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.status-icon-passed {
+  color: #10b981;
+  flex-shrink: 0;
+}
+
+.status-icon-warning {
+  color: #f59e0b;
+  flex-shrink: 0;
+}
+
+.summary-title {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+
+.summary-desc {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.status-pill.is-success {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.status-pill.is-warning {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.remix-cards-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.remix-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface);
+  padding: 16px;
+  transition: all 0.15s ease;
+}
+
+.remix-card.is-duplicate {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.03);
+}
+
+.remix-card.is-remixed {
+  border-color: rgba(99, 102, 241, 0.4);
+  background: rgba(99, 102, 241, 0.03);
+}
+
+.remix-card.is-clean {
+  border-color: var(--line);
+}
+
+.remix-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line-subtle, rgba(255, 255, 255, 0.06));
+}
+
+.remix-card-number {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.q-badge {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--surface-subtle, rgba(255, 255, 255, 0.05));
+  color: var(--ink);
+}
+
+.match-status-badge {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.match-status-badge.is-duplicate {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.match-status-badge.is-remixed {
+  background: rgba(99, 102, 241, 0.12);
+  color: #818cf8;
+  border: 1px solid rgba(99, 102, 241, 0.25);
+}
+
+.match-status-badge.is-passed {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+}
+
+.similarity-pill {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--surface-subtle, rgba(255, 255, 255, 0.05));
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.remix-card-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .remix-card-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.remix-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.col-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.remix-question-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0;
+  line-height: 1.45;
+}
+
+.remix-question-text.history-text {
+  color: #fca5a5;
+  font-style: italic;
+}
+
+.remix-choices-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.choice-chip {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: var(--surface-subtle, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.choice-chip.is-correct {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #10b981;
+  font-weight: 600;
+}
+
+.matched-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.match-reason-tag {
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.clean-note {
+  font-size: 13px;
+  color: #10b981;
+  margin: auto 0;
+  font-style: italic;
+}
+
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.tab-badge.badge-warning {
+  background: #f59e0b;
+  color: #000;
+}
+
+.tab-badge.badge-success {
+  background: #10b981;
+  color: #fff;
+}
+

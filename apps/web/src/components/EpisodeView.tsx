@@ -1,6 +1,6 @@
-import { ArrowLeft, ArrowsInSimple, ArrowsOutSimple, Check, CheckCircle, CircleNotch, Copy, DownloadSimple, Eye, FileText, FilmSlate, FloppyDisk, FolderOpen, Image, Lightbulb, MagnifyingGlass, PencilSimple, Play, SpeakerHigh, VideoCamera, WarningCircle, X } from "@phosphor-icons/react";
+import { ArrowLeft, ArrowRight, ArrowsClockwise, ArrowsInSimple, ArrowsOutSimple, Check, CheckCircle, CircleNotch, Copy, DownloadSimple, Eye, FileText, FilmSlate, FloppyDisk, FolderOpen, Image, Lightbulb, MagnifyingGlass, PencilSimple, Play, SpeakerHigh, VideoCamera, WarningCircle, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ALL_QUIZ_IMAGE_STYLES, QUIZ_IMAGE_STYLE_LABELS, QUIZ_MAX_QUESTION_COUNT, QUIZ_MIN_QUESTION_COUNT, type Channel, type ProductionAssessment, type QuizImageStyle, type Scene, type Task } from "@studio/shared";
+import { ALL_QUIZ_IMAGE_STYLES, QUIZ_IMAGE_STYLE_LABELS, QUIZ_MAX_QUESTION_COUNT, QUIZ_MIN_QUESTION_COUNT, type Channel, type ProductionAssessment, type QuestionHistoryCheckResult, type QuizImageStyle, type Scene, type Task } from "@studio/shared";
 import { api, type BundleImage } from "../api";
 import { isTaskActive, isTaskTerminal, latestTask } from "../lib/utils";
 import { parseContinuityBundles } from "../lib/continuity";
@@ -83,16 +83,45 @@ export function EpisodeDetail({
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [globalPromptExpanded, setGlobalPromptExpanded] = useState<boolean | null>(false);
-  const initialWorkflowTab = (activeTab === "script" || activeTab === "visual" || activeTab === "timeline") ? activeTab : "timeline";
-  const [workflowTab, setWorkflowTab] = useState<"script" | "visual" | "timeline">(initialWorkflowTab);
+  const [historyCheck, setHistoryCheck] = useState<QuestionHistoryCheckResult | null>(null);
+  const [isRemixing, setIsRemixing] = useState(false);
+  const initialWorkflowTab = (activeTab === "script" || activeTab === "visual" || activeTab === "timeline" || activeTab === "remix") ? activeTab : "timeline";
+  const [workflowTab, setWorkflowTab] = useState<"script" | "visual" | "timeline" | "remix">(initialWorkflowTab);
+
+  const loadHistoryCheck = useCallback(async () => {
+    try {
+      const res = await api.quizHistoryCheck(channel.channel_id, episodeId);
+      setHistoryCheck(res.history_check);
+    } catch {
+      // Ignore non-fatal check error
+    }
+  }, [channel.channel_id, episodeId]);
 
   useEffect(() => {
-    if (activeTab && (activeTab === "script" || activeTab === "visual" || activeTab === "timeline") && activeTab !== workflowTab) {
+    void loadHistoryCheck();
+  }, [loadHistoryCheck, quizV2?.quiz, scenes.length]);
+
+  const handleRemix = async () => {
+    try {
+      setIsRemixing(true);
+      const res = await api.remixQuizQuestions(channel.channel_id, episodeId);
+      setHistoryCheck(res.history_check);
+      await load();
+      onNotice({ tone: "good", message: `Đã remix thành công ${res.remixed_count} câu hỏi và kiểm tra lại lịch sử!` });
+    } catch (error) {
+      onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Remix câu hỏi thất bại" });
+    } finally {
+      setIsRemixing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab && (activeTab === "script" || activeTab === "visual" || activeTab === "timeline" || activeTab === "remix") && activeTab !== workflowTab) {
       setWorkflowTab(activeTab);
     }
   }, [activeTab]);
 
-  const switchWorkflowTab = (tab: "script" | "visual" | "timeline") => {
+  const switchWorkflowTab = (tab: "script" | "visual" | "timeline" | "remix") => {
     setWorkflowTab(tab);
     onTabChange?.(tab);
   };
@@ -546,7 +575,7 @@ export function EpisodeDetail({
         )}
       </section>
 
-      {/* 3-Stage Creation Workspace Tabs (Hidden in Simplify Mode) */}
+      {/* 4-Stage Creation Workspace Tabs (Hidden in Simplify Mode) */}
       {!simplifyMode ? (
         <div className="channel-group-tabs" role="tablist" aria-label="Episode creation workspace" style={{ margin: "24px 0 26px" }}>
           <button
@@ -559,6 +588,21 @@ export function EpisodeDetail({
             <FileText size={17} weight={workflowTab === "script" ? "fill" : "regular"} />
             <span>1. Script & Plan</span>
             {readiness.script ? <CheckCircle size={14} weight="fill" style={{ color: "var(--green)" }} /> : null}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workflowTab === "remix"}
+            className={`channel-group-tab ${workflowTab === "remix" ? "is-selected" : ""}`}
+            onClick={() => switchWorkflowTab("remix")}
+          >
+            <ArrowsClockwise size={17} weight={workflowTab === "remix" ? "bold" : "regular"} />
+            <span>Question Remix</span>
+            {historyCheck?.duplicate_count ? (
+              <span className={`tab-badge ${historyCheck.passed ? "badge-success" : "badge-warning"}`}>
+                {historyCheck.duplicate_count}
+              </span>
+            ) : null}
           </button>
           <button
             type="button"
@@ -610,6 +654,138 @@ export function EpisodeDetail({
               );
             })}
         </div>
+      ) : null}
+
+      {/* Stage: Question Remix & History Check */}
+      {workflowTab === "remix" && !simplifyMode ? (
+        <section className="remix-section panel" style={{ marginTop: "12px" }}>
+          <div className="section-heading" style={{ marginBottom: "20px" }}>
+            <div>
+              <p className="eyebrow">Content Quality & Anti-Duplicate</p>
+              <h2>Question Remix & History Check</h2>
+            </div>
+            <div className="scene-heading-actions">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void handleRemix()}
+                disabled={isRemixing || !historyCheck || historyCheck.items.length === 0}
+              >
+                {isRemixing ? <CircleNotch className="spin" size={17} /> : <ArrowsClockwise size={17} />}
+                <span>Remix & Check again</span>
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => switchWorkflowTab("timeline")}
+              >
+                <span>Continue Build</span>
+                <ArrowRight size={16} />
+              </button>
+            </div>
+          </div>
+
+          <div className={`history-check-summary-banner ${historyCheck?.passed ? "is-passed" : "is-blocked"}`}>
+            <div className="summary-left">
+              {historyCheck?.passed ? (
+                <CheckCircle size={28} weight="fill" className="status-icon-passed" />
+              ) : (
+                <WarningCircle size={28} weight="fill" className="status-icon-warning" />
+              )}
+              <div>
+                <strong className="summary-title">
+                  {historyCheck?.passed
+                    ? "Đạt điều kiện History Check"
+                    : `Phát hiện ${historyCheck?.duplicate_count || 0} câu hỏi bị trùng lặp với lịch sử`}
+                </strong>
+                <p className="summary-desc">
+                  {historyCheck
+                    ? `Tổng số câu: ${historyCheck.total_questions} | Câu trùng: ${historyCheck.duplicate_count} | Ngưỡng cho phép pass: <= ${historyCheck.pass_threshold} câu`
+                    : "Đang tải dữ liệu History Check..."}
+                </p>
+              </div>
+            </div>
+            <div className="summary-badge-group">
+              <span className={`status-pill ${historyCheck?.passed ? "is-success" : "is-warning"}`}>
+                {historyCheck?.passed ? "PASSED" : "ACTION RECOMMENDED"}
+              </span>
+            </div>
+          </div>
+
+          {historyCheck && historyCheck.items.length > 0 ? (
+            <div className="remix-questions-list">
+              <h3 style={{ margin: "24px 0 12px", fontSize: "15px", fontWeight: 600 }}>
+                Chi tiết đối chiếu từng câu hỏi ({historyCheck.items.length})
+              </h3>
+              <div className="remix-cards-grid">
+                {historyCheck.items.map((item, index) => {
+                  const isDupe = item.status === "duplicate";
+                  const isRemixed = item.status === "remixed";
+                  return (
+                    <div
+                      key={item.current_question_id || index}
+                      className={`remix-card ${isDupe ? "is-duplicate" : isRemixed ? "is-remixed" : "is-clean"}`}
+                    >
+                      <div className="remix-card-header">
+                        <div className="remix-card-number">
+                          <span className="q-badge">Câu #{index + 1}</span>
+                          <span className={`match-status-badge is-${item.status}`}>
+                            {isDupe ? "⚠️ Trùng với lịch sử" : isRemixed ? "✨ Đã Remix" : "✓ Câu hỏi mới"}
+                          </span>
+                        </div>
+                        {item.matched_entry ? (
+                          <span className="similarity-pill">
+                            Độ trùng: {Math.round(item.similarity_score * 100)}%
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div className="remix-card-body">
+                        <div className="remix-col current-col">
+                          <label className="col-label">Câu hỏi hiện tại trong Video:</label>
+                          <p className="remix-question-text">"{item.current_question_text}"</p>
+                          <div className="remix-choices-list">
+                            {item.current_choices.map((c, i) => (
+                              <span
+                                key={i}
+                                className={`choice-chip ${c === item.current_correct_answer ? "is-correct" : ""}`}
+                              >
+                                {c} {c === item.current_correct_answer ? "✓" : ""}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        {item.matched_entry ? (
+                          <div className="remix-col history-col">
+                            <label className="col-label">
+                              Trùng với video cũ: <strong>{item.matched_entry.episode_title}</strong>
+                            </label>
+                            <p className="remix-question-text history-text">
+                              "{item.matched_entry.question_text}"
+                            </p>
+                            <div className="matched-meta">
+                              <span>📅 Ngày render: {new Date(item.matched_entry.rendered_at).toLocaleDateString("vi-VN")}</span>
+                              <span className="match-reason-tag">{item.match_reason}</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="remix-col history-col is-empty-match">
+                            <p className="clean-note">✓ Không tìm thấy câu hỏi tương tự trong 30 ngày qua.</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="artifact-empty" style={{ padding: "40px 0" }}>
+              <p>Chưa có thông tin đối chiếu câu hỏi. Nhấn <strong>Generate script / Quiz</strong> ở bước 1 để đối chiếu.</p>
+            </div>
+          )}
+        </section>
       ) : null}
 
       {/* Stage 2: Visual & Continuity */}

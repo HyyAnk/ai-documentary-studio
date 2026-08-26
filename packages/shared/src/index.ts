@@ -106,8 +106,14 @@ export const TopicCandidateSchema = z.object({
   question_count: z.number().int().min(QUIZ_MIN_QUESTION_COUNT).max(QUIZ_MAX_QUESTION_COUNT).default(8),
   age_band: z.enum(["4-6", "7-9", "10-12", "family"]).default("7-9"),
   visual_style: z.enum(["mixed", "pixar_3d", "flat_vector", "kawaii_chibi", "voxel_lowpoly", "plastic_toy"]).default("mixed"),
+  theme_hint: z.string().optional(),
 });
 export type TopicCandidate = z.infer<typeof TopicCandidateSchema>;
+
+export const SuggestTopicsInputSchema = z.object({
+  topic_hint: z.string().optional(),
+});
+export type SuggestTopicsInput = z.infer<typeof SuggestTopicsInputSchema>;
 
 export const EpisodeTopicSchema = z.object({
   title: z.string().min(1),
@@ -668,8 +674,66 @@ export const AppConfigSchema = z.object({
     merge_gap_ms: z.number().int().nonnegative().default(300),
     match_target_duration: z.boolean().default(true),
   }),
+  question_history: z.object({
+    enabled: z.boolean().default(true),
+    pass_threshold: z.number().int().min(0).max(50).default(2),
+    ttl_days: z.number().int().min(1).max(365).default(30),
+    auto_remix: z.boolean().default(false),
+  }).default({}),
 });
 export type AppConfig = z.infer<typeof AppConfigSchema>;
+
+export const QuestionHistorySettingsSchema = z.object({
+  enabled: z.boolean().default(true),
+  pass_threshold: z.number().int().min(0).max(50).default(2),
+  ttl_days: z.number().int().min(1).max(365).default(30),
+  auto_remix: z.boolean().default(false),
+});
+export type QuestionHistorySettings = z.infer<typeof QuestionHistorySettingsSchema>;
+
+export const QuestionHistoryEntrySchema = z.object({
+  question_id: z.string().min(1),
+  question_text: z.string().min(1),
+  normalized_question: z.string().default(""),
+  choices: z.array(z.string()).default([]),
+  correct_answer: z.string().default(""),
+  episode_id: z.string().min(1),
+  episode_title: z.string().min(1),
+  channel_id: z.string().min(1),
+  rendered_at: IsoDate,
+});
+export type QuestionHistoryEntry = z.infer<typeof QuestionHistoryEntrySchema>;
+
+export const QuestionHistoryCheckItemSchema = z.object({
+  current_question_id: z.string().min(1),
+  current_question_text: z.string().min(1),
+  current_choices: z.array(z.string()).default([]),
+  current_correct_answer: z.string().default(""),
+  matched_entry: QuestionHistoryEntrySchema.nullable().default(null),
+  similarity_score: z.number().min(0).max(1).default(0),
+  match_reason: z.string().default(""),
+  status: z.enum(["duplicate", "remixed", "passed"]).default("passed"),
+});
+export type QuestionHistoryCheckItem = z.infer<typeof QuestionHistoryCheckItemSchema>;
+
+export const QuestionHistoryCheckResultSchema = z.object({
+  episode_id: z.string().min(1),
+  checked_at: IsoDate,
+  total_questions: z.number().int().nonnegative().default(0),
+  duplicate_count: z.number().int().nonnegative().default(0),
+  pass_threshold: z.number().int().nonnegative().default(2),
+  passed: z.boolean().default(true),
+  items: z.array(QuestionHistoryCheckItemSchema).default([]),
+});
+export type QuestionHistoryCheckResult = z.infer<typeof QuestionHistoryCheckResultSchema>;
+
+export const RemixQuestionsInputSchema = z.object({
+  question_ids: z.array(z.string()).optional(),
+});
+export type RemixQuestionsInput = z.infer<typeof RemixQuestionsInputSchema>;
+
+export const SaveHistorySettingsInputSchema = QuestionHistorySettingsSchema.partial();
+export type SaveHistorySettingsInput = z.infer<typeof SaveHistorySettingsInputSchema>;
 
 export const VoiceProfileSchema = z.object({
   voice_id: z.string().min(1),

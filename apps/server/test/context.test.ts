@@ -39,6 +39,25 @@ describe("ContextEngine", () => {
     expect(context.excluded_categories).toContain("research/script/scene work for candidates");
   });
 
+  it("includes specific theme guidance when topicHint is provided for SUGGEST_TOPICS", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "documentary-topic-hint-context-"));
+    roots.push(root);
+    await mkdir(path.join(root, "templates"), { recursive: true });
+    await mkdir(path.join(root, "shared"), { recursive: true });
+    await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# DNA\n", "utf8");
+    await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
+    await writeFile(path.join(root, "shared", "research_rules.md"), "# Research\n", "utf8");
+    const repository = new RepositoryService(root);
+    const channel = await repository.createChannel({ name: "Jobs Channel", description: "Careers for kids", target_audience: "Kids", language: "Vietnamese", market: "VN", dna_mode: "example" });
+    const logger = new StudioLogger(root, true);
+    await logger.init();
+    const context = await new ContextEngine(repository, logger).build("SUGGEST_TOPICS", channel.channel_id, null, undefined, 0, "Các loại nghề nghiệp");
+    expect(context.prompt).toContain("IMPORTANT TOPIC THEME REQUIREMENT");
+    expect(context.prompt).toContain("Các loại nghề nghiệp");
+    expect(context.prompt).toContain("Exactly 2 candidates MUST be directly inspired by");
+    expect(context.prompt).toContain("The remaining 3 candidates should be diverse");
+  });
+
   it("uses the Quiz Engine DNA template for AI DNA generation", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "documentary-quiz-dna-context-"));
     roots.push(root);

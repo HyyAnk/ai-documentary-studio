@@ -1,13 +1,16 @@
-import type {
-  AppConfig,
-  DirectorPlan,
-  QuizAssessment,
-  QuizAssetPlan,
-  QuizAssetResolution,
-  QuizTimeline,
-  QuizV2,
-  QuizIssue,
-  VoicePlan,
+import {
+  type AppConfig,
+  type DirectorPlan,
+  type QuestionHistoryCheckResult,
+  type QuizAssessment,
+  type QuizAssetPlan,
+  type QuizAssetResolution,
+  type QuizTimeline,
+  type QuizV2,
+  type QuizQuestion,
+  type QuizIssue,
+  type VoicePlan,
+  QuizQuestionSchema,
 } from "@studio/shared";
 import { RepositoryError, type RepositoryService } from "../../repository.js";
 import { planQuizAssets } from "../assets/assetPlanner.js";
@@ -22,12 +25,13 @@ import { assessQuiz } from "../qa/quizAssessment.js";
 import { preflightQuizRender } from "../qa/preflight.js";
 import { compileQuizTimeline } from "../timeline/compileTimeline.js";
 import { invalidateQuizArtifacts } from "./invalidation.js";
+import { checkQuestionsAgainstHistory } from "../qa/questionHistory.js";
 
 import type { AntigravityClient } from "../../antigravity.js";
 
 export type QuizOrchestratorInput = {
   repository: RepositoryService;
-  config: Pick<AppConfig, "audio_generation"> & { image_generation?: AppConfig["image_generation"] };
+  config: Pick<AppConfig, "audio_generation"> & { image_generation?: AppConfig["image_generation"]; question_history?: AppConfig["question_history"] };
   channelId: string;
   episodeId: string;
   activeEngine?: "codex" | "antigravity";
@@ -39,6 +43,7 @@ export type QuizOrchestratorInput = {
 
 export type QuizArtifacts = {
   quiz: QuizV2 | null;
+  history_check: QuestionHistoryCheckResult | null;
   director_plan: DirectorPlan | null;
   asset_plan: QuizAssetPlan | null;
   asset_resolution: QuizAssetResolution | null;
@@ -48,8 +53,9 @@ export type QuizArtifacts = {
 };
 
 export async function readQuizArtifacts(input: QuizOrchestratorInput): Promise<QuizArtifacts> {
-  const [quiz, director_plan, asset_plan, asset_resolution, voice_plan, timeline, assessment] = await Promise.all([
+  const [quiz, history_check, director_plan, asset_plan, asset_resolution, voice_plan, timeline, assessment] = await Promise.all([
     input.repository.readQuiz(input.channelId, input.episodeId),
+    input.repository.readHistoryCheck(input.channelId, input.episodeId),
     input.repository.readDirectorPlan(input.channelId, input.episodeId),
     input.repository.readAssetPlan(input.channelId, input.episodeId),
     input.repository.readQuizAssetResolution(input.channelId, input.episodeId),
@@ -57,10 +63,10 @@ export async function readQuizArtifacts(input: QuizOrchestratorInput): Promise<Q
     input.repository.readQuizTimeline(input.channelId, input.episodeId),
     input.repository.readQuizAssessment(input.channelId, input.episodeId),
   ]);
-  return { quiz, director_plan, asset_plan, asset_resolution, voice_plan, timeline, assessment };
+  return { quiz, history_check, director_plan, asset_plan, asset_resolution, voice_plan, timeline, assessment };
 }
 
-export async function generateQuiz(input: QuizOrchestratorInput): Promise<{ quiz: QuizV2; artifact_path: string; invalidated: string[] }> {
+export async function generateQuiz(input: QuizOrchestratorInput): Promise<{ quiz: QuizV2; history_check: QuestionHistoryCheckResult; artifact_path: string; invalidated: string[] }> {
   const [episode, channel, scenes] = await Promise.all([
     input.repository.getEpisode(input.channelId, input.episodeId),
     input.repository.getChannel(input.channelId),
@@ -68,9 +74,118 @@ export async function generateQuiz(input: QuizOrchestratorInput): Promise<{ quiz
   ]);
   const quiz = deriveQuizV2FromScenes({ episodeId: episode.episode_id, language: channel.language, ageBand: episode.quiz_config.age_band, format: episode.quiz_config.quiz_format, scenes });
   const artifact_path = await input.repository.writeQuiz(input.channelId, input.episodeId, quiz);
+
+  // Run History Check against past 30 days
+  const history = await input.repository.readQuestionHistory(input.channelId);
+  const passThreshold = input.config.question_history?.pass_threshold ?? 2;
+  const history_check = checkQuestionsAgainstHistory(input.episodeId, quiz.questions, history, passThreshold);
+  await input.repository.writeHistoryCheck(input.channelId, input.episodeId, history_check);
+
   const invalidatedStages = invalidateQuizArtifacts("quiz");
   const invalidated = await input.repository.invalidateQuizArtifacts(input.channelId, input.episodeId, invalidatedStages);
-  return { quiz, artifact_path, invalidated };
+  return { quiz, history_check, artifact_path, invalidated };
+}
+
+export async function remixQuizQuestions(input: QuizOrchestratorInput, requestedQuestionIds?: string[]): Promise<{ quiz: QuizV2; history_check: QuestionHistoryCheckResult; remixed_count: number; invalidated: string[] }> {
+  const [episode, channel, scenes, currentQuiz] = await Promise.all([
+    input.repository.getEpisode(input.channelId, input.episodeId),
+    input.repository.getChannel(input.channelId),
+    input.repository.readScenes(input.channelId, input.episodeId),
+    input.repository.readQuiz(input.channelId, input.episodeId),
+  ]);
+  if (!currentQuiz) throw new RepositoryError("Generate Quiz facts before remixing questions", "QUIZ_REQUIRED");
+
+  const history = await input.repository.readQuestionHistory(input.channelId);
+  const passThreshold = input.config.question_history?.pass_threshold ?? 2;
+  const initialCheck = checkQuestionsAgainstHistory(input.episodeId, currentQuiz.questions, history, passThreshold);
+
+  const targetIds = new Set(
+    requestedQuestionIds && requestedQuestionIds.length > 0
+      ? requestedQuestionIds
+      : initialCheck.items.filter((i) => i.status === "duplicate").map((i) => i.current_question_id)
+  );
+
+  if (targetIds.size === 0) {
+    return { quiz: currentQuiz, history_check: initialCheck, remixed_count: 0, invalidated: [] };
+  }
+
+  const questionsToRemix = currentQuiz.questions.filter((q) => targetIds.has(q.id));
+
+  const prompt = [
+    "You are an expert Quiz Editor for an educational children and family entertainment channel.",
+    `Channel: ${channel.display_name}. Language: ${channel.language}. Age Band: ${episode.quiz_config.age_band}. Format: ${episode.quiz_config.quiz_format}.`,
+    "TASK: Rephrase the provided quiz questions so that their phrasing, perspective, hook, and clues feel completely fresh, creative, and non-repetitive compared to previously produced videos.",
+    "STRICT RULES:",
+    "1. Keep the EXACT same correct answer and preserve all visible choices verbatim.",
+    "2. Keep the same format, difficulty, and child-friendly tone.",
+    "3. Change the question sentence, clues, or angles to avoid similarity with previous questions.",
+    "4. Return ONLY a valid JSON array containing the rephrased questions matching the schema: [{ id, number, format, difficulty, question, choices: [{ id, text }], correct_choice_id, explanation, fun_fact, source_ids, visual_opportunity }]. Do not include markdown code fences or conversational text.",
+    "\nQuestions to rephrase:\n" + JSON.stringify(questionsToRemix, null, 2),
+  ].join("\n");
+
+  let rephrasedQuestions: QuizQuestion[] = [];
+  try {
+    const isAgy = input.activeEngine === "antigravity" && Boolean(input.antigravityClient);
+    if (isAgy && input.antigravityClient) {
+      const threadId = await input.antigravityClient.startThread();
+      const rawOutput = await input.antigravityClient.startTurn(threadId, prompt);
+      const jsonStart = rawOutput.indexOf("[");
+      const jsonEnd = rawOutput.lastIndexOf("]");
+      if (jsonStart >= 0 && jsonEnd > jsonStart) {
+        const parsed = JSON.parse(rawOutput.slice(jsonStart, jsonEnd + 1)) as unknown[];
+        rephrasedQuestions = parsed.map((item) => QuizQuestionSchema.parse(item));
+      }
+    }
+  } catch {
+    // If external call fails, fall back to heuristic modification
+  }
+
+  if (rephrasedQuestions.length === 0) {
+    rephrasedQuestions = questionsToRemix.map((q) => ({
+      ...q,
+      question: q.question.startsWith("Đố bạn ") ? q.question.replace("Đố bạn ", "Khám phá xem ") : `Thử thách mới: ${q.question}`,
+    }));
+  }
+
+  const rephrasedMap = new Map(rephrasedQuestions.map((q) => [q.id, q]));
+  const updatedQuestions = currentQuiz.questions.map((q) => rephrasedMap.get(q.id) ?? q);
+  const updatedQuiz: QuizV2 = { ...currentQuiz, questions: updatedQuestions };
+
+  await input.repository.writeQuiz(input.channelId, input.episodeId, updatedQuiz);
+
+  const updatedScenes = scenes.map((scene) => {
+    if (scene.quiz && rephrasedMap.has(scene.quiz.question_number ? `q-${scene.quiz.question_number}` : "")) {
+      const rephrased = rephrasedMap.get(`q-${scene.quiz.question_number}`)!;
+      return {
+        ...scene,
+        quiz: {
+          ...scene.quiz,
+          question: rephrased.question,
+          explanation: rephrased.explanation,
+        },
+      };
+    }
+    return scene;
+  });
+  await input.repository.saveScenes(input.channelId, input.episodeId, updatedScenes);
+
+  const updatedCheck = checkQuestionsAgainstHistory(input.episodeId, updatedQuiz.questions, history, passThreshold);
+  const finalCheckItems = updatedCheck.items.map((item) => {
+    if (targetIds.has(item.current_question_id)) {
+      if (item.status === "passed") return { ...item, status: "remixed" as const };
+    }
+    return item;
+  });
+  const finalCheck: QuestionHistoryCheckResult = {
+    ...updatedCheck,
+    items: finalCheckItems,
+  };
+  await input.repository.writeHistoryCheck(input.channelId, input.episodeId, finalCheck);
+
+  const invalidatedStages = invalidateQuizArtifacts("quiz");
+  const invalidated = await input.repository.invalidateQuizArtifacts(input.channelId, input.episodeId, invalidatedStages);
+
+  return { quiz: updatedQuiz, history_check: finalCheck, remixed_count: rephrasedQuestions.length, invalidated };
 }
 
 export async function generateDirector(input: QuizOrchestratorInput): Promise<{ director_plan: DirectorPlan; artifact_path: string; invalidated: string[] }> {

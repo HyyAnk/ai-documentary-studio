@@ -12,6 +12,8 @@ import {
   SceneSchema,
   TopicCandidateSchema,
   TopicConfirmInputSchema,
+  QuestionHistoryEntrySchema,
+  QuestionHistoryCheckResultSchema,
   QUIZ_SECONDS_PER_QUESTION,
   VoicePlanSchema,
   VoiceProfileSchema,
@@ -21,10 +23,13 @@ import {
   type DirectorPlan,
   type Episode,
   type EpisodeSettingsInput,
+  type QuestionHistoryEntry,
+  type QuestionHistoryCheckResult,
   type QuizAssessment,
   type QuizAssetPlan,
   type QuizAssetResolution,
   type QuizImageStyle,
+  type QuizQuestion,
   type QuizTimeline,
   type QuizV2,
   type Scene,
@@ -38,6 +43,7 @@ import { access, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile
 import path from "node:path";
 import { stripEditorialOverlayInstructions } from "./visualPrompt.js";
 import { invalidateQuizArtifacts as quizInvalidationStages } from "./quiz/pipeline/invalidation.js";
+import { pruneQuestionHistory, normalizeQuestionText } from "./quiz/qa/questionHistory.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -514,6 +520,56 @@ export class RepositoryService {
 
   async writeVoicePlan(channelId: string, episodeId: string, plan: VoicePlan): Promise<string> {
     return this.writeQuizArtifact(channelId, episodeId, "voice-plan.json", VoicePlanSchema.parse(plan));
+  }
+
+  async readHistoryCheck(channelId: string, episodeId: string): Promise<QuestionHistoryCheckResult | null> {
+    return this.readQuizArtifact(channelId, episodeId, "history-check.json", QuestionHistoryCheckResultSchema);
+  }
+
+  async writeHistoryCheck(channelId: string, episodeId: string, result: QuestionHistoryCheckResult): Promise<string> {
+    return this.writeQuizArtifact(channelId, episodeId, "history-check.json", QuestionHistoryCheckResultSchema.parse(result));
+  }
+
+  async readQuestionHistory(channelId: string): Promise<QuestionHistoryEntry[]> {
+    const channel = await this.getChannel(channelId);
+    const historyPath = this.resolvePath("channels", channel.slug, "question_history.json");
+    try {
+      const raw = JSON.parse(await readFile(historyPath, "utf8")) as unknown;
+      if (!Array.isArray(raw)) return [];
+      return raw.map((item) => QuestionHistoryEntrySchema.parse(item));
+    } catch {
+      return [];
+    }
+  }
+
+  async appendQuestionHistory(channelId: string, episodeId: string, questions: QuizQuestion[], ttlDays = 30): Promise<void> {
+    const channel = await this.getChannel(channelId);
+    const episode = await this.getEpisode(channelId, episodeId).catch(() => null);
+    const episodeTitle = episode?.topic?.title || episodeId;
+    const historyPath = this.resolvePath("channels", channel.slug, "question_history.json");
+    const existing = await this.readQuestionHistory(channelId);
+
+    const filteredExisting = existing.filter((e) => e.episode_id !== episodeId);
+
+    const newEntries: QuestionHistoryEntry[] = questions.map((q) => {
+      const correctChoice = q.choices.find((c) => c.id === q.correct_choice_id)?.text || "";
+      return {
+        question_id: q.id,
+        question_text: q.question,
+        normalized_question: normalizeQuestionText(q.question),
+        choices: q.choices.map((c) => c.text),
+        correct_answer: correctChoice,
+        episode_id: episodeId,
+        episode_title: episodeTitle,
+        channel_id: channelId,
+        rendered_at: nowIso(),
+      };
+    });
+
+    const combined = [...filteredExisting, ...newEntries];
+    const pruned = pruneQuestionHistory(combined, ttlDays);
+    await mkdir(path.dirname(historyPath), { recursive: true });
+    await this.writeJsonAtomic(historyPath, pruned);
   }
 
   async invalidateQuizArtifacts(channelId: string, episodeId: string, stages: string[]): Promise<string[]> {
@@ -1130,7 +1186,7 @@ export class RepositoryService {
     return slug;
   }
 
-  private async readQuizArtifact<T>(channelId: string, episodeId: string, filename: "quiz-v2.json" | "director-plan.json" | "asset-plan.json" | "asset-resolution.json" | "voice-plan.json" | "timeline.json" | "qa.json", schema: { parse(value: unknown): T }): Promise<T | null> {
+  private async readQuizArtifact<T>(channelId: string, episodeId: string, filename: "quiz-v2.json" | "director-plan.json" | "asset-plan.json" | "asset-resolution.json" | "voice-plan.json" | "timeline.json" | "qa.json" | "history-check.json", schema: { parse(value: unknown): T }): Promise<T | null> {
     const target = await this.quizArtifactTarget(channelId, episodeId, filename);
     try {
       const raw = JSON.parse(await readFile(target.absolutePath, "utf8")) as unknown;
@@ -1142,13 +1198,13 @@ export class RepositoryService {
     }
   }
 
-  private async writeQuizArtifact<T>(channelId: string, episodeId: string, filename: "quiz-v2.json" | "director-plan.json" | "asset-plan.json" | "asset-resolution.json" | "voice-plan.json" | "timeline.json" | "qa.json", value: T): Promise<string> {
+  private async writeQuizArtifact<T>(channelId: string, episodeId: string, filename: "quiz-v2.json" | "director-plan.json" | "asset-plan.json" | "asset-resolution.json" | "voice-plan.json" | "timeline.json" | "qa.json" | "history-check.json", value: T): Promise<string> {
     const target = await this.quizArtifactTarget(channelId, episodeId, filename);
     await this.writeJsonAtomic(target.absolutePath, value);
     return target.relativePath;
   }
 
-  private async quizArtifactTarget(channelId: string, episodeId: string, filename: "quiz-v2.json" | "director-plan.json" | "asset-plan.json" | "asset-resolution.json" | "voice-plan.json" | "timeline.json" | "qa.json"): Promise<{ absolutePath: string; relativePath: string }> {
+  private async quizArtifactTarget(channelId: string, episodeId: string, filename: "quiz-v2.json" | "director-plan.json" | "asset-plan.json" | "asset-resolution.json" | "voice-plan.json" | "timeline.json" | "qa.json" | "history-check.json"): Promise<{ absolutePath: string; relativePath: string }> {
     const episode = await this.getEpisode(channelId, episodeId);
     const channel = await this.getChannel(channelId);
     const episodeDirectory = this.resolvePath("channels", channel.slug, "episodes", episode.slug);

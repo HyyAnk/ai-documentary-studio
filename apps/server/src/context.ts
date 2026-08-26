@@ -22,7 +22,7 @@ type ContextFile = { path: string; reason: string; content: string };
 export class ContextEngine {
   constructor(private readonly repository: RepositoryService, private readonly logger: StudioLogger) {}
 
-  async build(taskType: TaskType, channelId: string, episodeId: string | null, sceneNumber?: number, imageVariant = 0): Promise<ContextManifest> {
+  async build(taskType: TaskType, channelId: string, episodeId: string | null, sceneNumber?: number, imageVariant = 0, topicHint?: string): Promise<ContextManifest> {
     const channel = await this.repository.getChannel(channelId);
     const isQuiz = channel.engine === "quiz" || channel.group_id === "quiz";
     const files: ContextFile[] = [];
@@ -69,9 +69,12 @@ export class ContextEngine {
         reason: "existing episode titles only",
         content: JSON.stringify(episodes.map((episode) => episode.topic.title)),
       });
+      const hintGuidance = topicHint?.trim()
+        ? `\nIMPORTANT TOPIC THEME REQUIREMENT: The user specifically requested ideas relating to "${topicHint.trim()}". Exactly 2 candidates MUST be directly inspired by, focused on, or explore specific creative angles of "${topicHint.trim()}" (include "theme_hint": "${topicHint.trim()}" in those 2 JSON objects). The remaining 3 candidates should be diverse, creative topics aligned with the overall channel DNA.`
+        : "";
       const prompt = this.compose(taskType, channel, null, [...files, ...sharedFiles], { output_contract: isQuiz
-        ? `Return exactly 5 JSON candidates with title, premise, why_it_fits, hook, estimated_potential, quiz_format (knowledge|image_guess|multiple_choice|true_false|odd_one_out), question_count (${QUIZ_MIN_QUESTION_COUNT}-${QUIZ_MAX_QUESTION_COUNT}), and age_band (4-6|7-9|10-12|family). Use five different formats where possible. Do not research or develop them further.`
-        : "Return exactly 5 JSON candidates with title, premise, why_it_fits, hook, and estimated_potential. Do not research or develop them further." });
+        ? `Return exactly 5 JSON candidates with title, premise, why_it_fits, hook, estimated_potential, quiz_format (knowledge|image_guess|multiple_choice|true_false|odd_one_out), question_count (${QUIZ_MIN_QUESTION_COUNT}-${QUIZ_MAX_QUESTION_COUNT}), and age_band (4-6|7-9|10-12|family). Use five different formats where possible.${hintGuidance} Do not research or develop them further.`
+        : `Return exactly 5 JSON candidates with title, premise, why_it_fits, hook, and estimated_potential.${hintGuidance} Do not research or develop them further.` });
       return this.finalize(taskType, channelId, null, [...files, ...sharedFiles], excluded.concat("research/script/scene work for candidates"), prompt);
     }
 
