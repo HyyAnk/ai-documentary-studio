@@ -118,15 +118,17 @@ describe("Candy Arcade visual regression contract", () => {
   it("renders prominent 3D glossy circular badges and distinct choice-coded stroke borders for kids", () => {
     const html = renderHtml();
     expect(html).toContain("border-radius: 50%");
-    expect(html).toContain("--choice-depth-shadow: #C2410C");
-    expect(html).toContain("--choice-depth-shadow: #9D174D");
-    expect(html).toContain("--choice-depth-shadow: #075985");
-    expect(html).toContain("--choice-depth-shadow: #3F6212");
-    expect(html).toContain(".answer-card::before { content: \"\"; position: absolute; inset: 6px 14px 6px 20px; border: 2.5px dashed rgba(255, 255, 255, 0.75);");
-    expect(html).toMatch(/\.answer-card > b[^}]*width: 108px/);
-    expect(html).toMatch(/\.answer-card > b[^}]*font-size: 54px/);
-    expect(html).toMatch(/\.answer-card > b[^}]*margin-left: -58px/);
-    expect(html).toContain("border: 7px solid var(--choice-stroke)");
+    expect(html).toContain("--choice-depth-shadow: #D27800");
+    expect(html).toContain("--choice-depth-shadow: #B01845");
+    expect(html).toContain("--choice-depth-shadow: #0066B3");
+    expect(html).toContain("--choice-depth-shadow: #4C8A00");
+    expect(html).toContain(".answer-card::before { content: \"\"; position: absolute; inset: 8px 16px 8px 24px; border: 3.5px dashed rgba(255, 255, 255, 0.8);");
+    expect(html).toMatch(/\.answer-card > b[^}]*width: 126px/);
+    expect(html).toMatch(/\.answer-card > b[^}]*font-size: 64px/);
+    expect(html).toMatch(/\.answer-card > b[^}]*margin-left: -68px/);
+    expect(html).toContain("border: 8px solid var(--choice-stroke)");
     expect(html).toContain(".answer-card > b::after");
+    expect(html).toContain(".layout-media_left_choices_right .answer-grid.answer-count-2 { grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 32px; height: 580px; }");
+    expect(html).toContain(".layout-media_left_choices_right .answer-count-2 .answer-card > b { width: 154px; height: 154px; margin-left: -84px; font-size: 78px;");
   });
 });
