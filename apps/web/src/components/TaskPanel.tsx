@@ -31,7 +31,7 @@ const PIPELINE_STAGES = [
   { id: "script", label: "Script", percent: 12 },
   { id: "visual", label: "Visual Bible", percent: 18 },
   { id: "shots", label: "Shots", percent: 25 },
-  { id: "media", label: "Voice & Ảnh", percent: 55 },
+  { id: "media", label: "Voice & Images", percent: 55 },
   { id: "video", label: "Render Video", percent: 100 },
 ];
 
@@ -91,7 +91,7 @@ export function TaskActivityBar({
     <div className={`task-activity-bar ${reconnecting ? "is-reconnecting" : ""}`} role="status">
       <div className="task-activity-signal">
         <span className="live-pulse" />
-        <span>{reconnecting ? "Reconnecting live updates" : `${tasks.length} ${tasks.length === 1 ? "tác vụ" : "tác vụ"} đang chạy`}</span>
+        <span>{reconnecting ? "Reconnecting live updates" : `${tasks.length} active ${tasks.length === 1 ? "task" : "tasks"}`}</span>
       </div>
       {task ? (
         <>
@@ -106,12 +106,12 @@ export function TaskActivityBar({
         </>
       ) : (
         <div className="task-activity-copy">
-          <strong>Đang kết nối lại</strong>
-          <span>Dữ liệu sẽ tự động đồng bộ khi kết nối hoàn tất.</span>
+          <strong>Reconnecting</strong>
+          <span>Data will automatically sync once connection is restored.</span>
         </div>
       )}
       <button className="text-button" onClick={handleAction}>
-        {task?.episode_id ? "Theo dõi Production Rail" : "Xem tác vụ"} <ArrowUpRight size={14} />
+        {task?.episode_id ? "Production Rail" : "View Tasks"} <ArrowUpRight size={14} />
       </button>
     </div>
   );
@@ -175,10 +175,10 @@ function EpisodeProgressCard({
 
         <div className="ep-card-status-badges">
           {summary.queuePosition !== null && isQueued ? (
-            <span className="queue-position-pill">#{summary.queuePosition + 1} Hàng chờ</span>
+            <span className="queue-position-pill">Queue #{summary.queuePosition + 1}</span>
           ) : null}
           <span className={`ep-status-pill ${summary.status.toLowerCase()}`}>
-            {isRunning ? "Đang xử lý" : isQueued ? "Đang chờ slot" : isCompleted ? "Hoàn thành" : isFailed ? "Thất bại" : formatTaskStatus(summary.status)}
+            {isRunning ? "Running" : isQueued ? "Queued" : isCompleted ? "Completed" : isFailed ? "Failed" : formatTaskStatus(summary.status)}
           </span>
         </div>
       </div>
@@ -187,7 +187,7 @@ function EpisodeProgressCard({
       <div className="ep-progress-bar-wrap">
         <div className="ep-progress-info">
           <span className="ep-progress-stage-text">
-            {summary.progressMessage || (isRunning ? "Đang tiến hành sản xuất..." : isQueued ? "Đang xếp hàng chờ đến lượt build..." : isCompleted ? "Video đã sẵn sàng" : "Đã dừng")}
+            {summary.progressMessage || (isRunning ? "Production in progress..." : isQueued ? "Queued for build slot..." : isCompleted ? "Video ready" : "Stopped")}
           </span>
           <strong className="ep-progress-percentage">{summary.progressPercent}%</strong>
         </div>
@@ -217,7 +217,7 @@ function EpisodeProgressCard({
       {/* Card Footer */}
       <div className="ep-card-footer">
         <div className="ep-card-meta">
-          <span className="ep-card-time-label">Thời gian:</span>
+          <span className="ep-card-time-label">Elapsed:</span>
           <strong>{formatTaskElapsed(targetTask, now)}</strong>
           {targetTask.completed_at ? (
             <span className="ep-card-date">({formatDate(targetTask.completed_at)})</span>
@@ -229,21 +229,21 @@ function EpisodeProgressCard({
             <button
               type="button"
               className="quiet-button danger compact"
-              title="Hủy tiến trình Episode này"
+              title="Cancel episode build"
               onClick={() => onCancel(targetTask)}
             >
               <X size={14} />
-              <span>Hủy</span>
+              <span>Cancel</span>
             </button>
           ) : isFailed ? (
             <button
               type="button"
               className="quiet-button compact"
-              title="Thử lại tiến trình"
+              title="Retry build"
               onClick={() => onRetry(targetTask)}
             >
               <ArrowClockwise size={14} />
-              <span>Thử lại</span>
+              <span>Retry</span>
             </button>
           ) : null}
 
@@ -251,7 +251,7 @@ function EpisodeProgressCard({
             <button
               type="button"
               className="primary-button compact ep-rail-btn"
-              title="Mở Episode để theo dõi chi tiết trên Production Rail"
+              title="Open Episode in Production Rail"
               onClick={() => onOpenEpisode(summary.channelId, summary.episodeId)}
             >
               <span>Production Rail</span>
@@ -301,7 +301,7 @@ export function TasksView({
       const channelId = latestTask.channel_id;
       const channelName = channelMap.get(channelId) || "Channel";
       const progressPercent = calculateEpisodeProgress(activeTask, status);
-      const progressMessage = activeTask?.progress_message || latestTask.progress_message || (status === "COMPLETED" ? "Đã dựng xong Video" : "");
+      const progressMessage = activeTask?.progress_message || latestTask.progress_message || (status === "COMPLETED" ? "Video build completed" : "");
 
       summaries.push({
         channelId,
@@ -337,10 +337,10 @@ export function TasksView({
   const cancel = async (task: Task) => {
     try {
       await api.cancelTask(task.task_id);
-      onNotice({ tone: "good", message: "Đã hủy tác vụ" });
+      onNotice({ tone: "good", message: "Task cancelled" });
       await onRefresh();
     } catch (error) {
-      onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Không thể hủy tác vụ" });
+      onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Failed to cancel task" });
     }
   };
 
@@ -352,18 +352,18 @@ export function TasksView({
         episode_id: task.episode_id,
         scene_number: task.scene_number,
       });
-      onNotice({ tone: "good", message: `${formatTaskType(task.task_type)} đã được thêm vào hàng chờ` });
+      onNotice({ tone: "good", message: `${formatTaskType(task.task_type)} added to queue` });
       await onRefresh();
     } catch (error) {
-      onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Không thể thử lại tác vụ" });
+      onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Failed to retry task" });
     }
   };
 
   return (
     <section className="page-wrap">
       <PageTitle
-        eyebrow="Tiến trình sản xuất (Operations)"
-        title="Tiến trình Episode & Video Builds"
+        eyebrow="Operations"
+        title="Episode & Video Builds"
         action={
           <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
             <div className="view-mode-tabs" role="tablist">
@@ -375,7 +375,7 @@ export function TasksView({
                 onClick={() => setViewMode("episodes")}
               >
                 <FilmSlate size={15} />
-                <span>Tiến trình Episode</span>
+                <span>Episode Builds</span>
               </button>
               <button
                 type="button"
@@ -385,12 +385,12 @@ export function TasksView({
                 onClick={() => setViewMode("raw")}
               >
                 <ListChecks size={15} />
-                <span>Chi tiết kỹ thuật</span>
+                <span>Technical Tasks</span>
               </button>
             </div>
             <button className="quiet-button" onClick={() => void onRefresh()}>
               <ArrowClockwise size={16} />
-              <span>Làm mới</span>
+              <span>Refresh</span>
             </button>
           </div>
         }
@@ -399,19 +399,19 @@ export function TasksView({
       {/* Metrics Summary Strip */}
       <div className="operations-metrics-strip">
         <div className="op-metric-card">
-          <span className="op-metric-label">Đang Build</span>
+          <span className="op-metric-label">Building</span>
           <strong className="op-metric-value accent-text">{activeBuildsCount}</strong>
-          <span className="op-metric-hint">Episode đang chạy song song</span>
+          <span className="op-metric-hint">Parallel active episodes</span>
         </div>
         <div className="op-metric-card">
-          <span className="op-metric-label">Trong hàng chờ</span>
+          <span className="op-metric-label">In Queue</span>
           <strong className="op-metric-value yellow-text">{queuedBuildsCount}</strong>
-          <span className="op-metric-hint">Đang đợi slot build</span>
+          <span className="op-metric-hint">Waiting for build slots</span>
         </div>
         <div className="op-metric-card">
-          <span className="op-metric-label">Hoàn tất gần đây</span>
+          <span className="op-metric-label">Completed Recently</span>
           <strong className="op-metric-value green-text">{completedBuildsCount}</strong>
-          <span className="op-metric-hint">Tập đã dựng xong video</span>
+          <span className="op-metric-hint">Finished video builds</span>
         </div>
       </div>
 
@@ -419,9 +419,9 @@ export function TasksView({
         episodeSummaries.length === 0 ? (
           <EmptyState
             icon={<FilmSlate size={32} />}
-            title="Chưa có Episode nào được build"
-            copy="Khi bạn bấm tạo Video hoặc chạy Pipeline, tiến trình tổng thể của từng Episode sẽ xuất hiện tại đây."
-            action="Làm mới"
+            title="No episodes built yet"
+            copy="When you generate a video or run a pipeline, episode build progress will appear here."
+            action="Refresh"
             onAction={() => void onRefresh()}
           />
         ) : (
@@ -441,9 +441,9 @@ export function TasksView({
       ) : tasks.length === 0 ? (
         <EmptyState
           icon={<ListChecks size={26} />}
-          title="Không có tác vụ nào"
-          copy="Các tác vụ kỹ thuật chạy ngầm sẽ được liệt kê tại đây."
-          action="Làm mới"
+          title="No tasks found"
+          copy="Background technical tasks will be listed here."
+          action="Refresh"
           onAction={() => void onRefresh()}
         />
       ) : (

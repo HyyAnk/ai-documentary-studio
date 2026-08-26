@@ -18,7 +18,7 @@ describe("Contrast Self-Healing & Auto-Correction", () => {
 
     const css = generateContrastSelfHealingCss(report);
     expect(css).toContain(".keyword-highlight { color: #047857 !important;");
-    expect(css).toContain(".answer-card span, .visual-answer-label span { color: #ffffff !important;");
+    expect(css).toContain(".answer-card:nth-child(4n+1) span, .visual-answer-card:nth-child(4n+1) span { color: #78350F !important;");
     expect(css).toContain(".answer-card > b, .visual-answer-label > b { color: #ffffff !important;");
     expect(css).toContain(".badge-comment, .badge-like, .badge-sub { color: #172a59 !important;");
     expect(css).toContain('[data-text*="space" i]');
