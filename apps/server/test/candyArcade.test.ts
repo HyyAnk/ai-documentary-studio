@@ -194,7 +194,7 @@ describe("Candy Arcade visual template", () => {
     expect((html.match(/class="image-card hero-image"/g) ?? [])).toHaveLength(50);
     expect(html).toContain("ray-spin 150s");
     expect(html).not.toContain("repeat:-1");
-    expect(html).not.toContain("filter:");
+    expect(html).toContain("filter: grayscale");
     expect(html).not.toContain("clip-path");
   });
 
