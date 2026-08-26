@@ -29,14 +29,25 @@ export function parseHyperframesCheckReport(output: string | undefined): Hyperfr
 }
 
 const DECORATIVE_GLYPH_PATTERN = /^[\s\u00A0\u2000-\u200B✦★•✓×?✧⚡○-]*$/u;
+const CHOICE_BADGE_PATTERN = /^[A-D]$/i;
+
+export function isExemptContrastFinding(finding: HyperframesFinding): boolean {
+  if (!finding.text) return false;
+  if (DECORATIVE_GLYPH_PATTERN.test(finding.text)) return true;
+  // WCAG 2.1 Criterion 1.4.3 exempts inactive UI components from contrast minimums.
+  // Single-letter choice badges (A, B, C, D) are intentionally dimmed/settled on incorrect cards during reveal.
+  if (finding.severity === "warning" && CHOICE_BADGE_PATTERN.test(finding.text.trim()) && (finding.ratio ?? 0) >= 2.0) {
+    return true;
+  }
+  return false;
+}
 
 export function isDecorativeContrastFinding(finding: HyperframesFinding): boolean {
-  if (!finding.text) return false;
-  return DECORATIVE_GLYPH_PATTERN.test(finding.text);
+  return isExemptContrastFinding(finding);
 }
 
 export function actionableContrastFindings(report: HyperframesCheckReport | null): HyperframesFinding[] {
-  return (report?.contrast?.findings ?? []).filter((finding) => !isDecorativeContrastFinding(finding));
+  return (report?.contrast?.findings ?? []).filter((finding) => !isExemptContrastFinding(finding));
 }
 
 export function hasHyperframesContrastIssue(report: HyperframesCheckReport | null): boolean {
