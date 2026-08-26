@@ -118,17 +118,18 @@ describe("Candy Arcade visual regression contract", () => {
   it("renders prominent 3D glossy circular badges and distinct choice-coded stroke borders for kids", () => {
     const html = renderHtml();
     expect(html).toContain("border-radius: 50%");
-    expect(html).toContain("--choice-depth-shadow: #D27800");
-    expect(html).toContain("--choice-depth-shadow: #B01845");
-    expect(html).toContain("--choice-depth-shadow: #0066B3");
-    expect(html).toContain("--choice-depth-shadow: #4C8A00");
-    expect(html).toContain(".answer-card::before { content: \"\"; position: absolute; inset: 8px 16px 8px 24px; border: 3.5px dashed rgba(255, 255, 255, 0.8);");
-    expect(html).toMatch(/\.answer-card > b[^}]*width: 126px/);
-    expect(html).toMatch(/\.answer-card > b[^}]*font-size: 64px/);
-    expect(html).toMatch(/\.answer-card > b[^}]*margin-left: -68px/);
+    expect(html).toContain("--choice-depth-shadow: #E09000");
+    expect(html).toContain("--choice-depth-shadow: #CC2556");
+    expect(html).toContain("--choice-depth-shadow: #007ECC");
+    expect(html).toContain("--choice-depth-shadow: #6BA607");
+    expect(html).toContain(".answer-card::before { content: \"\"; position: absolute; inset: 6px 14px 6px 24px; border: 3px dashed rgba(255, 255, 255, 0.7);");
+    expect(html).toMatch(/\.answer-card > b[^}]*width: 156px/);
+    expect(html).toMatch(/\.answer-card > b[^}]*font-size: 80px/);
+    expect(html).toMatch(/\.answer-card > b[^}]*margin-left: -86px/);
     expect(html).toContain("border: 8px solid var(--choice-stroke)");
     expect(html).toContain(".answer-card > b::after");
-    expect(html).toContain(".layout-media_left_choices_right .answer-grid.answer-count-2 { grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 32px; height: 580px; }");
-    expect(html).toContain(".layout-media_left_choices_right .answer-count-2 .answer-card > b { width: 154px; height: 154px; margin-left: -84px; font-size: 78px;");
+    expect(html).toContain(".layout-media_left_choices_right .answer-grid.answer-count-2 { gap: 36px; height: 580px; }");
+    expect(html).toContain(".layout-media_left_choices_right .answer-count-2 .answer-card > b { width: 196px; height: 196px; margin-left: -104px; font-size: 98px;");
+    expect(html).toContain(".layout-media_left_choices_right .answer-count-3 .answer-card > b { width: 154px; height: 154px; margin-left: -82px; font-size: 78px;");
   });
 });
