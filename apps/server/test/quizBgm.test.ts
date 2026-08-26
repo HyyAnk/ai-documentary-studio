@@ -113,9 +113,28 @@ describe("BGM Registry and Audio Pipeline", () => {
     expect(bundle.html).toContain('class="clip bgm-clip"');
     expect(bundle.html).toContain('data-track-index="4"');
     expect(bundle.html).toContain('data-volume="0.18"');
+    expect(bundle.html).toContain('data-automation="');
     expect(bundle.html).toContain('src="./bgm/');
     expect(bundle.html).not.toContain('src="file:///');
 
+    // Parse automation attribute to verify fade-in and fade-out keyframes
+    const bgmMatch = bundle.html.match(/<audio id="bgm-clip-[^"]*"[^>]*data-automation="([^"]+)"/);
+    expect(bgmMatch).toBeTruthy();
+    const automationJson = bgmMatch![1]!.replaceAll("&quot;", '"');
+    const automation = JSON.parse(automationJson);
+    expect(automation.version).toBe(1);
+    expect(automation.lanes).toHaveLength(1);
+    expect(automation.lanes[0].target).toBe("volume");
+
+    const points = automation.lanes[0].points;
+    expect(points.length).toBeGreaterThanOrEqual(3);
+    // Starts at 0 (fade-in)
+    expect(points[0]).toEqual({ t: 0, v: 0 });
+    // Ramps to base volume 0.18
+    expect(points[1]).toEqual({ t: 0.5, v: 0.18 });
+    // Ends at 0 (fade-out at total duration)
+    expect(points[points.length - 1].v).toBe(0);
+    expect(points[points.length - 1].t).toBeCloseTo(timeline.duration_seconds, 1);
 
     // Check narration and SFX tracks coexist cleanly
     expect(bundle.html).toContain('id="quiz-narration"');

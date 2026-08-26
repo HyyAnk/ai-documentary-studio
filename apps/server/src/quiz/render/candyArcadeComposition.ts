@@ -89,7 +89,7 @@ export function buildCandyArcadeCompositionBundle(input: CandyArcadeCompositionI
   const scenes = clips.filter(Boolean).map(toSubComposition);
   const audioSrc = source(input.audioPath);
   const narrationDuration = input.narrationDurationSeconds > 0 ? input.narrationDurationSeconds : duration;
-  const bgmClips = buildBgmClips(duration, input.assets);
+  const bgmClips = buildBgmClips(duration, input.assets, outroStart);
   const sfxClips = buildSfxClips(events, input.assets);
   const audioTags = [
     `<audio id="quiz-narration" class="clip" data-start="0" data-duration="${narrationDuration.toFixed(3)}" data-track-index="2" data-volume="1" src="${audioSrc}"></audio>`,
@@ -258,10 +258,76 @@ function source(value: string): string {
   return pathToFileURL(value).href;
 }
 
-function buildBgmClips(duration: number, assets?: Record<string, string>): string[] {
+function buildBgmClips(duration: number, assets?: Record<string, string>, outroStart?: number): string[] {
   const schedule = defaultBgmRegistry.resolveBgmSchedule(duration, { assets, bpmPreference: "120_bpm_upbeat" });
-  return schedule.map((item) => {
-    return `<audio id="${item.id}" class="clip bgm-clip" data-start="${item.startSeconds.toFixed(3)}" data-duration="${item.durationSeconds.toFixed(3)}" data-track-index="4" data-volume="${item.volume.toFixed(2)}" src="${item.src}"></audio>`;
+  const totalClips = schedule.length;
+
+  return schedule.map((item, index) => {
+    const isFirstClip = index === 0;
+    const isFinalClip = index === totalClips - 1;
+    const clipStart = item.startSeconds;
+    const clipDuration = item.durationSeconds;
+    const baseVolume = item.volume;
+
+    const points: Array<{ t: number; v: number }> = [];
+
+    // Subtle 0.5s fade-in at the beginning of the audio track
+    if (isFirstClip) {
+      const fadeInDur = Math.min(0.5, clipDuration * 0.2);
+      if (fadeInDur > 0.05) {
+        points.push({ t: 0, v: 0 });
+        points.push({ t: Number(fadeInDur.toFixed(3)), v: baseVolume });
+      } else {
+        points.push({ t: 0, v: baseVolume });
+      }
+    } else {
+      const fadeInDur = Math.min(0.6, clipDuration * 0.2);
+      if (fadeInDur > 0.05) {
+        points.push({ t: 0, v: 0 });
+        points.push({ t: Number(fadeInDur.toFixed(3)), v: baseVolume });
+      } else {
+        points.push({ t: 0, v: baseVolume });
+      }
+    }
+
+    if (isFinalClip) {
+      // Smooth fade-out towards the end of the video
+      let fadeOutSeconds = 2.5;
+      if (typeof outroStart === "number" && outroStart > clipStart && outroStart < duration - 0.5) {
+        const outroDur = duration - outroStart;
+        fadeOutSeconds = Math.max(2.0, Math.min(4.0, outroDur));
+      }
+      fadeOutSeconds = Math.min(fadeOutSeconds, clipDuration * 0.5);
+
+      const fadeStartLocal = Math.max(0, clipDuration - fadeOutSeconds);
+      const lastPoint = points[points.length - 1];
+      if (lastPoint && fadeStartLocal > lastPoint.t) {
+        points.push({ t: Number(fadeStartLocal.toFixed(3)), v: baseVolume });
+      }
+      points.push({ t: Number(clipDuration.toFixed(3)), v: 0 });
+    } else {
+      const fadeOutSeconds = Math.min(0.6, clipDuration * 0.2);
+      const fadeStartLocal = Math.max(0, clipDuration - fadeOutSeconds);
+      const lastPoint = points[points.length - 1];
+      if (lastPoint && fadeStartLocal > lastPoint.t) {
+        points.push({ t: Number(fadeStartLocal.toFixed(3)), v: baseVolume });
+      }
+      points.push({ t: Number(clipDuration.toFixed(3)), v: 0 });
+    }
+
+    const automation = {
+      version: 1,
+      lanes: [
+        {
+          target: "volume",
+          points,
+        },
+      ],
+    };
+
+    const automationAttr = `data-automation="${escAttr(JSON.stringify(automation))}"`;
+
+    return `<audio id="${item.id}" class="clip bgm-clip" data-start="${item.startSeconds.toFixed(3)}" data-duration="${item.durationSeconds.toFixed(3)}" data-track-index="4" data-volume="${item.volume.toFixed(2)}" ${automationAttr} src="${item.src}"></audio>`;
   });
 }
 
