@@ -699,7 +699,7 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 @keyframes correct-badge-reveal { 0% { transform: scale(1); } 55% { transform: scale(1.14); } 100% { transform: scale(1.06); } }
 @keyframes visual-correct-card-reveal { 0% { transform: translateY(0) scale(1); } 55% { transform: translateY(-12px) scale(1.06); } 100% { transform: translateY(-4px) scale(1.03); } }
 @keyframes visual-correct-border { 0% { border-color: #fff; } 55%,100% { border-color: var(--correct); } }
-@keyframes incorrect-card-settle { from { opacity: 1; transform: scale(1); filter: grayscale(0) brightness(1); } to { opacity: .60; transform: scale(.95); filter: grayscale(.65) brightness(.90); box-shadow: 0 4px 0 rgba(10,25,60,.12); } }
+@keyframes incorrect-card-settle { from { opacity: 1; transform: scale(1); } to { opacity: .58; transform: scale(.94); border-color: rgba(255,255,255,0.4); box-shadow: 0 4px 0 rgba(10,25,60,.12); } }
 @keyframes status-pop { from { opacity: 0; transform: scale(0); } to { opacity: 1; transform: scale(1); } }
 @keyframes cross-pop { 0% { transform: scale(0); } 65% { transform: scale(1.15); } 100% { transform: scale(1); } }
 @keyframes hero-reveal-push { from { transform: scale(1); } to { transform: scale(1.035); } }
