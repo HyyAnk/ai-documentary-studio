@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowClockwise, Broadcast, CaretDown, Check, CheckCircle, CircleNotch, FileText, Gear, House, Image, ListChecks, MoonStars, Queue, SpeakerHigh, Sparkle, Sun, TerminalWindow, VideoCamera, Wallet, WarningCircle, X } from "@phosphor-icons/react";
+import { ArrowClockwise, Broadcast, CaretDown, Check, CheckCircle, CircleNotch, FileText, Gear, House, Image, ListChecks, MoonStars, Plus, Queue, SpeakerHigh, Sparkle, Sun, TerminalWindow, VideoCamera, Wallet, WarningCircle, X } from "@phosphor-icons/react";
 import type { Channel, CodexSettingsResponse, Task } from "@studio/shared";
 import type { GitInfo, Notice, Page, Theme } from "./types";
 import { formatTaskType } from "../lib/utils";
@@ -121,6 +121,7 @@ export function Sidebar({
   balanceError = null,
   onRefreshBalance,
   onOpenSettings,
+  onCreateChannel,
 }: {
   page: Page;
   setPage: (page: Page) => void;
@@ -134,6 +135,7 @@ export function Sidebar({
   balanceError?: string | null;
   onRefreshBalance?: () => void;
   onOpenSettings?: () => void;
+  onCreateChannel?: () => void;
 }) {
   const items: Array<{ page: Page; label: string; icon: typeof House }> = [
     { page: "dashboard", label: "Dashboard", icon: House },
@@ -151,6 +153,17 @@ export function Sidebar({
           <span className="brand-subtitle">AI Video Engine</span>
         </div>
       </div>
+      {onCreateChannel ? (
+        <button
+          type="button"
+          className="sidebar-create-btn"
+          onClick={onCreateChannel}
+          title="Create New Channel"
+        >
+          <Plus size={16} weight="bold" />
+          <span>New Channel</span>
+        </button>
+      ) : null}
       <div className="sidebar-rule" />
       <nav className="primary-nav" aria-label="Primary navigation">
         {items.map(({ page: itemPage, label, icon: Icon }) => (

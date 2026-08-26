@@ -1,7 +1,7 @@
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { access, mkdir, readFile } from "node:fs/promises";
+import { access, mkdir, readFile, stat } from "node:fs/promises";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
@@ -835,6 +835,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
       return { status: "unavailable", message: "Codex App Server unavailable" };
     }
   });
+
   server.get("/api/events", { websocket: true }, (socket) => {
     const client = socket as unknown as { send: (payload: string) => void; readyState: number; OPEN: number };
     clients.add(client);

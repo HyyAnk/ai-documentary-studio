@@ -240,6 +240,7 @@ export function App() {
           openPage("settings");
           setQueryParam("tab", "media");
         }}
+        onCreateChannel={() => requestCreateChannel("quiz")}
       />
       <main className="main-column">
         <Topbar
