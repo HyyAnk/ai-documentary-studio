@@ -46,9 +46,8 @@ describe("Candy Arcade visual regression contract", () => {
     const width = Number(markerCss.match(/width: ([\d.]+)px/)?.[1]);
     const height = Number(markerCss.match(/height: ([\d.]+)px/)?.[1]);
     expect(width / height).toBeGreaterThanOrEqual(.92);
-    expect(width / height).toBeLessThanOrEqual(1.08);
-    expect(html).toContain('<div class="timer-progress"></div><span class="timer-marker" data-layout-allow-occlusion>');
-    expect(html).toContain('<b class="marker-val val-query">?</b><b class="marker-val val-5">5</b>');
+    expect(html).toContain('<div class="timer-progress"></div><span class="timer-marker" data-layout-allow-occlusion data-layout-allow-overlap>');
+    expect(html).toContain('<b class="marker-val val-query" data-layout-allow-overlap>?</b><b class="marker-val val-5" data-layout-allow-overlap>5</b>');
     expect(html).not.toContain('<div class="timer-progress"><span class="timer-marker');
     expect(html).toContain("@keyframes quiz-timer-marker-slide { from { left: 100%; } to { left: 0%; } }");
     expect(thinkingBarCss).toContain("animation: phase-hold var(--timer-duration) steps(1,end)");

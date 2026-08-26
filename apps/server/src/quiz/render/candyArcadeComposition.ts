@@ -208,7 +208,7 @@ function answerCards(question: QuizV2["questions"][number], assets: Record<strin
     const layout = textLayout(choice.text, "choice");
     const optionAsset = assetFor(assets, `asset-${question.id}-${choice.id}`);
     const phaseSeconds = ambientPhaseSeconds("float", index, question.id);
-    return `<div class="answer-card ${state} choice-tier-${layout.tier}" style="--item-phase:${phaseSeconds}s" data-layout-allow-occlusion data-layout-allow-overflow><b>${String.fromCharCode(65 + index)}</b>${optionAsset ? `<img src="${escAttr(optionAsset)}" alt="">` : ""}<span>${esc(choice.text)}</span>${state === "answer-correct" ? "<i class=\"answer-check\" data-layout-ignore aria-hidden=\"true\">✓</i>" : state === "answer-incorrect" ? "<i class=\"answer-cross\" data-layout-ignore aria-hidden=\"true\">×</i>" : ""}</div>`;
+    return `<div class="answer-card ${state} choice-tier-${layout.tier}" style="--item-phase:${phaseSeconds}s" data-layout-allow-occlusion data-layout-allow-overflow><b data-layout-allow-occlusion>${String.fromCharCode(65 + index)}</b>${optionAsset ? `<img src="${escAttr(optionAsset)}" alt="">` : ""}<span data-layout-allow-occlusion>${esc(choice.text)}</span>${state === "answer-correct" ? "<i class=\"answer-check\" data-layout-ignore aria-hidden=\"true\">✓</i>" : state === "answer-incorrect" ? "<i class=\"answer-cross\" data-layout-ignore aria-hidden=\"true\">×</i>" : ""}</div>`;
   }).join("")}</div>`;
 }
 
@@ -216,7 +216,7 @@ function visualAnswerCards(question: QuizV2["questions"][number], assets: Record
   return `<div class="visual-answer-grid">${question.choices.map((choice, index) => {
     const state = "answer-" + visualAnswerState(choice.id, question.correct_choice_id, "reveal");
     const phaseSeconds = ambientPhaseSeconds("float", index, question.id);
-    return `<div class="visual-answer-card ${state}" style="--item-phase:${phaseSeconds}s" data-layout-allow-occlusion data-layout-allow-overflow>${imageCard(assetFor(assets, `asset-${question.id}-${choice.id}`), choice.text, "option-image", index + question.number * 10)}<div class="visual-answer-label" data-layout-allow-overflow><b>${String.fromCharCode(65 + index)}</b><span>${esc(choice.text)}</span></div>${state === "answer-correct" ? "<i class=\"answer-check\" data-layout-ignore aria-hidden=\"true\">✓</i>" : state === "answer-incorrect" ? "<i class=\"answer-cross\" data-layout-ignore aria-hidden=\"true\">×</i>" : ""}</div>`;
+    return `<div class="visual-answer-card ${state}" style="--item-phase:${phaseSeconds}s" data-layout-allow-occlusion data-layout-allow-overflow>${imageCard(assetFor(assets, `asset-${question.id}-${choice.id}`), choice.text, "option-image", index + question.number * 10)}<div class="visual-answer-label" data-layout-allow-overflow><b data-layout-allow-occlusion>${String.fromCharCode(65 + index)}</b><span data-layout-allow-occlusion>${esc(choice.text)}</span></div>${state === "answer-correct" ? "<i class=\"answer-check\" data-layout-ignore aria-hidden=\"true\">✓</i>" : state === "answer-incorrect" ? "<i class=\"answer-cross\" data-layout-ignore aria-hidden=\"true\">×</i>" : ""}</div>`;
   }).join("")}</div>`;
 }
 
@@ -230,7 +230,7 @@ function thinkingBar(input: { clipStart: number; revealStart: number }): string 
   const queryDuration = cd5;
   const style = `style="--timer-duration:${duration.toFixed(3)}s;--cd-query-dur:${queryDuration.toFixed(3)}s;--cd5-at:${cd5.toFixed(3)}s;--cd4-at:${cd4.toFixed(3)}s;--cd3-at:${cd3.toFixed(3)}s;--cd2-at:${cd2.toFixed(3)}s;--cd1-at:${cd1.toFixed(3)}s"`;
   const starSvg = `<svg class="marker-star-svg" viewBox="0 0 100 100" aria-hidden="true" data-layout-ignore><defs><linearGradient id="markerStarGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#FFE043" /><stop offset="45%" stop-color="#FF961F" /><stop offset="100%" stop-color="#FF3366" /></linearGradient><linearGradient id="markerStarStroke" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#FFFFFF" /><stop offset="60%" stop-color="#FFF4B8" /><stop offset="100%" stop-color="#FFD633" /></linearGradient></defs><path d="M50 11 Q59 20 68 29.5 Q80 33 91 41 Q86 53 79.5 63.5 Q80 77 75.5 88.5 Q63 87 50 85 Q37 87 24.5 88.5 Q20 77 20.5 63.5 Q14 53 9 41 Q20 33 32 29.5 Q41 20 50 11 Z" fill="rgba(13,35,71,0.35)" /><path class="star-outer" d="M50 7 Q59 16 68 25.5 Q80 29 91 37 Q86 49 79.5 59.5 Q80 73 75.5 84.5 Q63 83 50 81 Q37 83 24.5 84.5 Q20 73 20.5 59.5 Q14 49 9 37 Q20 29 32 25.5 Q41 16 50 7 Z" fill="url(#markerStarGrad)" stroke="url(#markerStarStroke)" stroke-width="7" stroke-linejoin="round" stroke-linecap="round" /></svg>`;
-  return `<div class="thinking-bar" ${style}><div class="thinking-track" aria-label="Quiz timer" data-layout-allow-overflow><div class="timer-milestones" data-layout-ignore aria-hidden="true"><span class="milestone-star star-1">★</span><span class="milestone-star star-2">★</span><span class="milestone-star star-3">★</span><span class="milestone-star star-4">★</span></div><div class="timer-progress"></div><span class="timer-marker" data-layout-allow-occlusion>${starSvg}<b class="marker-val val-query">?</b><b class="marker-val val-5">5</b><b class="marker-val val-4">4</b><b class="marker-val val-3">3</b><b class="marker-val val-2">2</b><b class="marker-val val-1">1</b></span><div class="timer-sparkles" data-layout-ignore aria-hidden="true"><i>✦</i><i>•</i><i>✦</i></div></div></div>`;
+  return `<div class="thinking-bar" ${style}><div class="thinking-track" aria-label="Quiz timer" data-layout-allow-overflow><div class="timer-milestones" data-layout-ignore aria-hidden="true"><span class="milestone-star star-1">★</span><span class="milestone-star star-2">★</span><span class="milestone-star star-3">★</span><span class="milestone-star star-4">★</span></div><div class="timer-progress"></div><span class="timer-marker" data-layout-allow-occlusion data-layout-allow-overlap>${starSvg}<b class="marker-val val-query" data-layout-allow-overlap>?</b><b class="marker-val val-5" data-layout-allow-overlap>5</b><b class="marker-val val-4" data-layout-allow-overlap>4</b><b class="marker-val val-3" data-layout-allow-overlap>3</b><b class="marker-val val-2" data-layout-allow-overlap>2</b><b class="marker-val val-1" data-layout-allow-overlap>1</b></span><div class="timer-sparkles" data-layout-ignore aria-hidden="true"><i>✦</i><i>•</i><i>✦</i></div></div></div>`;
 }
 
 function revealPanel(input: { question: QuizV2["questions"][number]; copy: Copy; isFinal: boolean }): string {
@@ -238,8 +238,8 @@ function revealPanel(input: { question: QuizV2["questions"][number]; copy: Copy;
 }
 
 function sceneDecorations(questionIndex: number): string {
-  const symbols = ["✦", "•", "○", "?", "✧", "⚡", "•"];
-  return `<div class="scene-decor" data-layout-ignore aria-hidden="true">${symbols.map((symbol, index) => `<i class="decor-${index + 1}" style="--decor-phase:${ambientPhaseSeconds("drift", index, String(questionIndex))}s">${symbol}</i>`).join("")}</div>`;
+  const symbols = ["✦", "•", "○", "★", "✧", "⚡", "•"];
+  return `<div class="scene-decor" data-layout-ignore aria-hidden="true">${symbols.map((symbol, index) => `<i class="decor-${index + 1}" data-layout-ignore aria-hidden="true" style="--decor-phase:${ambientPhaseSeconds("drift", index, String(questionIndex))}s">${symbol}</i>`).join("")}</div>`;
 }
 
 function styleAttributes(visual: QuizTemplateScene, layout: ReturnType<typeof textLayout>, clipStart: number, choicesStart: number, thinkingStart: number, revealStart: number, rewardStart: number, clipEnd: number): string {
