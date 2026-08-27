@@ -17,8 +17,9 @@ export function SidebarQueueWidget({
   onOpenTasks?: () => void;
   onOpenEpisode?: (channelId: string, episodeId: string) => void;
 }) {
-  const queuedTasks = tasks.filter((task) => task.status === "QUEUED").reverse();
-  const runningTasks = tasks.filter((task) => task.status === "RUNNING");
+  const episodeTasks = tasks.filter((task) => Boolean(task.episode_id));
+  const queuedTasks = episodeTasks.filter((task) => task.status === "QUEUED").reverse();
+  const runningTasks = episodeTasks.filter((task) => task.status === "RUNNING");
   const channelMap = new Map(channels.map((c) => [c.channel_id, c.display_name]));
 
   const formatEpisodeLabel = (channelId: string, episodeId: string | null) => {
@@ -607,19 +608,22 @@ export function NoticeBanner({ notice, onClose }: { notice: NonNullable<Notice>;
   const remainingRef = useRef(duration);
   const startTimeRef = useRef(Date.now());
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
+    setIsPaused(false);
     remainingRef.current = duration;
     startTimeRef.current = Date.now();
 
     timerRef.current = setTimeout(() => {
-      onClose();
+      onCloseRef.current();
     }, duration);
 
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [notice, onClose, duration]);
+  }, [notice.message, notice.tone, notice.title, duration]);
 
   const handleMouseEnter = () => {
     setIsPaused(true);
@@ -635,8 +639,14 @@ export function NoticeBanner({ notice, onClose }: { notice: NonNullable<Notice>;
     startTimeRef.current = Date.now();
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
-      onClose();
+      onCloseRef.current();
     }, remainingRef.current);
+  };
+
+  const handleAnimationEnd = () => {
+    if (!isPaused) {
+      onCloseRef.current();
+    }
   };
 
   const title = notice.title ?? (notice.tone === "bad" ? "Error" : undefined);
@@ -667,12 +677,13 @@ export function NoticeBanner({ notice, onClose }: { notice: NonNullable<Notice>;
       </button>
       <div className="notice-progress">
         <div
-          key={notice.message}
+          key={`${notice.tone}-${notice.message}`}
           className="notice-progress-fill"
           style={{
             animationDuration: `${duration}ms`,
             animationPlayState: isPaused ? "paused" : "running",
           }}
+          onAnimationEnd={handleAnimationEnd}
         />
       </div>
     </div>

@@ -1,17 +1,47 @@
-import { ArrowUpRight, Broadcast, CheckCircle, CheckSquareOffset, FilmSlate, FolderOpen, Lightning, Plus, Trash } from "@phosphor-icons/react";
-import type { Channel, Task } from "@studio/shared";
-import { formatTaskElapsed, formatTaskStatus, formatTaskType, isTaskActive } from "../lib/utils";
-import { EmptyState } from "./EmptyState";
+import { useState } from "react";
+import {
+  ArrowUpRight,
+  Broadcast,
+  ChartBar,
+  CheckCircle,
+  Cpu,
+  CurrencyDollar,
+  FilmSlate,
+  FolderOpen,
+  Image as ImageIcon,
+  Lightning,
+  Plus,
+  SpeakerHigh,
+  Trash,
+  TrendUp,
+  VideoCamera,
+  Wallet,
+} from "@phosphor-icons/react";
+import type { AppConfig, Channel, StorageInfo, Task } from "@studio/shared";
+import type { GitInfo, Page } from "./types";
 import { PageTitle } from "./AppChrome";
+import { EmptyState } from "./EmptyState";
 
 export type ChannelGroupId = "quiz";
 
-export function ChannelCard({ channel, index, onOpen, onDelete }: { channel: Channel; index: number; onOpen: () => void; onDelete: (channel: Channel) => void }) {
+export function ChannelCard({
+  channel,
+  index,
+  onOpen,
+  onDelete,
+}: {
+  channel: Channel;
+  index: number;
+  onOpen: () => void;
+  onDelete: (channel: Channel) => void;
+}) {
   return (
     <article className="channel-card quiz-channel-card">
       <div className="card-top">
         <span className="channel-kind">Quiz Engine</span>
-        <span className={`status-badge ${channel.status.toLowerCase()}`}>{channel.status.toLowerCase()}</span>
+        <span className={`status-badge ${channel.status.toLowerCase()}`}>
+          {channel.status.toLowerCase()}
+        </span>
         <button
           type="button"
           className="icon-button danger channel-card-delete"
@@ -28,7 +58,7 @@ export function ChannelCard({ channel, index, onOpen, onDelete }: { channel: Cha
         onClick={onOpen}
       >
         <h3>{channel.display_name}</h3>
-        {channel.description ? <p>{channel.description}</p> : <p style={{ opacity: 0.5 }}>No description provided.</p>}
+        {channel.description ? <p>{channel.description}</p> : null}
         <div className="card-bottom">
           <span>
             {channel.episode_count}{" "}
@@ -48,7 +78,7 @@ function Metric({
   icon: Icon,
 }: {
   label: string;
-  value: number;
+  value: string | number;
   note: string;
   icon?: typeof Broadcast;
 }) {
@@ -64,15 +94,59 @@ function Metric({
   );
 }
 
-function TaskRow({ task, now }: { task: Task; now: number }) {
+function CostSavingsSection({
+  voiceMetrics,
+}: {
+  voiceMetrics?: {
+    rendered_characters: number;
+    rendered_duration_seconds: number;
+    rendered_segments_count: number;
+    rendered_episodes_count: number;
+  } | null;
+}) {
+  const elevenLabsRatePer1k = 0.10; // $0.10 per 1,000 characters
+  const usdToVnd = 25500;
+
+  const renderedChars = voiceMetrics?.rendered_characters || 0;
+  const renderedSeconds = voiceMetrics?.rendered_duration_seconds || 0;
+
+  const savedUsd = (renderedChars / 1000) * elevenLabsRatePer1k;
+  const savedVnd = savedUsd * usdToVnd;
+
   return (
-    <div className={`activity-row ${isTaskActive(task) ? "is-processing" : ""}`}>
-      <div className={`task-status-dot ${task.status.toLowerCase()}`} />
-      <div>
-        <strong>{formatTaskType(task.task_type)}</strong>
-        <span>{task.error || task.progress_message || formatTaskStatus(task.status)}</span>
+    <div className="dashboard-section">
+      <div className="dashboard-section-header">
+        <div className="dashboard-section-title">
+          <CurrencyDollar size={18} weight="duotone" style={{ color: "var(--green)" }} />
+          <h2>Voice Cost Savings (vs ElevenLabs $0.10 / 1K chars)</h2>
+        </div>
       </div>
-      <span className="task-elapsed">{formatTaskElapsed(task, now)}</span>
+
+      <div className="savings-card">
+        <div className="savings-metrics-row">
+          <div className="savings-submetric">
+            <span className="submetric-label">Estimated Savings</span>
+            <strong className="submetric-val" style={{ color: "var(--green)" }}>
+              ${savedUsd.toFixed(2)} USD{" "}
+              <span style={{ fontSize: "12px", color: "var(--muted)", fontWeight: 500 }}>
+                ({Math.round(savedVnd).toLocaleString("vi-VN")} ₫)
+              </span>
+            </strong>
+          </div>
+          <div className="savings-submetric">
+            <span className="submetric-label">Rendered Characters</span>
+            <strong className="submetric-val">
+              {renderedChars.toLocaleString("vi-VN")} chars
+            </strong>
+          </div>
+          <div className="savings-submetric">
+            <span className="submetric-label">Audio Produced</span>
+            <strong className="submetric-val">
+              {renderedSeconds > 0 ? `${(renderedSeconds / 60).toFixed(1)} mins` : "0 mins"}
+            </strong>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -81,26 +155,110 @@ export function DashboardView({
   channels,
   tasks,
   activeTasks,
-  now,
-  onCreate,
-  openChannel,
-  onDelete,
-  openTaskList,
-  openChannelsList,
+  now: _now,
+  appConfig: _appConfig,
+  activeEngine: _activeEngine = "codex",
+  currentModel: _currentModel = "",
+  currentImageModel: _currentImageModel = "gpt-image-2",
+  imageBalance = null,
+  voiceMetrics = null,
+  storage: _storage = null,
+  git: _git = { branch: null, dirty: false, changed_files: 0 },
+  engineStatus: _engineStatus = "ready",
+  onNavigate: _onNavigate,
 }: {
   channels: Channel[];
   tasks: Task[];
   activeTasks: Task[];
-  now: number;
-  onCreate: (groupId?: ChannelGroupId) => void;
-  openChannel: (id: string) => void;
-  onDelete: (channel: Channel) => void;
-  openTaskList: () => void;
-  openChannelsList: () => void;
+  now?: number;
+  appConfig?: AppConfig | null;
+  activeEngine?: "codex" | "antigravity";
+  currentModel?: string;
+  currentImageModel?: string;
+  imageBalance?: { balance_vnd: number; rpm?: number } | null;
+  voiceMetrics?: {
+    rendered_characters: number;
+    rendered_duration_seconds: number;
+    rendered_segments_count: number;
+    rendered_episodes_count: number;
+  } | null;
+  storage?: StorageInfo | null;
+  git?: GitInfo;
+  engineStatus?: string;
+  onNavigate?: (page: Page, params?: Record<string, string>) => void;
 }) {
-  const reviewCount = tasks.filter((task) => task.status === "WAITING_APPROVAL").length;
+  // Channel & Episode metrics
+  const activeChannelsCount = channels.filter((c) => c.status === "ACTIVE").length;
+  const draftChannelsCount = channels.filter((c) => c.status === "DRAFT").length;
+  const totalEpisodes = channels.reduce((total, channel) => total + (channel.episode_count || 0), 0);
+
+  // Pipeline & Task execution telemetry
+  const runningCount = tasks.filter((task) => task.status === "RUNNING").length;
+  const queuedCount = tasks.filter((task) => task.status === "QUEUED").length;
   const completedCount = tasks.filter((task) => task.status === "COMPLETED").length;
-  const recentChannels = [...channels].sort((a, b) => b.updated_at.localeCompare(a.updated_at)).slice(0, 6);
+  const failedCount = tasks.filter((task) => task.status === "FAILED").length;
+  const terminalCount = completedCount + failedCount;
+  const successRate = terminalCount > 0 ? ((completedCount / terminalCount) * 100).toFixed(1) : "100";
+
+  // Balance formatting
+  const formattedBalance = imageBalance
+    ? `${imageBalance.balance_vnd.toLocaleString("vi-VN")} ₫`
+    : "N/A";
+  const balanceRateNote = imageBalance?.rpm ? `${imageBalance.rpm} RPM rate limit` : "Image API quota";
+
+
+  // Category breakdown
+  const categoryStats = [
+    {
+      domain: "Visual Art & Assets",
+      filter: (t: Task) => t.task_type === "GENERATE_BUNDLE_IMAGE",
+      icon: ImageIcon,
+    },
+    {
+      domain: "Voice & Speech (TTS)",
+      filter: (t: Task) => t.task_type === "GENERATE_AUDIO" || t.task_type === "GENERATE_NARRATION",
+      icon: SpeakerHigh,
+    },
+    {
+      domain: "Script & Intelligence",
+      filter: (t: Task) =>
+        [
+          "SUGGEST_TOPICS",
+          "GENERATE_RESEARCH",
+          "GENERATE_TREATMENT",
+          "GENERATE_SCRIPT",
+          "GENERATE_VISUAL_BIBLE",
+          "GENERATE_SCENES",
+          "GENERATE_SEQUENCE_SCENES",
+          "GENERATE_PIPELINE",
+          "GENERATE_DNA",
+          "REGENERATE_DIALOGUE",
+          "REGENERATE_PROMPT",
+          "REGENERATE_BOTH",
+        ].includes(t.task_type),
+      icon: Cpu,
+    },
+    {
+      domain: "Video Composition",
+      filter: (t: Task) => t.task_type === "GENERATE_VIDEO",
+      icon: VideoCamera,
+    },
+  ].map((cat) => {
+    const catTasks = tasks.filter(cat.filter);
+    const catCompleted = catTasks.filter((t) => t.status === "COMPLETED").length;
+    const catFailed = catTasks.filter((t) => t.status === "FAILED").length;
+    const catRunning = catTasks.filter((t) => t.status === "RUNNING").length;
+    const catTerminal = catCompleted + catFailed;
+    const catRate = catTerminal > 0 ? ((catCompleted / catTerminal) * 100).toFixed(0) : "100";
+    return {
+      ...cat,
+      total: catTasks.length,
+      completed: catCompleted,
+      failed: catFailed,
+      running: catRunning,
+      successRate: catRate,
+    };
+  });
 
   return (
     <section className="page-wrap">
@@ -111,88 +269,106 @@ export function DashboardView({
             Studio <em>Dashboard</em>
           </h1>
           <p className="hero-copy">
-            Produce, monitor, and scale AI-driven children's quiz video channels with high-fidelity automation.
+            System metrics, real-time pipeline telemetry, and economic ROI analysis.
           </p>
         </div>
-        <div className="hero-actions-group" style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-          <button className="primary-button hero-action" onClick={() => onCreate("quiz")}>
-            <Plus size={16} weight="bold" />
-            <span>New Quiz Channel</span>
-          </button>
-        </div>
       </div>
 
+      {/* Top Level Metric KPIs */}
       <div className="metric-grid">
-        <Metric label="Channels" value={channels.length} note="Active projects" icon={Broadcast} />
+        <Metric
+          label="Channels"
+          value={channels.length}
+          note={`${activeChannelsCount} active · ${draftChannelsCount} draft`}
+          icon={Broadcast}
+        />
         <Metric
           label="Episodes"
-          value={channels.reduce((total, channel) => total + channel.episode_count, 0)}
-          note="In library"
+          value={totalEpisodes}
+          note={`Across ${channels.length} projects`}
           icon={FilmSlate}
         />
-        <Metric label="Running" value={activeTasks.length} note="Active background" icon={Lightning} />
         <Metric
-          label="Review"
-          value={reviewCount}
-          note={reviewCount ? "Action required" : `${completedCount} completed`}
-          icon={CheckSquareOffset}
+          label="Success Rate"
+          value={`${successRate}%`}
+          note={`${completedCount} completed · ${failedCount} failed`}
+          icon={CheckCircle}
+        />
+        <Metric
+          label="Active Tasks"
+          value={activeTasks.length}
+          note={`${runningCount} running · ${queuedCount} queued`}
+          icon={Lightning}
+        />
+        <Metric
+          label="Image Balance"
+          value={formattedBalance}
+          note={balanceRateNote}
+          icon={Wallet}
         />
       </div>
 
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">Library</p>
-          <h2>Channels</h2>
-        </div>
-        <button className="text-button" onClick={openChannelsList}>
-          <span>View all</span>
-          <ArrowUpRight size={15} />
-        </button>
-      </div>
-      {channels.length === 0 ? (
-        <EmptyState
-          icon={<Broadcast size={26} />}
-          title="No channels"
-          copy="Create a channel to begin producing automated documentary and quiz content."
-          action="Create channel"
-          onAction={onCreate}
-        />
-      ) : (
-        <div className="channel-grid">
-          {recentChannels.map((channel, index) => (
-            <ChannelCard
-              key={channel.channel_id}
-              index={index + 1}
-              channel={channel}
-              onOpen={() => openChannel(channel.channel_id)}
-              onDelete={onDelete}
-            />
-          ))}
-        </div>
-      )}
+      <div className="dashboard-grid">
+        {/* Cost Savings & ROI Section */}
+        <CostSavingsSection voiceMetrics={voiceMetrics} />
 
-      <div className="section-heading activity-heading">
-        <div>
-          <p className="eyebrow">Operations</p>
-          <h2>Recent activity</h2>
+        {/* Pipeline Progress & Telemetry */}
+        <div className="dashboard-section">
+          {/* Operational Domain Breakdown Table */}
+          <div className="dashboard-table-card">
+            <table className="dashboard-table">
+              <thead>
+                <tr>
+                  <th>Production Domain</th>
+                  <th>Total Runs</th>
+                  <th>Running</th>
+                  <th>Completed</th>
+                  <th>Failed</th>
+                  <th>Success Rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {categoryStats.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <tr key={item.domain}>
+                      <td>
+                        <div className="table-domain-cell">
+                          <Icon size={16} style={{ color: "var(--accent-deep)" }} />
+                          <span>{item.domain}</span>
+                        </div>
+                      </td>
+                      <td className="table-num-cell">{item.total}</td>
+                      <td className="table-num-cell" style={{ color: item.running ? "var(--accent)" : "inherit" }}>
+                        {item.running}
+                      </td>
+                      <td className="table-num-cell" style={{ color: "var(--green)" }}>
+                        {item.completed}
+                      </td>
+                      <td className="table-num-cell" style={{ color: item.failed ? "var(--notice-error)" : "inherit" }}>
+                        {item.failed}
+                      </td>
+                      <td>
+                        <div className="progress-pill-wrap">
+                          <div className="progress-mini-bar">
+                            <div
+                              className="progress-mini-fill"
+                              style={{ width: `${item.successRate}%` }}
+                            />
+                          </div>
+                          <span className="table-num-cell" style={{ fontSize: "11px" }}>
+                            {item.successRate}%
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
-        <button className="text-button" onClick={openTaskList}>
-          <span>View all</span>
-          <ArrowUpRight size={15} />
-        </button>
       </div>
-      {tasks.length === 0 ? (
-        <div className="activity-empty">
-          <CheckCircle size={19} />
-          <span>No background tasks recorded yet.</span>
-        </div>
-      ) : (
-        <div className="activity-list">
-          {tasks.slice(0, 5).map((task) => (
-            <TaskRow key={task.task_id} task={task} now={now} />
-          ))}
-        </div>
-      )}
     </section>
   );
 }

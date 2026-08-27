@@ -41,6 +41,12 @@ export function App() {
     return saved !== "false";
   });
   const [imageBalance, setImageBalance] = useState<{ balance_vnd: number; rpm?: number } | null>(null);
+  const [voiceMetrics, setVoiceMetrics] = useState<{
+    rendered_characters: number;
+    rendered_duration_seconds: number;
+    rendered_segments_count: number;
+    rendered_episodes_count: number;
+  } | null>(null);
   const [loadingBalance, setLoadingBalance] = useState(false);
   const [balanceError, setBalanceError] = useState<string | null>(null);
   const { channels, setChannels, refresh: refreshChannels } = useChannels();
@@ -59,9 +65,17 @@ export function App() {
   const fetchBalance = useCallback(async () => {
     try {
       setLoadingBalance(true);
-      const res = await api.imageBalance();
-      setImageBalance(res);
-      setBalanceError(null);
+      const [res, vmRes] = await Promise.allSettled([api.imageBalance(), api.voiceRenderedMetrics()]);
+      if (res.status === "fulfilled") {
+        setImageBalance(res.value);
+        setBalanceError(null);
+      } else {
+        setImageBalance(null);
+        setBalanceError(res.reason instanceof Error ? res.reason.message : "Failed to load balance");
+      }
+      if (vmRes.status === "fulfilled") {
+        setVoiceMetrics(vmRes.value);
+      }
     } catch (err) {
       setImageBalance(null);
       setBalanceError(err instanceof Error ? err.message : "Failed to load balance");
@@ -97,15 +111,17 @@ export function App() {
   }, []);
 
   const refreshPeripheralState = useCallback(async () => {
-    const [gitResult, codexResult, agyResult, engineResult] = await Promise.allSettled([
+    const [gitResult, codexResult, agyResult, engineResult, voiceMetricsResult] = await Promise.allSettled([
       api.git(),
       api.codexSettings(),
       api.antigravitySettings(),
       api.engine(),
+      api.voiceRenderedMetrics(),
     ]);
     if (gitResult.status === "fulfilled") setGit(gitResult.value);
     if (codexResult.status === "fulfilled") setCodex(codexResult.value);
     if (agyResult.status === "fulfilled") setAntigravity(agyResult.value);
+    if (voiceMetricsResult.status === "fulfilled") setVoiceMetrics(voiceMetricsResult.value);
     if (engineResult.status === "fulfilled") {
       const eng = engineResult.value;
       setActiveEngine(eng.active_engine);
@@ -135,6 +151,7 @@ export function App() {
   useEffect(() => { void refresh().catch((error: Error) => { setNotice({ tone: "bad", message: error.message }); setLoading(false); }); }, [refresh]);
 
   const selectedChannel = channels.find((channel) => channel.channel_id === selectedChannelId) ?? null;
+  const handleCloseNotice = useCallback(() => setNotice(null), []);
   const showError = (error: unknown) => setNotice({ tone: "bad", message: error instanceof Error ? error.message : "Something went wrong" });
   const showGood = (message: string) => setNotice({ tone: "good", message });
   const requestDeleteChannel = (channel: Channel) => setDeleteTarget(channel);
@@ -213,13 +230,14 @@ export function App() {
   if (stopped) return <main className="shutdown-screen"><div className="shutdown-card"><Power size={24} weight="bold" /><p className="eyebrow">Local workspace</p><h1>Dashboard stopped</h1><p>Run <strong>run dashboard.bat</strong> to start it again. Your channel files are still on this computer.</p></div></main>;
 
   const currentEngineStatus = activeEngine === "antigravity" ? antigravityStatus : codexStatus;
+  const activeEpisodeTasks = activeTasks.filter((t) => Boolean(t.episode_id));
 
   return (
     <div className="app-shell">
       <Sidebar
         page={page}
         setPage={navigate}
-        activeTaskCount={activeTasks.length}
+        activeTaskCount={activeEpisodeTasks.length}
         tasks={tasks}
         channels={channels}
         onCancelTask={async (taskId) => {
@@ -280,8 +298,8 @@ export function App() {
           }}
           onShutdown={() => void stopDashboard()}
         />
-        {page !== "tasks" && (
-          <TaskActivityBar tasks={activeTasks} realtimeStatus={realtimeStatus} now={taskClock} onOpenTasks={() => navigate("tasks")} onOpenEpisode={openEpisode} />
+        {page !== "tasks" && !selectedEpisodeId && (
+          <TaskActivityBar tasks={activeEpisodeTasks} realtimeStatus={realtimeStatus} now={taskClock} onOpenTasks={() => navigate("tasks")} onOpenEpisode={openEpisode} />
         )}
         {loading ? <LoadingState /> : page === "dashboard" ? (
           <DashboardView
@@ -289,11 +307,21 @@ export function App() {
             tasks={tasks}
             activeTasks={activeTasks}
             now={taskClock}
-            onCreate={(groupId) => requestCreateChannel(groupId || "quiz")}
-            openChannel={(chId) => openChannel(chId)}
-            onDelete={requestDeleteChannel}
-            openTaskList={() => navigate("tasks")}
-            openChannelsList={() => navigate("channels")}
+            appConfig={appConfig}
+            activeEngine={activeEngine}
+            currentModel={currentModel}
+            currentImageModel={currentImageModel}
+            imageBalance={imageBalance}
+            voiceMetrics={voiceMetrics}
+            storage={storage}
+            git={git}
+            engineStatus={currentEngineStatus}
+            onNavigate={(nextPage, params) => {
+              openPage(nextPage);
+              if (params) {
+                Object.entries(params).forEach(([k, v]) => setQueryParam(k, v));
+              }
+            }}
           />
         ) : null}
         {!loading && page === "channels" ? (
@@ -366,7 +394,7 @@ export function App() {
       {storage && !storage.configured ? <StorageSetupModal storage={storage} onSaved={async (next) => { await applyStorage(next); showGood("Content storage is ready"); }} onError={showError} /> : null}
       {showCreate ? <CreateChannelModal initialGroupId={showCreate} onClose={() => setShowCreate(null)} onCreated={async (channelId, message, task) => { if (task) upsertTask(task); setShowCreate(null); await refresh(); openChannel(channelId); setNotice({ tone: "good", message }); }} onError={showError} /> : null}
       {deleteTarget ? <DeleteChannelModal channel={deleteTarget} onClose={() => setDeleteTarget(null)} onDeleted={handleChannelDeleted} onError={showError} /> : null}
-      {notice ? <NoticeBanner notice={notice} onClose={() => setNotice(null)} /> : null}
+      {notice ? <NoticeBanner notice={notice} onClose={handleCloseNotice} /> : null}
     </div>
   );
 }

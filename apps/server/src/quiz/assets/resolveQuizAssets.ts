@@ -20,7 +20,13 @@ export async function resolveQuizAssets(input: {
   visualStyle?: QuizImageStyle;
   activeEngine?: "codex" | "antigravity";
   antigravityClient?: AntigravityClient;
-  imageConfig?: { api_key?: string; model?: string };
+  imageConfig?: {
+    api_key?: string;
+    model?: string;
+    provider?: "gpti2" | "shopaikey" | "custom";
+    base_url?: string;
+    quality?: string;
+  };
   onProgress?: (progress: { completed: number; total: number; reused: boolean }) => Promise<void> | void;
   maxRounds?: number;
 }): Promise<{ resolution: QuizAssetResolution; issues: QuizIssue[] }> {
@@ -90,13 +96,19 @@ export async function resolveQuizAssets(input: {
         workerId: input.episodeId,
         step: "compile_asset_prompt",
       });
-      const providerName = Gpti2QuizImageProvider.isConfigured(input.imageConfig?.api_key)
-        ? "gpti2"
-        : activeEngine === "antigravity"
-        ? "antigravity-chain"
-        : ShopAiKeyQuizImageProvider.isConfigured()
-        ? "shopaikey"
-        : "inline-fallback";
+      const configuredProvider = input.imageConfig?.provider ?? "gpti2";
+      const providerName =
+        configuredProvider === "gpti2" && Gpti2QuizImageProvider.isConfigured(input.imageConfig?.api_key)
+          ? "gpti2"
+          : configuredProvider === "shopaikey" && (input.imageConfig?.api_key || ShopAiKeyQuizImageProvider.isConfigured())
+          ? "shopaikey"
+          : configuredProvider === "custom" && input.imageConfig?.api_key
+          ? "custom"
+          : activeEngine === "antigravity"
+          ? "antigravity-chain"
+          : ShopAiKeyQuizImageProvider.isConfigured(input.imageConfig?.api_key)
+          ? "shopaikey"
+          : "inline-fallback";
       const fingerprint = assetFingerprint(request, providerName, compiled.cacheVersion);
       const cached = byFingerprint.get(fingerprint);
       const bundleNumber = request.question_id ? Number(/^question-(\d+)$/i.exec(request.question_id)?.[1] ?? 0) : 0;
@@ -144,7 +156,7 @@ export async function resolveQuizAssets(input: {
             issues.push(issue(request, "asset_fallback_degraded", "warning", `Asset ${request.asset_id} used Tier 3 deterministic fallback. Visual review recommended.`, "Inspect the generated fallback card or replace with a dedicated image."));
           }
           reused = true;
-        } else if (Gpti2QuizImageProvider.isConfigured(input.imageConfig?.api_key)) {
+        } else if (configuredProvider === "gpti2" && Gpti2QuizImageProvider.isConfigured(input.imageConfig?.api_key)) {
           const provider = new Gpti2QuizImageProvider(
             input.repository,
             { channelId: input.channelId, episodeId: input.episodeId },
@@ -186,6 +198,44 @@ export async function resolveQuizAssets(input: {
             }
           }
           if (!generated) throw new Error(`Failed to generate asset ${request.asset_id}`);
+          const assetEntry: QuizAssetResolution["assets"][number] = { ...request, fingerprint, path: generated.path, source: "provider" };
+          resolvedMap.set(request.asset_id, assetEntry);
+          if (request.purpose === "hero_question_image" && bundleNumber > 0) {
+            try {
+              const resolvedPath = await input.repository.resolveQuizAssetPath(input.channelId, input.episodeId, generated.path);
+              const imageBytes = new Uint8Array(await readFile(resolvedPath));
+              await input.repository.writeBundleImage(input.channelId, input.episodeId, bundleNumber, imageBytes);
+            } catch {
+              // Non-critical background sync
+            }
+          }
+        } else if ((configuredProvider === "shopaikey" || configuredProvider === "custom") && (input.imageConfig?.api_key || ShopAiKeyQuizImageProvider.isConfigured())) {
+          const provider = new ShopAiKeyQuizImageProvider(
+            input.repository,
+            { channelId: input.channelId, episodeId: input.episodeId },
+            {
+              apiKey: input.imageConfig?.api_key || process.env.SHOPAIKEY_API_KEY,
+              baseUrl: input.imageConfig?.base_url || (configuredProvider === "shopaikey" ? "https://direct.shopaikey.com/v1" : "https://api.openai.com/v1"),
+              model: input.imageConfig?.model || "gpt-image-2",
+              quality: input.imageConfig?.quality,
+            },
+          );
+          let generated: Awaited<ReturnType<typeof provider.generateAsset>> | null = null;
+          const maxAttempts = 3;
+          for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+              generated = await provider.generateAsset({ assetId: request.asset_id, fingerprint, prompt: compiled.prompt });
+              break;
+            } catch (err) {
+              if (attempt < maxAttempts) {
+                logger.warn(`Quiz asset ${request.asset_id} ${configuredProvider} generation attempt ${attempt} failed (${err instanceof Error ? err.message : String(err)}). Retrying in ${attempt * 500}ms...`, { profileId: input.channelId, workerId: input.episodeId });
+                await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+                continue;
+              }
+              throw err;
+            }
+          }
+          if (!generated) throw new Error(`Failed to generate ${configuredProvider} asset ${request.asset_id}`);
           const assetEntry: QuizAssetResolution["assets"][number] = { ...request, fingerprint, path: generated.path, source: "provider" };
           resolvedMap.set(request.asset_id, assetEntry);
           if (request.purpose === "hero_question_image" && bundleNumber > 0) {
@@ -242,10 +292,16 @@ export async function resolveQuizAssets(input: {
               // Non-critical background sync
             }
           }
-        } else if (!ShopAiKeyQuizImageProvider.isConfigured()) {
-          issues.push(issue(request, "asset_provider_unavailable", "blocker", "A semantically critical visual asset needs image generation, but no image provider is configured.", "Configure gpti2.store in Settings or switch to Antigravity engine before rendering."));
-        } else {
-          const provider = new ShopAiKeyQuizImageProvider(input.repository, { channelId: input.channelId, episodeId: input.episodeId });
+        } else if (ShopAiKeyQuizImageProvider.isConfigured(input.imageConfig?.api_key)) {
+          const provider = new ShopAiKeyQuizImageProvider(
+            input.repository,
+            { channelId: input.channelId, episodeId: input.episodeId },
+            {
+              apiKey: input.imageConfig?.api_key || process.env.SHOPAIKEY_API_KEY,
+              baseUrl: input.imageConfig?.base_url || "https://direct.shopaikey.com/v1",
+              model: input.imageConfig?.model,
+            },
+          );
           let generated: Awaited<ReturnType<typeof provider.generateAsset>> | null = null;
           const maxAttempts = 3;
           for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -273,6 +329,8 @@ export async function resolveQuizAssets(input: {
               // Non-critical background sync
             }
           }
+        } else {
+          issues.push(issue(request, "asset_provider_unavailable", "blocker", "A semantically critical visual asset needs image generation, but no image provider is configured.", "Configure an image provider (gpti2.store, ShopAiKey, or Custom) in Settings or switch to Antigravity engine before rendering."));
         }
       } catch (error) {
         if (round === maxRounds) {

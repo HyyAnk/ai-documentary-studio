@@ -150,7 +150,7 @@ export function deriveQuizV2FromScenes(input: {
       fun_fact: "",
       source_ids: sourceIds,
       visual_opportunity: visualOpportunity,
-      validation: { semantic_status: "validated", source_coverage: sourceIds.length > 0, fact_locked: true },
+      validation: { semantic_status: "validated" as const, source_coverage: sourceIds.length > 0, fact_locked: true },
     };
   });
   const balancedQuestions = balanceQuizChoicePositions(questions);

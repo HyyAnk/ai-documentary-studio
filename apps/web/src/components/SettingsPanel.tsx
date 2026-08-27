@@ -1,6 +1,6 @@
 import { ArrowsClockwise, CircleNotch, Eye, EyeSlash, FileText, FloppyDisk, HardDrives, Info, Play, Plus, SlidersHorizontal, Sparkle, SpeakerHigh, TerminalWindow, Trash, VideoCamera } from "@phosphor-icons/react";
 import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
-import type { AppConfig, Channel, CodexSettingsResponse, AntigravitySettingsResponse, StorageInfo, VoiceProfile } from "@studio/shared";
+import type { AppConfig, Channel, CodexSettingsResponse, AntigravitySettingsResponse, StorageInfo, VoiceProfile, ImageProviderId } from "@studio/shared";
 import { api } from "../api";
 import { PageTitle, StatusLine } from "./AppChrome";
 import type { Notice } from "./types";
@@ -166,6 +166,10 @@ export function SettingsView({
   );
   const [imageEnabled, setImageEnabled] = useState(appConfig?.image_generation?.enabled ?? true);
   const [imagesPerBundle, setImagesPerBundle] = useState(appConfig?.image_generation?.images_per_bundle ?? 1);
+  const [imageProvider, setImageProvider] = useState<ImageProviderId>(
+    (appConfig?.image_generation?.provider as ImageProviderId) ?? "gpti2"
+  );
+  const [imageBaseUrl, setImageBaseUrl] = useState(appConfig?.image_generation?.base_url ?? "");
   const [imageModel, setImageModel] = useState(appConfig?.image_generation?.model ?? "gpt-image-2");
   const [imageApiKey, setImageApiKey] = useState(appConfig?.image_generation?.api_key ?? "");
   const [showImageKey, setShowImageKey] = useState(false);
@@ -255,6 +259,8 @@ export function SettingsView({
     if (appConfig?.image_generation) {
       setImageEnabled(appConfig.image_generation.enabled);
       setImagesPerBundle(appConfig.image_generation.images_per_bundle);
+      setImageProvider((appConfig.image_generation.provider as ImageProviderId) ?? "gpti2");
+      setImageBaseUrl(appConfig.image_generation.base_url ?? "");
       setImageModel(appConfig.image_generation.model ?? "gpt-image-2");
       setMaxConcurrentImageTasks(appConfig.image_generation.max_concurrent_tasks ?? 3);
       setHasImageApiKey(Boolean(appConfig.image_generation.has_api_key || appConfig.image_generation.api_key));
@@ -427,8 +433,9 @@ export function SettingsView({
       const next = await api.saveImageSettings({
         enabled: imageEnabled,
         images_per_bundle: imagesPerBundle,
-        provider: "gpti2",
-        model: imageModel,
+        provider: imageProvider,
+        base_url: imageBaseUrl.trim(),
+        model: imageModel.trim() || "gpt-image-2",
         quality: "low",
         max_concurrent_tasks: maxConcurrentImageTasks,
         api_key: imageApiKey.trim(),
@@ -445,7 +452,13 @@ export function SettingsView({
   };
 
   const clearImageKey = async () => {
-    if (!window.confirm("Are you sure you want to remove this gpti2.store API key?")) return;
+    const providerLabel =
+      imageProvider === "gpti2"
+        ? "gpti2.store"
+        : imageProvider === "shopaikey"
+        ? "ShopAiKey"
+        : "Custom Provider";
+    if (!window.confirm(`Are you sure you want to remove this ${providerLabel} API key?`)) return;
     setSavingImage(true);
     try {
       const next = await api.saveImageSettings({
@@ -455,7 +468,7 @@ export function SettingsView({
       setImageApiKey("");
       setHasImageApiKey(false);
       setImageBalanceInfo(null);
-      onNotice({ tone: "good", message: "gpti2.store API key removed" });
+      onNotice({ tone: "good", message: `${providerLabel} API key removed` });
     } catch (error) {
       onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Could not remove API key" });
     } finally {
@@ -466,12 +479,25 @@ export function SettingsView({
   const checkImageBalance = async () => {
     setCheckingImageBalance(true);
     try {
-      const result = await api.imageBalance();
-      setImageBalanceInfo(result);
-      onNotice({
-        tone: "good",
-        message: `Valid API key! Balance: ${result.balance_vnd.toLocaleString("en-US")} VND${result.rpm ? ` (RPM: ${result.rpm})` : ""}`,
+      const result = await api.verifyImageConnection({
+        provider: imageProvider,
+        api_key: imageApiKey.trim(),
+        base_url: imageBaseUrl.trim(),
+        model: imageModel.trim(),
       });
+      if (result.balance_vnd !== undefined) {
+        setImageBalanceInfo({ balance_vnd: result.balance_vnd, rpm: result.rpm });
+        onNotice({
+          tone: "good",
+          message: `Valid API key! Balance: ${result.balance_vnd.toLocaleString("en-US")} VND${result.rpm ? ` (RPM: ${result.rpm})` : ""}`,
+        });
+      } else {
+        setImageBalanceInfo(null);
+        onNotice({
+          tone: "good",
+          message: result.message || "Connected to image provider successfully!",
+        });
+      }
     } catch (error) {
       setImageBalanceInfo(null);
       onNotice({
@@ -1119,13 +1145,22 @@ export function SettingsView({
             <div className="panel-heading">
               <div>
                 <p className="eyebrow">Continuity Anchor Images</p>
-                <h2>Image Provider (gpti2.store)</h2>
+                <h2>Image Provider Settings</h2>
               </div>
               <FileText size={22} />
             </div>
-            <StatusLine label="Provider" value="gpti2.store (API)" />
+            <StatusLine
+              label="Provider"
+              value={
+                imageProvider === "gpti2"
+                  ? "gpti2.store (API)"
+                  : imageProvider === "shopaikey"
+                  ? "ShopAiKey (Direct Proxy)"
+                  : "Custom OpenAI-compatible API"
+              }
+            />
             <StatusLine label="API Key status" value={hasImageApiKey ? "Configured" : "Not configured"} />
-            {imageBalanceInfo ? (
+            {imageBalanceInfo && imageProvider === "gpti2" ? (
               <StatusLine
                 label="Available balance"
                 value={`${imageBalanceInfo.balance_vnd.toLocaleString("en-US")} VND${imageBalanceInfo.rpm ? ` (RPM: ${imageBalanceInfo.rpm})` : ""}`}
@@ -1140,14 +1175,78 @@ export function SettingsView({
                 />
                 <span>Enable continuity anchor images generation</span>
               </label>
+
               <label>
-                gpti2.store API key
+                Image Provider Service
+                <select
+                  value={imageProvider}
+                  onChange={(event) => {
+                    const nextProvider = event.target.value as ImageProviderId;
+                    setImageProvider(nextProvider);
+                    if (nextProvider === "gpti2") {
+                      if (imageModel !== "gpt-image-2" && imageModel !== "nano-banana-2") {
+                        setImageModel("gpt-image-2");
+                      }
+                    } else if (nextProvider === "shopaikey") {
+                      if (!imageBaseUrl) setImageBaseUrl("https://direct.shopaikey.com/v1");
+                      if (imageModel === "nano-banana-2") setImageModel("gpt-image-2");
+                    } else if (nextProvider === "custom") {
+                      if (!imageBaseUrl) setImageBaseUrl("https://api.openai.com/v1");
+                    }
+                  }}
+                >
+                  <option value="gpti2">gpti2.store (Default - Low cost VND, gpt-image-2 & nano-banana-2)</option>
+                  <option value="shopaikey">ShopAiKey (Direct OpenAI-compatible proxy)</option>
+                  <option value="custom">Custom Provider (OpenAI-compatible Endpoint)</option>
+                </select>
+                <small className="field-help">
+                  {imageProvider === "gpti2"
+                    ? "Optimized for high-volume automated video assets with VND pricing and balance check."
+                    : imageProvider === "shopaikey"
+                    ? "Direct OpenAI proxy endpoint supporting gpt-image-2, gpt-image-1.5, dall-e-3."
+                    : "Connect any custom OpenAI-compatible image endpoint (OneAPI, NewAPI, Fal, OpenRouter, Local AI)."}
+                </small>
+              </label>
+
+              {imageProvider === "shopaikey" || imageProvider === "custom" ? (
+                <label>
+                  {imageProvider === "custom" ? "Custom Base URL / Endpoint" : "Base URL (Optional override)"}
+                  <input
+                    value={imageBaseUrl}
+                    onChange={(event) => setImageBaseUrl(event.target.value)}
+                    placeholder={
+                      imageProvider === "shopaikey"
+                        ? "https://direct.shopaikey.com/v1"
+                        : "https://your-api-endpoint.com/v1"
+                    }
+                    autoComplete="off"
+                  />
+                  <small className="field-help">
+                    {imageProvider === "custom"
+                      ? "Base URL of your OpenAI-compatible image service (e.g. https://api.openai.com/v1 or http://localhost:8000/v1)."
+                      : "Default: https://direct.shopaikey.com/v1. Leave blank to use default."}
+                  </small>
+                </label>
+              ) : null}
+
+              <label>
+                {imageProvider === "gpti2"
+                  ? "gpti2.store API key"
+                  : imageProvider === "shopaikey"
+                  ? "ShopAiKey API key"
+                  : "API Key / Bearer Token"}
                 <div style={{ display: "flex", gap: "6px", alignItems: "center", width: "100%" }}>
                   <input
                     type={showImageKey ? "text" : "password"}
                     value={imageApiKey}
                     onChange={(event) => setImageApiKey(event.target.value)}
-                    placeholder="Paste gpti2.store API key (sk-...)"
+                    placeholder={
+                      imageProvider === "gpti2"
+                        ? "Paste gpti2.store API key (sk-...)"
+                        : imageProvider === "shopaikey"
+                        ? "Paste ShopAiKey API key (sk-...)"
+                        : "Paste custom API key or Bearer token"
+                    }
                     autoComplete="off"
                     style={{ flex: 1 }}
                   />
@@ -1176,16 +1275,54 @@ export function SettingsView({
                 <small className="field-help">
                   {hasImageApiKey
                     ? "Key stored securely in .documentary-studio/ (gitignored). You can edit directly to replace or click the trash icon to remove."
-                    : "Get your API key from the Account tab at https://gpti2.store. Stored securely in .documentary-studio/ (gitignored)."}
+                    : imageProvider === "gpti2"
+                    ? "Get your API key from the Account tab at https://gpti2.store. Stored securely in .documentary-studio/ (gitignored)."
+                    : imageProvider === "shopaikey"
+                    ? "Get your API key from https://shopaikey.com. Stored securely in .documentary-studio/ (gitignored)."
+                    : "Key or token for your custom OpenAI-compatible endpoint. Stored securely in .documentary-studio/."}
                 </small>
               </label>
-              <label>
-                Default Model
-                <select value={imageModel} onChange={(event) => setImageModel(event.target.value)}>
-                  <option value="gpt-image-2">gpt-image-2 (50 VND / image - Economy)</option>
-                  <option value="nano-banana-2">nano-banana-2 (100 VND / image - 2K HD)</option>
-                </select>
-              </label>
+
+              {imageProvider === "gpti2" ? (
+                <label>
+                  Default Model
+                  <select value={imageModel} onChange={(event) => setImageModel(event.target.value)}>
+                    <option value="gpt-image-2">gpt-image-2 (50 VND / image - Economy)</option>
+                    <option value="nano-banana-2">nano-banana-2 (100 VND / image - 2K HD)</option>
+                  </select>
+                </label>
+              ) : imageProvider === "shopaikey" ? (
+                <label>
+                  Default Model
+                  <select value={imageModel} onChange={(event) => setImageModel(event.target.value)}>
+                    <option value="gpt-image-2">gpt-image-2 (Default)</option>
+                    <option value="gpt-image-1.5">gpt-image-1.5</option>
+                    <option value="gpt-image-1">gpt-image-1</option>
+                    <option value="gpt-image-2-all">gpt-image-2-all</option>
+                    <option value="dall-e-3">dall-e-3</option>
+                  </select>
+                </label>
+              ) : (
+                <label>
+                  Model Name / ID
+                  <input
+                    value={imageModel}
+                    onChange={(event) => setImageModel(event.target.value)}
+                    placeholder="e.g. dall-e-3, gpt-image-2, flux-schnell, sdxl"
+                    list="custom-image-models"
+                  />
+                  <datalist id="custom-image-models">
+                    <option value="gpt-image-2" />
+                    <option value="dall-e-3" />
+                    <option value="flux-schnell" />
+                    <option value="flux-dev" />
+                    <option value="stable-diffusion-xl" />
+                    <option value="imagen-3" />
+                  </datalist>
+                  <small className="field-help">Specify the model identifier accepted by your custom provider API.</small>
+                </label>
+              )}
+
               <label>
                 Parallel Generation Workers
                 <select
@@ -1198,6 +1335,7 @@ export function SettingsView({
                   <option value="4">4 workers</option>
                 </select>
               </label>
+
               <label>
                 Images per bundle
                 <select
@@ -1209,15 +1347,17 @@ export function SettingsView({
                   <option value="2">2 anchors</option>
                 </select>
               </label>
+
               <small className="field-help">
                 Idempotency protection and async queue support are active. Low-quality mode optimizes rendering speed and token cost.
               </small>
+
               <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                 <button className="primary-button" disabled={savingImage}>
                   {savingImage ? <CircleNotch className="spin" size={16} /> : <FloppyDisk size={16} />}
                   <span>Save Image Settings</span>
                 </button>
-                {hasImageApiKey ? (
+                {hasImageApiKey || imageApiKey ? (
                   <button
                     type="button"
                     className="quiet-button"
@@ -1225,7 +1365,13 @@ export function SettingsView({
                     onClick={() => void checkImageBalance()}
                   >
                     {checkingImageBalance ? <CircleNotch className="spin" size={15} /> : null}
-                    <span>{checkingImageBalance ? "Checking…" : "Check Balance & Verify Key"}</span>
+                    <span>
+                      {checkingImageBalance
+                        ? "Verifying…"
+                        : imageProvider === "gpti2"
+                        ? "Check Balance & Verify Key"
+                        : "Verify Connection & Key"}
+                    </span>
                   </button>
                 ) : null}
               </div>

@@ -1,5 +1,5 @@
-import { Archive, ArrowLeft, ArrowUpRight, CaretDown, CircleNotch, Eye, FileText, FilmSlate, FloppyDisk, Lightbulb, Palette, PencilSimple, Plus, Play, Sparkle, Trash, X } from "@phosphor-icons/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Archive, ArrowLeft, ArrowUpRight, CaretDown, CheckCircle, CircleNotch, Clock, Eye, FileText, FilmSlate, FloppyDisk, Lightbulb, MagnifyingGlass, Palette, PencilSimple, Plus, Play, Sparkle, Trash, VideoCamera, X } from "@phosphor-icons/react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ALL_QUIZ_IMAGE_STYLES, QUIZ_IMAGE_STYLE_LABELS, QUIZ_MAX_QUESTION_COUNT, QUIZ_MIN_QUESTION_COUNT, QUIZ_SECONDS_PER_QUESTION, type Channel, type Episode, type QuizImageStyle, type Task, type TopicCandidate } from "@studio/shared";
 import { api } from "../api";
 import { formatDate, isTaskActive, isTaskTerminal, latestTask } from "../lib/utils";
@@ -526,6 +526,176 @@ export function TopicCard({
   </article>;
 }
 
+export function TopicHistoryRow({
+  topic,
+  index,
+  channelStyles = ALL_QUIZ_IMAGE_STYLES,
+  onConfirm,
+  busy,
+  disabled,
+}: {
+  topic: TopicCandidate;
+  index: number;
+  channelStyles?: QuizImageStyle[];
+  onConfirm: (questionCount: number, visualStyle: QuizImageStyle | "mixed") => void;
+  busy: boolean;
+  disabled: boolean;
+}) {
+  return (
+    <div className="topic-history-row">
+      <div className="topic-history-main">
+        <span className="topic-history-index">#{String(index).padStart(2, "0")}</span>
+        <div className="topic-history-title-wrap">
+          <strong className="topic-history-title" title={`${topic.title}\n\nPremise: ${topic.premise}`}>
+            {topic.title}
+          </strong>
+          {topic.theme_hint ? (
+            <span className="topic-theme-badge compact" title={`Suggested by topic: ${topic.theme_hint}`}>
+              🎯 {topic.theme_hint}
+            </span>
+          ) : null}
+        </div>
+      </div>
+      <div className="topic-history-meta">
+        <span className="topic-history-potential" title="Estimated Potential">
+          {topic.estimated_potential || "Normal"}
+        </span>
+        <TopicLayoutPreviewButton quizFormat={topic.quiz_format} />
+        <button
+          type="button"
+          className="topic-history-use-btn"
+          disabled={disabled}
+          onClick={() => onConfirm(topic.question_count, topic.visual_style ?? "mixed")}
+          title={`Use this topic (${topic.question_count} questions)`}
+        >
+          {busy ? <CircleNotch className="spin" size={13} /> : <Play size={12} weight="fill" />}
+          <span>{busy ? "Creating…" : "Use"}</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function EpisodeCard({
+  episode,
+  index,
+  tasks,
+  onOpen,
+  onDelete,
+}: {
+  episode: Episode;
+  index: number;
+  tasks: Task[];
+  onOpen: () => void;
+  onDelete: (episode: Episode) => void;
+}) {
+  const isVideoReady = Boolean(episode.video_asset_path);
+  const questionCount = episode.quiz_config?.question_count ?? 8;
+  const estimatedDurationMinutes = Math.max(3, Math.round((questionCount * QUIZ_SECONDS_PER_QUESTION) / 60));
+  const visualStyle = episode.quiz_config?.visual_style ?? "mixed";
+  const visualStyleLabel = visualStyle === "mixed" ? "Mixed" : (QUIZ_IMAGE_STYLE_LABELS[visualStyle] ?? visualStyle);
+  const format = episode.quiz_config?.quiz_format;
+  const formatLabel = format === "odd_one_out"
+    ? "Odd One Out"
+    : format === "image_guess"
+    ? "Image Guess"
+    : format === "true_false"
+    ? "True/False"
+    : "Knowledge";
+
+  const episodeTasks = tasks.filter((t) => t.episode_id === episode.episode_id);
+  const hasActiveTask = episodeTasks.some(isTaskActive);
+
+  return (
+    <article className={`episode-card ${isVideoReady ? "is-video-ready" : ""} ${hasActiveTask ? "is-active-task" : ""}`}>
+      <div className="episode-card-top">
+        <div className="episode-card-badges">
+          <span className="episode-card-index">#{String(index).padStart(2, "0")}</span>
+          <span className="episode-badge format-badge" title={`Format: ${formatLabel}`}>
+            {format === "odd_one_out" ? "🎨 " : format === "image_guess" ? "🖼️ " : format === "true_false" ? "⚖️ " : "🎯 "}
+            {formatLabel}
+          </span>
+          <span className="episode-badge style-badge" title={`Visual Style: ${visualStyleLabel}`}>
+            {visualStyle === "mixed" ? "🎲 " : "✨ "}
+            {visualStyleLabel}
+          </span>
+        </div>
+        <button
+          type="button"
+          className="icon-button danger episode-card-delete"
+          title={`Delete ${episode.topic.title}`}
+          aria-label={`Delete episode ${episode.topic.title}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(episode);
+          }}
+        >
+          <Trash size={15} />
+        </button>
+      </div>
+
+      <div
+        className="episode-card-main"
+        role="button"
+        tabIndex={0}
+        onClick={onOpen}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onOpen();
+          }
+        }}
+        aria-label={`Open studio for ${episode.topic.title}`}
+      >
+        <h3 className="episode-card-title">{episode.topic.title}</h3>
+        <p className="episode-card-premise">{episode.topic.premise}</p>
+
+        {isVideoReady ? (
+          <div className="episode-video-ready-banner">
+            <div className="video-ready-left">
+              <VideoCamera size={16} weight="fill" className="video-ready-icon" />
+              <strong>Video Master Ready</strong>
+            </div>
+            {episode.video_duration_seconds ? (
+              <span className="video-ready-time">
+                {Math.floor(episode.video_duration_seconds / 60)}:{String(Math.round(episode.video_duration_seconds % 60)).padStart(2, "0")}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="episode-card-status-row">
+          <StageBadge stage={episode.stage} size="sm" />
+          <EpisodeAssetPills
+            episode={episode}
+            tasks={episodeTasks}
+            compact
+          />
+        </div>
+
+        <div className="episode-card-footer">
+          <div className="episode-card-meta">
+            <span className="meta-item" title="Question count & estimated target duration">
+              🎯 {questionCount} Qs · ~{estimatedDurationMinutes}m
+            </span>
+            {episode.created_at ? (
+              <span className="meta-date" title={`Created: ${formatDate(episode.created_at)}`}>
+                {formatDate(episode.created_at)}
+              </span>
+            ) : null}
+          </div>
+          <div className="episode-card-action">
+            <span className="action-label">Open Studio</span>
+            <div className="action-icon-circle">
+              <Play size={11} weight="fill" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 export function ChannelDetail({
   channel,
   channels,
@@ -558,6 +728,8 @@ export function ChannelDetail({
   const [dna, setDna] = useState<{ content: string; path: string; modified_at: string } | null>(null);
   const [topics, setTopics] = useState<TopicCandidate[]>([]);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
+  const [episodeSearch, setEpisodeSearch] = useState("");
+  const [episodeFilter, setEpisodeFilter] = useState<"all" | "in_progress" | "video_ready">("all");
   const [editingDna, setEditingDna] = useState(false);
   const [dnaDraft, setDnaDraft] = useState("");
   const [showDna, setShowDna] = useState(true);
@@ -709,7 +881,7 @@ export function ChannelDetail({
           <div>
             <p className="eyebrow">Quiz Engine Channel</p>
             <h1>{channel.display_name}</h1>
-            <p className="detail-copy">{channel.description || "No description yet. Your DNA is the source of truth for this channel."}</p>
+            {channel.description ? <p className="detail-copy">{channel.description}</p> : null}
           </div>
           <div className="detail-actions">
             <StatusBadge status={channel.status} />
@@ -767,73 +939,133 @@ export function ChannelDetail({
         </div>
 
         {/* Tab 1: Episodes */}
-        {channelTab === "episodes" ? (
-          <div>
-            <div className="section-heading" style={{ marginTop: "12px" }}>
-              <div>
-                <p className="eyebrow">Production Library</p>
-                <h2>Confirmed Episodes</h2>
-              </div>
-              <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                <span className="count-note">
-                  {episodes.length} {episodes.length === 1 ? "episode" : "episodes"}
-                </span>
-                <button className="primary-button compact" onClick={() => switchTab("topics")}>
-                  <Plus size={15} />
-                  <span>New Episode from Topics</span>
-                </button>
-              </div>
-            </div>
+        {channelTab === "episodes" ? (() => {
+          const videoReadyCount = episodes.filter((e) => Boolean(e.video_asset_path)).length;
+          const inProgressCount = episodes.length - videoReadyCount;
+          const filteredEpisodes = episodes.filter((ep) => {
+            if (episodeFilter === "video_ready" && !ep.video_asset_path) return false;
+            if (episodeFilter === "in_progress" && ep.video_asset_path) return false;
+            if (episodeSearch.trim()) {
+              const q = episodeSearch.toLowerCase();
+              const matchTitle = ep.topic.title.toLowerCase().includes(q);
+              const matchPremise = ep.topic.premise.toLowerCase().includes(q);
+              const matchHook = ep.topic.hook?.toLowerCase().includes(q);
+              if (!matchTitle && !matchPremise && !matchHook) return false;
+            }
+            return true;
+          });
 
-            {episodes.length === 0 ? (
-              <EmptyState
-                compact
-                icon={<FilmSlate size={24} />}
-                title="No episodes confirmed yet"
-                copy="Explore and confirm ideas in the Idea Lab to start generating video episodes."
-                action="Explore Idea Lab"
-                onAction={() => switchTab("topics")}
-              />
-            ) : (
-              <div className="episode-list">
-                {episodes.map((episode, index) => (
-                  <div className="episode-row" key={episode.episode_id}>
-                    <button
-                      type="button"
-                      className="episode-row-open"
-                      aria-label={`${String(index + 1).padStart(2, "0")} ${episode.topic.title}`}
-                      onClick={() => openEpisode(channel.channel_id, episode.episode_id)}
-                    >
-                      <div className="episode-index">{String(index + 1).padStart(2, "0")}</div>
-                      <div className="episode-info">
-                        <strong>{episode.topic.title}</strong>
-                        <span>{episode.topic.premise}</span>
-                      </div>
-                      <div className="episode-status-col">
-                        <StageBadge stage={episode.stage} size="sm" />
-                        <EpisodeAssetPills
-                          episode={episode}
-                          tasks={tasks.filter((t) => t.episode_id === episode.episode_id)}
-                          compact
-                        />
-                      </div>
-                      <ArrowUpRight size={17} />
-                    </button>
-                    <button
-                      type="button"
-                      className="icon-button danger episode-row-delete"
-                      title={`Delete ${episode.topic.title}`}
-                      aria-label={`Delete episode ${episode.topic.title}`}
-                      onClick={() => setDeleteEpisodeTarget(episode)}
-                    >
-                      <Trash size={16} />
-                    </button>
-                  </div>
-                ))}
+          return (
+            <div>
+              <div className="section-heading" style={{ marginTop: "12px" }}>
+                <div>
+                  <p className="eyebrow">Production Library</p>
+                  <h2>Confirmed Episodes</h2>
+                </div>
+                <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                  <span className="count-note">
+                    {episodes.length} {episodes.length === 1 ? "episode" : "episodes"}
+                  </span>
+                  <button className="primary-button compact" onClick={() => switchTab("topics")}>
+                    <Plus size={15} />
+                    <span>New Episode from Topics</span>
+                  </button>
+                </div>
               </div>
-            )}
-          </div>
-        ) : null}
+
+              {episodes.length === 0 ? (
+                <EmptyState
+                  compact
+                  icon={<FilmSlate size={24} />}
+                  title="No episodes confirmed yet"
+                  copy="Explore and confirm ideas in the Idea Lab to start generating video episodes."
+                  action="Explore Idea Lab"
+                  onAction={() => switchTab("topics")}
+                />
+              ) : (
+                <>
+                  {/* Search and Filter Toolbar */}
+                  <div className="episode-toolbar">
+                    <div className="episode-search-wrap">
+                      <MagnifyingGlass size={15} className="search-icon" />
+                      <input
+                        type="text"
+                        placeholder="Search episodes by title or topic..."
+                        value={episodeSearch}
+                        onChange={(e) => setEpisodeSearch(e.target.value)}
+                        className="episode-search-input"
+                      />
+                      {episodeSearch ? (
+                        <button
+                          type="button"
+                          className="search-clear-btn"
+                          onClick={() => setEpisodeSearch("")}
+                          aria-label="Clear search"
+                        >
+                          <X size={13} />
+                        </button>
+                      ) : null}
+                    </div>
+
+                    <div className="episode-filter-chips">
+                      <button
+                        type="button"
+                        className={`filter-chip ${episodeFilter === "all" ? "is-active" : ""}`}
+                        onClick={() => setEpisodeFilter("all")}
+                      >
+                        All ({episodes.length})
+                      </button>
+                      <button
+                        type="button"
+                        className={`filter-chip ${episodeFilter === "in_progress" ? "is-active" : ""}`}
+                        onClick={() => setEpisodeFilter("in_progress")}
+                      >
+                        In Production ({inProgressCount})
+                      </button>
+                      <button
+                        type="button"
+                        className={`filter-chip ${episodeFilter === "video_ready" ? "is-active" : ""}`}
+                        onClick={() => setEpisodeFilter("video_ready")}
+                      >
+                        Video Ready ({videoReadyCount})
+                      </button>
+                    </div>
+                  </div>
+
+                  {filteredEpisodes.length === 0 ? (
+                    <div className="episode-empty-search">
+                      <MagnifyingGlass size={28} />
+                      <p>No episodes matching <strong>"{episodeSearch}"</strong> in this filter.</p>
+                      <button
+                        type="button"
+                        className="quiet-button compact"
+                        onClick={() => {
+                          setEpisodeSearch("");
+                          setEpisodeFilter("all");
+                        }}
+                      >
+                        Reset Filters
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="episode-card-grid">
+                      {filteredEpisodes.map((episode, index) => (
+                        <EpisodeCard
+                          key={episode.episode_id}
+                          index={index + 1}
+                          episode={episode}
+                          tasks={tasks}
+                          onOpen={() => openEpisode(channel.channel_id, episode.episode_id)}
+                          onDelete={(ep) => setDeleteEpisodeTarget(ep)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })() : null}
 
         {/* Tab 2: Idea Lab & Topics */}
         {channelTab === "topics" ? (
@@ -883,18 +1115,45 @@ export function ChannelDetail({
                 onAction={() => void suggest()}
               />
             ) : (
-              <div className="topic-grid">
-                {topics.slice(0, 5).map((topic) => (
-                  <TopicCard
-                    key={topic.topic_id}
-                    topic={topic}
-                    channelStyles={channel.selected_styles}
-                    busy={confirmingTopicId === topic.topic_id}
-                    disabled={Boolean(confirmingTopicId) || channel.status === "ARCHIVED"}
-                    onConfirm={(questionCount, visualStyle) => void confirmTopic(topic, questionCount, visualStyle)}
-                  />
-                ))}
-              </div>
+              <>
+                <div className="topic-grid">
+                  {topics.slice(0, 5).map((topic) => (
+                    <TopicCard
+                      key={topic.topic_id}
+                      topic={topic}
+                      channelStyles={channel.selected_styles}
+                      busy={confirmingTopicId === topic.topic_id}
+                      disabled={Boolean(confirmingTopicId) || channel.status === "ARCHIVED"}
+                      onConfirm={(questionCount, visualStyle) => void confirmTopic(topic, questionCount, visualStyle)}
+                    />
+                  ))}
+                </div>
+
+                {topics.length > 5 ? (
+                  <div className="topic-history-section">
+                    <div className="section-heading" style={{ marginTop: "32px", marginBottom: "14px" }}>
+                      <div>
+                        <p className="eyebrow">Archive & Previous Ideas</p>
+                        <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 700 }}>Older Ideas History ({topics.length - 5})</h3>
+                      </div>
+                      <span className="count-note">Single-line archive view</span>
+                    </div>
+                    <div className="topic-history-list">
+                      {topics.slice(5).map((topic, index) => (
+                        <TopicHistoryRow
+                          key={topic.topic_id}
+                          index={index + 6}
+                          topic={topic}
+                          channelStyles={channel.selected_styles}
+                          busy={confirmingTopicId === topic.topic_id}
+                          disabled={Boolean(confirmingTopicId) || channel.status === "ARCHIVED"}
+                          onConfirm={(questionCount, visualStyle) => void confirmTopic(topic, questionCount, visualStyle)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </>
             )}
           </div>
         ) : null}

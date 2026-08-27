@@ -1,6 +1,6 @@
-﻿param (
+param (
     [string]$Version = "v1.0.0",
-    [string]$Repo = "HyyAnk/ai-documentary-studio",
+    [string]$Repo = "HyyAnk/my-1x-project",
     [string]$TargetDir = "$PSScriptRoot\..\assets\audio\bgm\tracks",
     [string]$CustomUrl = ""
 )

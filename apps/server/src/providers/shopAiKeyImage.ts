@@ -57,22 +57,39 @@ function canTryNextModel(status: number): boolean {
   return status !== 401 && status !== 403;
 }
 
-export async function generateShopAiKeyImageBytes(prompt: string, cancellationSignal?: AbortSignal): Promise<Uint8Array> {
-  const apiKey = process.env.SHOPAIKEY_API_KEY?.trim();
-  if (!apiKey) throw new RepositoryError("SHOPAIKEY_API_KEY is not configured on the server", "IMAGE_PROVIDER_NOT_CONFIGURED");
-  const baseUrl = (process.env.SHOPAIKEY_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, "");
-  const size = process.env.SHOPAIKEY_IMAGE_SIZE?.trim() || DEFAULT_SIZE;
-  const quality = process.env.SHOPAIKEY_IMAGE_QUALITY?.trim() || DEFAULT_QUALITY;
+export type OpenAiCompatibleImageOptions = {
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+  size?: string;
+  quality?: string;
+};
+
+export async function generateShopAiKeyImageBytes(
+  prompt: string,
+  cancellationSignal?: AbortSignal,
+  options?: OpenAiCompatibleImageOptions,
+): Promise<Uint8Array> {
+  const apiKey = options?.apiKey?.trim() || process.env.SHOPAIKEY_API_KEY?.trim() || process.env.CUSTOM_IMAGE_API_KEY?.trim();
+  if (!apiKey) throw new RepositoryError("Image API key is not configured", "IMAGE_PROVIDER_NOT_CONFIGURED");
+  const baseUrl = (options?.baseUrl?.trim() || process.env.SHOPAIKEY_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, "");
+  const size = options?.size?.trim() || process.env.SHOPAIKEY_IMAGE_SIZE?.trim() || DEFAULT_SIZE;
+  const quality = options?.quality?.trim() || process.env.SHOPAIKEY_IMAGE_QUALITY?.trim() || DEFAULT_QUALITY;
   let lastNetworkError: unknown = null;
   let lastFailureMessage = "unknown provider error";
-  const requestedModels = imageModelChain();
+  const requestedModels = options?.model ? [options.model] : imageModelChain();
   for (const [modelIndex, requestedModel] of requestedModels.entries()) {
     let retryFallback = false;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
       const requestSignal = cancellationSignal ? AbortSignal.any([cancellationSignal, AbortSignal.timeout(IMAGE_REQUEST_TIMEOUT_MS)]) : AbortSignal.timeout(IMAGE_REQUEST_TIMEOUT_MS);
       let response: Response;
       try {
-        response = await fetch(`${baseUrl}/images/generations`, { method: "POST", headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" }, body: JSON.stringify({ model: requestedModel, prompt: compactImagePrompt(prompt), size, quality, output_format: "png" }), signal: requestSignal });
+        response = await fetch(`${baseUrl}/images/generations`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+          body: JSON.stringify({ model: requestedModel, prompt: compactImagePrompt(prompt), size, quality, output_format: "png" }),
+          signal: requestSignal,
+        });
       } catch (error) {
         lastNetworkError = error;
         if (attempt < MAX_ATTEMPTS && !(modelIndex < requestedModels.length - 1 && attempt === 1)) { await waitForRetry(attempt); continue; }
@@ -87,46 +104,69 @@ export async function generateShopAiKeyImageBytes(prompt: string, cancellationSi
         lastFailureMessage = providerMessage;
         if (RETRYABLE_STATUS.has(response.status) && attempt < MAX_ATTEMPTS) { await waitForRetry(attempt); continue; }
         if (canTryNextModel(response.status) && modelIndex < requestedModels.length - 1) { retryFallback = true; break; }
-        throw new RepositoryError(`ShopAIKey image API failed (${response.status}): ${providerMessage}`, "IMAGE_PROVIDER_FAILED");
+        throw new RepositoryError(`Image API failed (${response.status}): ${providerMessage}`, "IMAGE_PROVIDER_FAILED");
       }
       const result = payload.data?.[0];
       if (result?.b64_json) return Buffer.from(result.b64_json.replace(/^data:image\/[^;]+;base64,/i, ""), "base64");
       if (result?.url) {
         const imageResponse = await fetch(result.url, { signal: cancellationSignal ? AbortSignal.any([cancellationSignal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000) });
-        if (!imageResponse.ok) throw new RepositoryError(`ShopAIKey image URL download failed (${imageResponse.status})`, "IMAGE_PROVIDER_FAILED");
+        if (!imageResponse.ok) throw new RepositoryError(`Image URL download failed (${imageResponse.status})`, "IMAGE_PROVIDER_FAILED");
         return new Uint8Array(await imageResponse.arrayBuffer());
       }
-      lastFailureMessage = "ShopAIKey image API returned no b64_json or url";
+      lastFailureMessage = "Image API returned no b64_json or url";
       if (modelIndex < requestedModels.length - 1) { retryFallback = true; break; }
       throw new RepositoryError(lastFailureMessage, "IMAGE_PROVIDER_EMPTY");
     }
     if (!retryFallback) break;
   }
-  if (lastNetworkError) throw new RepositoryError(`ShopAIKey image API unavailable for ${requestedModels.join(" then ")}`, "IMAGE_PROVIDER_UNAVAILABLE");
-  throw new RepositoryError(`ShopAIKey image API failed for ${requestedModels.join(" then ")}: ${lastFailureMessage}`, "IMAGE_PROVIDER_FAILED");
+  if (lastNetworkError) throw new RepositoryError(`Image API unavailable for ${requestedModels.join(" then ")}`, "IMAGE_PROVIDER_UNAVAILABLE");
+  throw new RepositoryError(`Image API failed for ${requestedModels.join(" then ")}: ${lastFailureMessage}`, "IMAGE_PROVIDER_FAILED");
 }
 
 export class ShopAiKeyImageProvider implements ImageProvider {
   constructor(
     private readonly repository: RepositoryService,
     private readonly target: ShopAiKeyImageTarget,
+    private readonly options?: OpenAiCompatibleImageOptions,
   ) {}
 
-  static isConfigured(): boolean {
-    return Boolean(process.env.SHOPAIKEY_API_KEY?.trim());
+  static isConfigured(apiKey?: string): boolean {
+    return Boolean((apiKey || process.env.SHOPAIKEY_API_KEY || "").trim());
   }
 
   async generateReference(prompt: string, cancellationSignal?: AbortSignal): Promise<{ asset_path: string }> {
-    return { asset_path: await this.repository.writeBundleImage(this.target.channelId, this.target.episodeId, this.target.bundleNumber, await generateShopAiKeyImageBytes(prompt, cancellationSignal), this.target.variant) };
+    return {
+      asset_path: await this.repository.writeBundleImage(
+        this.target.channelId,
+        this.target.episodeId,
+        this.target.bundleNumber,
+        await generateShopAiKeyImageBytes(prompt, cancellationSignal, this.options),
+        this.target.variant,
+      ),
+    };
   }
 }
 
 export class ShopAiKeyQuizImageProvider {
-  constructor(private readonly repository: RepositoryService, private readonly target: { channelId: string; episodeId: string }) {}
+  constructor(
+    private readonly repository: RepositoryService,
+    private readonly target: { channelId: string; episodeId: string },
+    private readonly options?: OpenAiCompatibleImageOptions,
+  ) {}
 
-  static isConfigured(): boolean { return ShopAiKeyImageProvider.isConfigured(); }
+  static isConfigured(apiKey?: string): boolean {
+    return ShopAiKeyImageProvider.isConfigured(apiKey);
+  }
 
   async generateAsset(input: { assetId: string; fingerprint: string; prompt: string }): Promise<{ path: string }> {
-    return { path: await this.repository.writeQuizImageAsset(this.target.channelId, this.target.episodeId, input.assetId, input.fingerprint, await generateShopAiKeyImageBytes(input.prompt)) };
+    return {
+      path: await this.repository.writeQuizImageAsset(
+        this.target.channelId,
+        this.target.episodeId,
+        input.assetId,
+        input.fingerprint,
+        await generateShopAiKeyImageBytes(input.prompt, undefined, this.options),
+      ),
+    };
   }
 }

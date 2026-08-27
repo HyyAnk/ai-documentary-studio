@@ -46,9 +46,8 @@ export type ProductionItemSummary = {
   id: string;
   channelId: string;
   channelName: string;
-  episodeId: string | null;
+  episodeId: string;
   episodeTitle: string;
-  isChannelTask: boolean;
   tasks: Task[];
   activeTask: Task | null;
   latestTask: Task;
@@ -86,8 +85,6 @@ function calculateProgress(task: Task | null, fallbackStatus: Task["status"]): n
     case "GENERATE_AUDIO": return 75;
     case "GENERATE_VIDEO": return 90;
     case "GENERATE_PIPELINE": return 10;
-    case "SUGGEST_TOPICS": return 50;
-    case "GENERATE_DNA": return 50;
     default: return 15;
   }
 }
@@ -105,8 +102,9 @@ export function TaskActivityBar({
   onOpenTasks: () => void;
   onOpenEpisode?: (channelId: string, episodeId: string) => void;
 }) {
-  if (tasks.length === 0 && realtimeStatus === "connected") return null;
-  const task = tasks[0] ?? null;
+  const episodeTasks = tasks.filter((t) => Boolean(t.episode_id));
+  if (episodeTasks.length === 0 && realtimeStatus === "connected") return null;
+  const task = episodeTasks[0] ?? null;
   const reconnecting = realtimeStatus !== "connected";
 
   const handleAction = () => {
@@ -120,10 +118,29 @@ export function TaskActivityBar({
   const progress = task ? calculateProgress(task, task.status) : 0;
 
   return (
-    <div className={`task-activity-bar ${reconnecting ? "is-reconnecting" : ""}`} role="status">
+    <div
+      className={`task-activity-bar ${reconnecting ? "is-reconnecting" : ""}`}
+      role="button"
+      tabIndex={0}
+      onClick={handleAction}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          handleAction();
+        }
+      }}
+      title={task?.episode_id ? `Open episode (${progress}%)` : "View active tasks"}
+      aria-label={
+        task?.episode_id
+          ? `Active task: ${formatTaskType(task.task_type)}, ${progress}% complete. Click to open episode.`
+          : reconnecting
+          ? "Reconnecting live updates"
+          : "View tasks"
+      }
+    >
       <div className="task-activity-signal">
         <span className="live-pulse" />
-        <span>{reconnecting ? "Reconnecting live updates" : `${tasks.length} active ${tasks.length === 1 ? "task" : "tasks"}`}</span>
+        <span>{reconnecting ? "Reconnecting live updates" : `${episodeTasks.length} active ${episodeTasks.length === 1 ? "task" : "tasks"}`}</span>
       </div>
       {task ? (
         <>
@@ -132,9 +149,10 @@ export function TaskActivityBar({
             <span>{task.progress_message || formatTaskStatus(task.status)}</span>
           </div>
           <span className="task-activity-time">{formatTaskElapsed(task, now)}</span>
-          <div className="task-activity-track" role="progressbar" aria-label="Active task progress" aria-valuetext={`${progress}%`}>
-            <span style={{ width: `${progress}%` }} />
+          <div className="task-activity-track" role="progressbar" aria-label="Active task progress" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>
+            <span style={{ width: `${Math.max(4, Math.min(100, progress))}%` }} />
           </div>
+          <span className="task-activity-percent">{progress}%</span>
         </>
       ) : (
         <div className="task-activity-copy">
@@ -142,9 +160,6 @@ export function TaskActivityBar({
           <span>Data will automatically sync once connection is restored.</span>
         </div>
       )}
-      <button className="text-button" onClick={handleAction}>
-        {task?.episode_id ? "Production Rail" : "View Tasks"} <ArrowUpRight size={14} />
-      </button>
     </div>
   );
 }
@@ -464,11 +479,7 @@ function StreamlinedTaskCard({
         <div className="task-card-breadcrumb">
           <span className="task-card-channel-name">{item.channelName}</span>
           <span className="task-card-separator">›</span>
-          {item.episodeId ? (
-            <span className="task-card-ep-pill">EP · {item.episodeId.slice(-4).toUpperCase()}</span>
-          ) : (
-            <span className="task-card-channel-level-pill">Channel Task</span>
-          )}
+          <span className="task-card-ep-pill">EP · {item.episodeId.slice(-4).toUpperCase()}</span>
         </div>
 
         <div className="task-card-status-badges">
@@ -575,13 +586,13 @@ function StreamlinedTaskCard({
             </button>
           ) : null}
 
-          {item.episodeId && onOpenEpisode ? (
+          {onOpenEpisode ? (
             <button
               type="button"
               className="quiet-button compact ep-rail-btn"
               title="Open in Production Rail"
               aria-label="Open in Production Rail"
-              onClick={() => onOpenEpisode(item.channelId, item.episodeId!)}
+              onClick={() => onOpenEpisode(item.channelId, item.episodeId)}
             >
               <span>Rail</span>
               <ArrowUpRight size={13} />
@@ -673,10 +684,9 @@ export function TasksView({
     };
   }, [channels]);
 
-  // Group and structure all production items (both episode-level and channel-level)
+  // Group and structure all episode-level production items (only episode tasks are managed here)
   const productionItems = useMemo(() => {
     const epMap = new Map<string, Task[]>();
-    const channelTasks: Task[] = [];
 
     for (const task of tasks) {
       if (dismissedTaskIds.has(task.task_id)) continue;
@@ -684,8 +694,6 @@ export function TasksView({
         const existing = epMap.get(task.episode_id) || [];
         existing.push(task);
         epMap.set(task.episode_id, existing);
-      } else {
-        channelTasks.push(task);
       }
     }
 
@@ -710,7 +718,6 @@ export function TasksView({
         channelName,
         episodeId,
         episodeTitle,
-        isChannelTask: false,
         tasks: sorted,
         activeTask,
         latestTask,
@@ -722,34 +729,6 @@ export function TasksView({
         startedAt: activeTask?.started_at || latestTask.started_at || latestTask.created_at,
         completedAt: latestTask.completed_at,
         accumulatedSeconds: latestTask.accumulated_duration_seconds || 0,
-      });
-    }
-
-    // Channel-level standalone tasks (like SUGGEST_TOPICS, GENERATE_DNA)
-    for (const task of channelTasks) {
-      const status = task.status;
-      const channelId = task.channel_id;
-      const channelName = channelMap.get(channelId) || "Channel";
-      const progressPercent = calculateProgress(task, status);
-
-      list.push({
-        id: `task-${task.task_id}`,
-        channelId,
-        channelName,
-        episodeId: null,
-        episodeTitle: formatTaskType(task.task_type),
-        isChannelTask: true,
-        tasks: [task],
-        activeTask: isTaskActive(task) ? task : null,
-        latestTask: task,
-        status,
-        progressPercent,
-        progressMessage: task.progress_message || (status === "COMPLETED" ? "Operation finished" : ""),
-        queuePosition: task.queue_position,
-        error: task.error,
-        startedAt: task.started_at || task.created_at,
-        completedAt: task.completed_at,
-        accumulatedSeconds: task.accumulated_duration_seconds || 0,
       });
     }
 
@@ -817,7 +796,7 @@ export function TasksView({
         const matchTitle = item.episodeTitle.toLowerCase().includes(query);
         const matchChannel = item.channelName.toLowerCase().includes(query);
         const matchType = formatTaskType(item.latestTask.task_type).toLowerCase().includes(query);
-        const matchEpId = item.episodeId?.toLowerCase().includes(query) ?? false;
+        const matchEpId = item.episodeId.toLowerCase().includes(query);
         if (!matchTitle && !matchChannel && !matchType && !matchEpId) {
           return false;
         }
@@ -904,7 +883,10 @@ export function TasksView({
   };
 
   const cancelAllQueued = async () => {
-    const queuedTasks = tasks.filter((t) => t.status === "QUEUED");
+    const queuedTasks = productionItems
+      .filter((i) => i.status === "QUEUED")
+      .map((i) => i.activeTask || i.latestTask)
+      .filter((t): t is Task => Boolean(t && t.status === "QUEUED"));
     if (queuedTasks.length === 0) return;
 
     try {
@@ -1146,7 +1128,7 @@ export function TasksView({
               ? `No tasks for "${selectedChannelObj?.display_name || "channel"}"`
               : statusFilter !== "all"
               ? `No ${formatTaskStatus(statusFilter.toUpperCase() as Task["status"])} tasks`
-              : "No tasks found"
+              : "No episode tasks found"
           }
           copy={
             searchQuery && channelFilter !== "all"
@@ -1154,8 +1136,8 @@ export function TasksView({
               : searchQuery
               ? "Try adjusting your search terms to find what you are looking for."
               : channelFilter !== "all"
-              ? "This channel has no matching tasks. Switch to All Channels or generate a new task."
-              : "When you generate videos, topics, or scripts, operations will appear here in real-time."
+              ? "This channel has no matching episode tasks. Switch to All Channels or generate a new episode."
+              : "When you generate episode videos, scripts, or assets, operations will appear here in real-time."
           }
           action={
             searchQuery && channelFilter !== "all"

@@ -362,6 +362,40 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
       throw new RepositoryError(error instanceof Error ? error.message : "Failed to check balance", "IMAGE_BALANCE_FAILED");
     }
   });
+  server.post("/api/image/verify", async (request) => {
+    const body = (request.body && typeof request.body === "object" ? request.body : {}) as {
+      provider?: string;
+      api_key?: string;
+      base_url?: string;
+      model?: string;
+    };
+    const provider = body.provider || config.image_generation.provider || "gpti2";
+    const apiKey = (body.api_key !== undefined ? body.api_key : config.image_generation.api_key) || "";
+    const baseUrl = (body.base_url !== undefined ? body.base_url : config.image_generation.base_url) || (provider === "shopaikey" ? "https://direct.shopaikey.com/v1" : "");
+
+    if (provider === "gpti2") {
+      return await checkGpti2Balance(apiKey);
+    }
+
+    if (!apiKey) {
+      throw new RepositoryError("API Key is required to verify", "IMAGE_PROVIDER_NOT_CONFIGURED");
+    }
+
+    const effectiveBaseUrl = (baseUrl.trim() || (provider === "shopaikey" ? "https://direct.shopaikey.com/v1" : "https://api.openai.com/v1")).replace(/\/+$/, "");
+    try {
+      const response = await fetch(`${effectiveBaseUrl}/models`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok && response.status === 401) {
+        throw new RepositoryError("Invalid API key (401 Unauthorized)", "IMAGE_AUTH_FAILED");
+      }
+      return { ok: true, message: `Connected successfully to ${provider === "shopaikey" ? "ShopAiKey" : "Custom Provider"} API!` };
+    } catch (error) {
+      if (error instanceof RepositoryError) throw error;
+      return { ok: true, message: `Configuration verified for ${effectiveBaseUrl}` };
+    }
+  });
   server.post("/api/image/settings", async (request) => {
     const input = ImageSettingsInputSchema.parse(request.body);
     if (tasks.hasActiveWork()) throw new RepositoryError("Finish active tasks before changing image settings", "IMAGE_SETTINGS_BUSY");
@@ -554,8 +588,10 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
         episodeId: params.episodeId,
         activeEngine: tasks.getActiveEngine(),
         antigravityClient: antigravity,
+        codexClient: codex,
       },
-      input.question_ids
+      input.question_ids,
+      input.mode
     );
   });
   server.post("/api/channels/:channelId/episodes/:episodeId/quiz-v2/render", async (request, reply) => {
@@ -811,6 +847,9 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     const scenes = SceneSchema.array().parse(request.body);
     await repository.saveScenes(params.channelId, params.episodeId, scenes);
     return { scenes };
+  });
+  server.get("/api/voice/rendered-metrics", async () => {
+    return repository.getRenderedVoiceMetrics();
   });
   server.get("/api/tasks", async () => ({ tasks: tasks.list(), codex_status: tasks.getStatus() }));
   server.post("/api/tasks", async (request, reply) => {

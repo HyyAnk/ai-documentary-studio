@@ -1,8 +1,8 @@
-import { ArrowLeft, ArrowRight, ArrowsClockwise, ArrowsInSimple, ArrowsOutSimple, Check, CheckCircle, CircleNotch, Copy, DownloadSimple, Eye, FileText, FilmSlate, FloppyDisk, FolderOpen, Image, Lightbulb, MagnifyingGlass, PencilSimple, Play, SpeakerHigh, VideoCamera, WarningCircle, X } from "@phosphor-icons/react";
+import { ArrowLeft, ArrowRight, ArrowsClockwise, ArrowsInSimple, ArrowsOutSimple, Check, CheckCircle, CircleNotch, Copy, DownloadSimple, Eye, FileText, FilmSlate, FloppyDisk, FolderOpen, Image, Lightbulb, MagnifyingGlass, PencilSimple, Play, SpeakerHigh, Stop, VideoCamera, WarningCircle, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ALL_QUIZ_IMAGE_STYLES, QUIZ_IMAGE_STYLE_LABELS, QUIZ_MAX_QUESTION_COUNT, QUIZ_MIN_QUESTION_COUNT, type Channel, type ProductionAssessment, type QuestionHistoryCheckResult, type QuizImageStyle, type Scene, type Task } from "@studio/shared";
 import { api, type BundleImage } from "../api";
-import { isTaskActive, isTaskTerminal, latestTask } from "../lib/utils";
+import { formatTaskType, isTaskActive, isTaskTerminal, latestTask } from "../lib/utils";
 import { parseContinuityBundles } from "../lib/continuity";
 import { useEpisode } from "../hooks/useEpisode";
 import { EmptyState, LoadingState } from "./EmptyState";
@@ -12,6 +12,7 @@ import { TaskProgressPanel } from "./TaskProgressPanel";
 import { QuizV2Panel } from "./QuizV2Panel";
 import { EpisodeBreadcrumb } from "./Breadcrumbs";
 import { PromptFocusModal } from "./PromptFocusModal";
+import { QuestionRemixPanel } from "./QuestionRemixPanel";
 import type { Notice } from "./types";
 
 export type PreviewImageData = {
@@ -85,6 +86,8 @@ export function EpisodeDetail({
   const [globalPromptExpanded, setGlobalPromptExpanded] = useState<boolean | null>(false);
   const [historyCheck, setHistoryCheck] = useState<QuestionHistoryCheckResult | null>(null);
   const [isRemixing, setIsRemixing] = useState(false);
+  const [remixingQuestionId, setRemixingQuestionId] = useState<string | null>(null);
+  const [remixAction, setRemixAction] = useState<{ questionId: string; mode: "rephrase" | "replace" } | null>(null);
   const initialWorkflowTab = (activeTab === "script" || activeTab === "visual" || activeTab === "timeline" || activeTab === "remix")
     ? activeTab
     : simplifyMode
@@ -111,17 +114,27 @@ export function EpisodeDetail({
     }
   }, [simplifyMode]);
 
-  const handleRemix = async () => {
+  const handleRemix = async (questionIds?: string[], mode: "rephrase" | "replace" = "rephrase") => {
     try {
       setIsRemixing(true);
-      const res = await api.remixQuizQuestions(channel.channel_id, episodeId);
+      if (questionIds && questionIds.length === 1) {
+        setRemixingQuestionId(questionIds[0]);
+        setRemixAction({ questionId: questionIds[0], mode });
+      } else {
+        setRemixingQuestionId(null);
+        setRemixAction(null);
+      }
+      const res = await api.remixQuizQuestions(channel.channel_id, episodeId, questionIds, mode);
       setHistoryCheck(res.history_check);
       await load();
-      onNotice({ tone: "good", message: `Successfully remixed ${res.remixed_count} questions and re-checked history!` });
+      const modeText = mode === "replace" ? "replaced with new questions" : "rephrased";
+      onNotice({ tone: "good", message: `Successfully ${modeText} ${res.remixed_count} questions and re-checked history!` });
     } catch (error) {
       onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Question remix failed" });
     } finally {
       setIsRemixing(false);
+      setRemixingQuestionId(null);
+      setRemixAction(null);
     }
   };
 
@@ -251,6 +264,24 @@ export function EpisodeDetail({
     } catch (error) {
       onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Could not start task" });
     } finally { setBusy(null); }
+  };
+
+  const [cancelling, setCancelling] = useState(false);
+
+  const handleCancelActiveTask = async (taskToCancel?: Task | null) => {
+    const target = taskToCancel || activeEpisodeTask;
+    if (!target) return;
+    try {
+      setCancelling(true);
+      const cancelled = await api.cancelTask(target.task_id);
+      if (cancelled) onTaskSubmitted(cancelled);
+      onNotice({ tone: "good", message: `Task ${formatTaskType(target.task_type)} stopped` });
+      await load();
+    } catch (error) {
+      onNotice({ tone: "bad", message: error instanceof Error ? error.message : "Failed to stop task" });
+    } finally {
+      setCancelling(false);
+    }
   };
 
   const saveArtifact = async (filename: ArtifactName, content: string) => {
@@ -489,6 +520,23 @@ export function EpisodeDetail({
                 : "Start production"}
             </span>
           </button>
+          {activeEpisodeTask ? (
+            <button
+              type="button"
+              className="danger-button"
+              disabled={cancelling}
+              onClick={() => void handleCancelActiveTask(activeEpisodeTask)}
+              title="Stop current task immediately"
+              aria-label="Stop current task"
+            >
+              {cancelling ? (
+                <CircleNotch className="spin" size={16} />
+              ) : (
+                <Stop size={16} weight="fill" />
+              )}
+              <span>Stop</span>
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -672,134 +720,15 @@ export function EpisodeDetail({
 
       {/* Stage: Question Remix & History Check (ALWAYS visible when on remix tab, never hidden by simplifyMode) */}
       {workflowTab === "remix" ? (
-        <section className="remix-section panel" style={{ marginTop: "12px" }}>
-          <div className="section-heading" style={{ marginBottom: "20px" }}>
-            <div>
-              <p className="eyebrow">Content Quality & Anti-Duplicate</p>
-              <h2>Question Remix & History Check</h2>
-            </div>
-            <div className="scene-heading-actions">
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => void handleRemix()}
-                disabled={isRemixing || !historyCheck || historyCheck.items.length === 0}
-              >
-                {isRemixing ? <CircleNotch className="spin" size={17} /> : <ArrowsClockwise size={17} />}
-                <span>Remix & Check again</span>
-              </button>
-              <button
-                type="button"
-                className="primary-button"
-                onClick={() => switchWorkflowTab("timeline")}
-              >
-                <span>Continue Build</span>
-                <ArrowRight size={16} />
-              </button>
-            </div>
-          </div>
-
-          <div className={`history-check-summary-banner ${historyCheck?.passed ? "is-passed" : "is-blocked"}`}>
-            <div className="summary-left">
-              {historyCheck?.passed ? (
-                <CheckCircle size={28} weight="fill" className="status-icon-passed" />
-              ) : (
-                <WarningCircle size={28} weight="fill" className="status-icon-warning" />
-              )}
-              <div>
-                <strong className="summary-title">
-                  {historyCheck?.passed
-                    ? "Passed History Duplicate Check"
-                    : `Detected ${historyCheck?.duplicate_count || 0} duplicate question(s) in history`}
-                </strong>
-                <p className="summary-desc">
-                  {historyCheck
-                    ? `Total: ${historyCheck.total_questions} questions | Duplicates: ${historyCheck.duplicate_count} | Pass threshold: <= ${historyCheck.pass_threshold}`
-                    : "Loading history check data..."}
-                </p>
-              </div>
-            </div>
-            <div className="summary-badge-group">
-              <span className={`status-pill ${historyCheck?.passed ? "is-success" : "is-warning"}`}>
-                {historyCheck?.passed ? "PASSED" : "ACTION RECOMMENDED"}
-              </span>
-            </div>
-          </div>
-
-          {historyCheck && historyCheck.items.length > 0 ? (
-            <div className="remix-questions-list">
-              <h3 style={{ margin: "24px 0 12px", fontSize: "15px", fontWeight: 600 }}>
-                Detailed Question History Comparison ({historyCheck.items.length})
-              </h3>
-              <div className="remix-cards-grid">
-                {historyCheck.items.map((item, index) => {
-                  const isDupe = item.status === "duplicate";
-                  const isRemixed = item.status === "remixed";
-                  return (
-                    <div
-                      key={item.current_question_id || index}
-                      className={`remix-card ${isDupe ? "is-duplicate" : isRemixed ? "is-remixed" : "is-clean"}`}
-                    >
-                      <div className="remix-card-header">
-                        <div className="remix-card-number">
-                          <span className="q-badge">Question #{index + 1}</span>
-                          <span className={`match-status-badge is-${item.status}`}>
-                            {isDupe ? "⚠️ Duplicate in History" : isRemixed ? "✨ Remixed" : "✓ New Question"}
-                          </span>
-                        </div>
-                        {item.matched_entry ? (
-                          <span className="similarity-pill">
-                            Similarity: {Math.round(item.similarity_score * 100)}%
-                          </span>
-                        ) : null}
-                      </div>
-
-                      <div className="remix-card-body">
-                        <div className="remix-col current-col">
-                          <label className="col-label">Current Question in Episode:</label>
-                          <p className="remix-question-text">"{item.current_question_text}"</p>
-                          <div className="remix-choices-list">
-                            {item.current_choices.map((c, i) => (
-                              <span
-                                key={i}
-                                className={`choice-chip ${c === item.current_correct_answer ? "is-correct" : ""}`}
-                              >
-                                {c} {c === item.current_correct_answer ? "✓" : ""}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-
-                        {item.matched_entry ? (
-                          <div className="remix-col history-col">
-                            <label className="col-label">
-                              Matched past video: <strong>{item.matched_entry.episode_title}</strong>
-                            </label>
-                            <p className="remix-question-text history-text">
-                              "{item.matched_entry.question_text}"
-                            </p>
-                            <div className="matched-meta">
-                              <span>📅 Rendered: {new Date(item.matched_entry.rendered_at).toLocaleDateString("en-US")}</span>
-                              <span className="match-reason-tag">{item.match_reason}</span>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="remix-col history-col is-empty-match">
-                            <p className="clean-note">✓ No similar questions found in past 30 days.</p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ) : (
-            <div className="artifact-empty" style={{ padding: "40px 0" }}>
-              <p>No question history comparison available. Click <strong>Generate script / Quiz</strong> in Step 1 to perform check.</p>
-            </div>
-          )}
-        </section>
+        <QuestionRemixPanel
+          historyCheck={historyCheck}
+          isRemixing={isRemixing}
+          remixingQuestionId={remixingQuestionId}
+          remixAction={remixAction}
+          onRemixAll={(mode) => void handleRemix(undefined, mode)}
+          onRemixSingle={(qId, mode) => void handleRemix([qId], mode)}
+          onContinueBuild={() => switchWorkflowTab("timeline")}
+        />
       ) : null}
 
       {/* Stage 2: Visual & Continuity */}

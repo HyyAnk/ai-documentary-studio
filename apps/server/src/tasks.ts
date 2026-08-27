@@ -31,7 +31,7 @@ import { CodexImageProvider } from "./providers/codexImage.js";
 import { ShopAiKeyImageProvider } from "./providers/shopAiKeyImage.js";
 import { AntigravityImageChainProvider } from "./providers/antigravityImageChain.js";
 import { Gpti2ImageProvider } from "./providers/gpti2Image.js";
-import type { AudioProvider } from "./providers/index.js";
+import type { AudioProvider, ImageProvider } from "./providers/index.js";
 import { optimizeShortScenes, packBeatsIntoScenes, rebalanceEditorialOverlays, type Beat } from "./sceneTiming.js";
 import { calibratedScriptTargetWords, countWords, extractNarration, extractNarrationChunks, extractNarrationSections, hasHumorPolicyMarker, scriptWordBounds } from "./production.js";
 import { stripEditorialOverlayInstructions } from "./visualPrompt.js";
@@ -453,15 +453,24 @@ export class TaskManager extends EventEmitter {
       return;
     }
     if (task.task_type === "GENERATE_BUNDLE_IMAGE") {
-      if (Gpti2ImageProvider.isConfigured(this.imageConfig.api_key)) {
+      const provider = this.imageConfig.provider ?? "gpti2";
+      if (provider === "gpti2" && Gpti2ImageProvider.isConfigured(this.imageConfig.api_key)) {
         await this.runGpti2BundleImageTask(task);
+        return;
+      }
+      if (provider === "shopaikey" && (this.imageConfig.api_key || ShopAiKeyImageProvider.isConfigured())) {
+        await this.runShopAiKeyImageTask(task);
+        return;
+      }
+      if (provider === "custom" && this.imageConfig.api_key) {
+        await this.runShopAiKeyImageTask(task);
         return;
       }
       if (this.activeEngine === "antigravity") {
         await this.runAntigravityBundleImageTask(task);
         return;
       }
-      if (ShopAiKeyImageProvider.isConfigured()) {
+      if (ShopAiKeyImageProvider.isConfigured(this.imageConfig.api_key)) {
         await this.runShopAiKeyImageTask(task);
         return;
       }
@@ -493,6 +502,46 @@ export class TaskManager extends EventEmitter {
     }
   }
 
+  private createImageProvider(
+    imageTarget: { channelId: string; episodeId: string; bundleNumber: number; variant: number; theme?: string },
+    output?: string,
+  ): ImageProvider {
+    const providerType = this.imageConfig.provider ?? "gpti2";
+    if (providerType === "gpti2" && Gpti2ImageProvider.isConfigured(this.imageConfig.api_key)) {
+      return new Gpti2ImageProvider(this.repository, imageTarget, {
+        apiKey: this.imageConfig.api_key,
+        model: this.imageConfig.model,
+      });
+    }
+    if (providerType === "shopaikey" && (this.imageConfig.api_key || ShopAiKeyImageProvider.isConfigured())) {
+      return new ShopAiKeyImageProvider(this.repository, imageTarget, {
+        apiKey: this.imageConfig.api_key || process.env.SHOPAIKEY_API_KEY,
+        baseUrl: this.imageConfig.base_url || "https://direct.shopaikey.com/v1",
+        model: this.imageConfig.model || "gpt-image-2",
+        quality: this.imageConfig.quality,
+      });
+    }
+    if (providerType === "custom" && this.imageConfig.api_key) {
+      return new ShopAiKeyImageProvider(this.repository, imageTarget, {
+        apiKey: this.imageConfig.api_key,
+        baseUrl: this.imageConfig.base_url || "https://api.openai.com/v1",
+        model: this.imageConfig.model || "gpt-image-2",
+        quality: this.imageConfig.quality,
+      });
+    }
+    if (this.activeEngine === "antigravity" && this.antigravity) {
+      return new AntigravityImageChainProvider(this.repository, imageTarget, this.antigravity, { allowTier3Fallback: false });
+    }
+    if (ShopAiKeyImageProvider.isConfigured(this.imageConfig.api_key)) {
+      return new ShopAiKeyImageProvider(this.repository, imageTarget, {
+        apiKey: this.imageConfig.api_key || process.env.SHOPAIKEY_API_KEY,
+        baseUrl: this.imageConfig.base_url || "https://direct.shopaikey.com/v1",
+        model: this.imageConfig.model,
+      });
+    }
+    return new CodexImageProvider(this.repository, imageTarget, output ?? "");
+  }
+
   private async generateBundleImageWithSafetyRetry(
     task: Task,
     imageTarget: { channelId: string; episodeId: string; bundleNumber: number; variant: number; theme?: string },
@@ -507,16 +556,8 @@ export class TaskManager extends EventEmitter {
 
     for (let attempt = 0; attempt <= maxAttempts; attempt++) {
       try {
-        const image = Gpti2ImageProvider.isConfigured(this.imageConfig.api_key)
-          ? await new Gpti2ImageProvider(this.repository, imageTarget, {
-              apiKey: this.imageConfig.api_key,
-              model: this.imageConfig.model,
-            }).generateReference(currentPrompt, signal)
-          : this.activeEngine === "antigravity"
-          ? await new AntigravityImageChainProvider(this.repository, imageTarget, this.antigravity, { allowTier3Fallback: false }).generateReference(currentPrompt, signal)
-          : ShopAiKeyImageProvider.isConfigured()
-          ? await new ShopAiKeyImageProvider(this.repository, imageTarget).generateReference(currentPrompt, signal)
-          : await new CodexImageProvider(this.repository, imageTarget, output ?? "").generateReference(currentPrompt);
+        const provider = this.createImageProvider(imageTarget, output);
+        const image = await provider.generateReference(currentPrompt, signal);
         return { image, updatedPrompt: currentPrompt !== initialPrompt ? currentPrompt : undefined };
       } catch (err) {
         lastError = err;

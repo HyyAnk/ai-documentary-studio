@@ -637,7 +637,8 @@ export const AppConfigSchema = z.object({
   image_generation: z.object({
     enabled: z.boolean().default(true),
     images_per_bundle: z.number().int().min(1).max(2).default(1),
-    provider: z.string().default("gpti2"),
+    provider: z.enum(["gpti2", "shopaikey", "custom"]).default("gpti2"),
+    base_url: z.string().default(""),
     model: z.string().default("gpt-image-2"),
     api_key: z.string().default(""),
     has_api_key: z.boolean().optional(),
@@ -739,6 +740,7 @@ export type QuestionHistoryCheckResult = z.infer<typeof QuestionHistoryCheckResu
 
 export const RemixQuestionsInputSchema = z.object({
   question_ids: z.array(z.string()).optional(),
+  mode: z.enum(["rephrase", "replace"]).default("rephrase").optional(),
 });
 export type RemixQuestionsInput = z.infer<typeof RemixQuestionsInputSchema>;
 
@@ -769,14 +771,18 @@ export type GenerateAllAudioInput = z.infer<typeof GenerateAllAudioInputSchema>;
 export const GenerateAllBundleImagesInputSchema = z.object({ force: z.boolean().default(false) });
 export type GenerateAllBundleImagesInput = z.infer<typeof GenerateAllBundleImagesInputSchema>;
 
+export const ImageProviderIdSchema = z.enum(["gpti2", "shopaikey", "custom"]);
+export type ImageProviderId = z.infer<typeof ImageProviderIdSchema>;
+
 export const ImageModelIdSchema = z.enum(["gpt-image-2", "nano-banana-2"]);
 export type ImageModelId = z.infer<typeof ImageModelIdSchema>;
 
 export const ImageSettingsInputSchema = z.object({
   enabled: z.boolean().optional(),
   images_per_bundle: z.number().int().min(1).max(2).optional(),
-  provider: z.string().trim().max(80).optional(),
-  model: z.string().trim().max(80).optional(),
+  provider: ImageProviderIdSchema.optional(),
+  base_url: z.string().trim().max(2000).optional(),
+  model: z.string().trim().max(160).optional(),
   api_key: z.string().max(4000).optional(),
   quality: z.enum(["low", "medium", "high"]).optional(),
   max_concurrent_tasks: z.number().int().positive().max(16).optional(),

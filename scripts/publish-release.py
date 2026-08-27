@@ -1,4 +1,4 @@
-﻿import subprocess
+import subprocess
 import requests
 import json
 import os
@@ -6,7 +6,7 @@ import sys
 
 # 1. Get token from git credential manager
 p = subprocess.Popen(['git', 'credential', 'fill'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-stdout, _ = p.communicate(input='protocol=https\nhost=github.com\npath=HyyAnk/ai-documentary-studio.git\n\n')
+stdout, _ = p.communicate(input='protocol=https\nhost=github.com\npath=HyyAnk/my-1x-project.git\n\n')
 token = None
 for line in stdout.splitlines():
     if line.startswith('password='):
@@ -22,7 +22,7 @@ headers = {
     'X-GitHub-Api-Version': '2022-11-28'
 }
 
-repo = 'HyyAnk/ai-documentary-studio'
+repo = 'HyyAnk/my-1x-project'
 tag_name = 'v1.0.0-assets'
 release_name = 'Kid BGM Audio Pack v1.0.0'
 release_body = '53 kid-friendly background music tracks with 100/120 BPM metadata for Quiz Engine.'

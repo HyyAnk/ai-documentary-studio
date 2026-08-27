@@ -110,12 +110,13 @@ test("channel deletion requires an explicit Yes and typed confirmation", async (
 });
 
 test("failed tasks expose a retry path with the original task scope", async ({ page }) => {
-  const channel = { channel_id: "ch_retry", slug: "retry-demo", display_name: "Retry demo", description: "A channel used to verify task recovery.", target_audience: "Viewers", language: "English", market: "Global", channel_dna_path: "channels/retry-demo/channel_dna.md", style_guide_path: null, status: "ACTIVE", created_at: "2026-08-16T00:00:00.000Z", updated_at: "2026-08-16T00:00:00.000Z", episode_count: 0, group_id: "quiz", engine: "quiz" };
-  const failedTask = { task_id: "task_retry_failed", task_type: "GENERATE_DNA", channel_id: channel.channel_id, episode_id: null, status: "FAILED", created_at: "2026-08-16T00:00:00.000Z", started_at: "2026-08-16T00:00:01.000Z", completed_at: "2026-08-16T00:00:02.000Z", codex_thread_id: null, codex_turn_id: null, error: "Codex App Server unavailable", output_files: [], lock_key: channel.channel_id, queue_position: null, progress_message: "Codex App Server unavailable", scene_number: null };
+  const channel = { channel_id: "ch_retry", slug: "retry-demo", display_name: "Retry demo", description: "A channel used to verify task recovery.", target_audience: "Viewers", language: "English", market: "Global", channel_dna_path: "channels/retry-demo/channel_dna.md", style_guide_path: null, status: "ACTIVE", created_at: "2026-08-16T00:00:00.000Z", updated_at: "2026-08-16T00:00:00.000Z", episode_count: 1, group_id: "quiz", engine: "quiz" };
+  const failedTask = { task_id: "task_retry_failed", task_type: "GENERATE_SCRIPT", channel_id: channel.channel_id, episode_id: "ep_retry_123", status: "FAILED", created_at: "2026-08-16T00:00:00.000Z", started_at: "2026-08-16T00:00:01.000Z", completed_at: "2026-08-16T00:00:02.000Z", codex_thread_id: null, codex_turn_id: null, error: "Codex App Server unavailable", output_files: [], lock_key: "ep_retry_123", queue_position: null, progress_message: "Codex App Server unavailable", scene_number: null };
   const retryTask = { ...failedTask, task_id: "task_retry_queued", status: "QUEUED", completed_at: null, error: null, progress_message: "Queued" };
   let tasks = [failedTask];
   let retryBody: Record<string, unknown> | null = null;
   await page.route("**/api/channels", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ channels: [channel] }) }));
+  await page.route(`**/api/channels/${channel.channel_id}/episodes`, (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ episodes: [] }) }));
   await page.route("**/api/tasks", async (route) => {
     if (route.request().method() === "POST") {
       retryBody = route.request().postDataJSON();
@@ -127,9 +128,9 @@ test("failed tasks expose a retry path with the original task scope", async ({ p
   await page.goto("/");
   await page.getByRole("button", { name: "Tasks", exact: true }).click();
   await expect(page.getByText("Codex App Server unavailable", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Retry", exact: true }).click();
-  await expect.poll(() => retryBody).toEqual({ task_type: "GENERATE_DNA", channel_id: channel.channel_id, episode_id: null, scene_number: null });
-  await expect(page.locator(".notice-banner.good")).toContainText("retry queued");
+  await page.locator(".task-card-actions").getByRole("button", { name: "Retry task" }).click();
+  await expect.poll(() => retryBody).toEqual({ task_type: "GENERATE_SCRIPT", channel_id: channel.channel_id, episode_id: "ep_retry_123", scene_number: null });
+  await expect(page.locator(".notice-banner.good")).toContainText("added to queue");
 });
 
 test("episode deletion uses a direct Yes or No confirmation", async ({ page }) => {
