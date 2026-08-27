@@ -612,7 +612,7 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 .fact-card p { margin: 8px 0 0; font-family: "Fredoka", "SVN-Hello Headline", "Baloo 2", "Nunito", sans-serif; font-size: 38px; font-weight: 900; line-height: 1.22; letter-spacing: -0.3px; }
 .visual-answer-grid { position: relative; z-index: 3; display: grid; grid-template-columns: repeat(3,1fr); gap: 28px; width: 1560px; margin-top: 28px; opacity: 0; animation: phase-enter .01s steps(1,end) calc(var(--clip-start) + var(--choices-at)) both; }
 .visual-answer-card { position: relative; z-index: 3; }
-.option-image { width: 100%; height: 500px; border-width: 12px; border-radius: 40px; animation: answer-float var(--scene-duration) ease-in-out calc(var(--clip-start) + var(--item-phase)) 1 alternate both; }
+.option-image { width: 100%; height: 500px; border-width: 12px; border-radius: 40px; transform-origin: center; animation: visual-choice-float 3.8s ease-in-out calc(var(--clip-start) + var(--item-phase)) infinite alternate both; }
 .visual-answer-label { position: relative; z-index: 4; display: flex; align-items: center; gap: 16px; min-height: 94px; margin: -36px 18px 0 38px; padding: 12px 26px 12px 18px; overflow: visible; border: 6px solid var(--choice-stroke); border-radius: 9999px; background: var(--choice-pattern), var(--choice-bg-tint); background-size: 64px 32px, 100% 100%; box-shadow: 0 12px 0 var(--choice-depth-shadow), inset 0 3px 0 rgba(255,255,255,.6), 0 10px 22px rgba(10,25,60,.22); font-size: 32px; font-weight: 900; }
 .visual-answer-label::before { content: ""; position: absolute; inset: 5px 10px 5px 16px; border: 2px dashed rgba(255, 255, 255, 0.75); border-radius: 9999px; pointer-events: none; z-index: 3; }
 .visual-answer-label > b { width: 92px; height: 92px; margin-left: -50px; border-radius: 50%; border: 6px solid var(--choice-badge-border); font-size: 48px; -webkit-text-stroke: 3px var(--choice-stroke-shadow); paint-order: stroke fill; }
@@ -671,6 +671,7 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
 @keyframes ambient-drift { to { transform: translate(24px,-19px) rotate(8deg); } }
 @keyframes hero-float { 50% { transform: translateY(-8px) rotate(1deg); } }
 @keyframes answer-float { 50% { transform: translateY(-4px) rotate(.25deg); } }
+@keyframes visual-choice-float { 0% { transform: translateY(0px) rotate(-0.8deg) scale(1); } 50% { transform: translateY(-7px) rotate(1deg) scale(1.012); } 100% { transform: translateY(-2px) rotate(-0.5deg) scale(1.004); } }
 @keyframes decor-drift { 50% { transform: translate(4px,-7px) rotate(2deg); } }
 @keyframes question-card-enter { from { opacity: 0; transform: translateY(24px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @keyframes question-card-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }

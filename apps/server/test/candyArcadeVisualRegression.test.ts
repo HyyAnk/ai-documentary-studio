@@ -108,10 +108,10 @@ describe("Candy Arcade visual regression contract", () => {
 
   it("stagger-floats answer images and composes visual reveal motion", () => {
     const html = renderHtml();
-    expect(html).toMatch(/\.option-image \{[^}]*animation: answer-float/);
+    expect(html).toMatch(/\.option-image \{[^}]*animation: visual-choice-float/);
     expect(html).toMatch(/\.answer-card img \{[^}]*animation: answer-float/);
     expect(html).toContain("--item-phase:");
-    expect(html).toContain("answer-float var(--scene-duration)");
+    expect(html).toContain("visual-choice-float 3.8s");
     expect(html).toContain("visual-correct-border");
   });
 
