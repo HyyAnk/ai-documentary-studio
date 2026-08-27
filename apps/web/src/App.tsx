@@ -280,7 +280,9 @@ export function App() {
           }}
           onShutdown={() => void stopDashboard()}
         />
-        <TaskActivityBar tasks={activeTasks} realtimeStatus={realtimeStatus} now={taskClock} onOpenTasks={() => navigate("tasks")} onOpenEpisode={openEpisode} />
+        {page !== "tasks" && (
+          <TaskActivityBar tasks={activeTasks} realtimeStatus={realtimeStatus} now={taskClock} onOpenTasks={() => navigate("tasks")} onOpenEpisode={openEpisode} />
+        )}
         {loading ? <LoadingState /> : page === "dashboard" ? (
           <DashboardView
             channels={channels}

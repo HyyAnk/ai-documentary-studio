@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import {
   ArrowUpRight,
   ArrowClockwise,
@@ -11,14 +11,14 @@ import {
   WarningCircle,
   MagnifyingGlass,
   Funnel,
-  SquaresFour,
-  Table as TableIcon,
   Trash,
   Copy,
   Check,
   FileText,
-  Info,
   ArrowsClockwise,
+  Hourglass,
+  XCircle,
+  CaretDown,
 } from "@phosphor-icons/react";
 import type { Channel, Task } from "@studio/shared";
 import { api, type RealtimeStatus } from "../api";
@@ -33,7 +33,14 @@ import { EmptyState } from "./EmptyState";
 import { PageTitle } from "./AppChrome";
 import type { Notice } from "./types";
 
-export type StatusFilter = "all" | "running" | "queued" | "failed" | "completed";
+export type StatusFilter =
+  | "all"
+  | "running"
+  | "queued"
+  | "waiting_approval"
+  | "failed"
+  | "completed"
+  | "cancelled";
 
 export type ProductionItemSummary = {
   id: string;
@@ -60,10 +67,13 @@ function calculateProgress(task: Task | null, fallbackStatus: Task["status"]): n
     return fallbackStatus === "COMPLETED" ? 100 : 0;
   }
   if (task.status === "COMPLETED") return 100;
+  if (task.status === "CANCELLED") return 0;
   if (task.progress_percent !== null && task.progress_percent !== undefined && task.progress_percent > 0) {
     return task.progress_percent;
   }
   if (task.status === "QUEUED") return 0;
+  if (task.status === "WAITING_APPROVAL") return 50;
+
   switch (task.task_type) {
     case "GENERATE_RESEARCH": return 5;
     case "GENERATE_TREATMENT": return 10;
@@ -152,6 +162,40 @@ export function TaskRow({ task, now }: { task: Task; now: number }) {
   );
 }
 
+export function TaskStatusChip({
+  status,
+  compact = false,
+}: {
+  status: Task["status"];
+  compact?: boolean;
+}) {
+  const isRunning = status === "RUNNING";
+  const isQueued = status === "QUEUED";
+  const isWaiting = status === "WAITING_APPROVAL";
+  const isFailed = status === "FAILED";
+  const isCompleted = status === "COMPLETED";
+  const isCancelled = status === "CANCELLED";
+
+  return (
+    <span className={`task-status-chip ${compact ? "compact" : ""} is-${status.toLowerCase()}`}>
+      {isRunning ? (
+        <CircleNotch size={12} className="spin" />
+      ) : isQueued ? (
+        <Clock size={12} />
+      ) : isWaiting ? (
+        <Hourglass size={12} />
+      ) : isFailed ? (
+        <WarningCircle size={12} weight="fill" />
+      ) : isCompleted ? (
+        <CheckCircle size={12} weight="fill" />
+      ) : isCancelled ? (
+        <XCircle size={12} />
+      ) : null}
+      <span>{formatTaskStatus(status)}</span>
+    </span>
+  );
+}
+
 /* ==========================================================================
    Task Detail & Error Inspection Drawer (Slide-Over Panel)
    ========================================================================== */
@@ -180,8 +224,10 @@ function TaskDetailDrawer({
 
   const isRunning = targetTask.status === "RUNNING";
   const isQueued = targetTask.status === "QUEUED";
+  const isWaiting = targetTask.status === "WAITING_APPROVAL";
   const isFailed = targetTask.status === "FAILED";
   const isCompleted = targetTask.status === "COMPLETED";
+  const isCancelled = targetTask.status === "CANCELLED";
 
   const handleCopyError = () => {
     if (targetTask.error) {
@@ -199,7 +245,7 @@ function TaskDetailDrawer({
             <span className="eyebrow">Task Details</span>
             <h2>{formatTaskType(targetTask.task_type)}</h2>
           </div>
-          <button className="icon-button" onClick={onClose} title="Close drawer" aria-label="Close">
+          <button className="icon-button" onClick={onClose} title="Close drawer" aria-label="Close drawer">
             <X size={18} />
           </button>
         </div>
@@ -212,10 +258,14 @@ function TaskDetailDrawer({
                 <CircleNotch size={20} className="spin accent-icon" />
               ) : isQueued ? (
                 <Clock size={20} className="yellow-icon" />
+              ) : isWaiting ? (
+                <Hourglass size={20} className="yellow-icon" />
               ) : isCompleted ? (
                 <CheckCircle size={20} weight="fill" className="green-icon" />
               ) : isFailed ? (
                 <WarningCircle size={20} weight="fill" className="coral-icon" />
+              ) : isCancelled ? (
+                <XCircle size={20} className="muted-icon" />
               ) : (
                 <ListChecks size={20} />
               )}
@@ -227,8 +277,12 @@ function TaskDetailDrawer({
                       ? "Task currently running on engine"
                       : isQueued
                       ? `Position #${(targetTask.queue_position ?? 0) + 1} in build queue`
+                      : isWaiting
+                      ? "Waiting for manual approval"
                       : isCompleted
                       ? "Execution finished successfully"
+                      : isCancelled
+                      ? "Execution cancelled by user"
                       : "Execution failed")}
                 </span>
               </div>
@@ -331,7 +385,7 @@ function TaskDetailDrawer({
               <X size={15} />
               <span>Cancel Task</span>
             </button>
-          ) : isFailed ? (
+          ) : isFailed || isCancelled ? (
             <button
               type="button"
               className="primary-button"
@@ -365,7 +419,7 @@ function TaskDetailDrawer({
 }
 
 /* ==========================================================================
-   Streamlined Task Card (Clean, Breathable, Topic-Oriented)
+   Streamlined Task Card (Clean, Breathable, Priority-Oriented)
    ========================================================================== */
 function StreamlinedTaskCard({
   item,
@@ -384,17 +438,32 @@ function StreamlinedTaskCard({
 }) {
   const isRunning = item.status === "RUNNING";
   const isQueued = item.status === "QUEUED";
+  const isWaiting = item.status === "WAITING_APPROVAL";
   const isFailed = item.status === "FAILED";
   const isCompleted = item.status === "COMPLETED";
+  const isCancelled = item.status === "CANCELLED";
 
   const targetTask = item.activeTask || item.latestTask;
 
   return (
-    <article className={`streamlined-task-card is-${item.status.toLowerCase()}`}>
-      {/* Top Bar: Channel Tag & Status Pill */}
+    <article
+      className={`streamlined-task-card is-${item.status.toLowerCase()}`}
+      onClick={() => onInspect(item)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onInspect(item);
+        }
+      }}
+      title="Click to view full task details"
+    >
+      {/* Top Header: Breadcrumb (Channel > Episode) + Status Chip */}
       <div className="task-card-header">
-        <div className="task-card-channel-group">
-          <span className="task-card-channel-pill">{item.channelName}</span>
+        <div className="task-card-breadcrumb">
+          <span className="task-card-channel-name">{item.channelName}</span>
+          <span className="task-card-separator">›</span>
           {item.episodeId ? (
             <span className="task-card-ep-pill">EP · {item.episodeId.slice(-4).toUpperCase()}</span>
           ) : (
@@ -403,80 +472,71 @@ function StreamlinedTaskCard({
         </div>
 
         <div className="task-card-status-badges">
-          {item.queuePosition !== null && isQueued ? (
+          {item.queuePosition !== null && isQueued && (
             <span className="queue-position-pill">Queue #{item.queuePosition + 1}</span>
-          ) : null}
-          <span className={`task-status-chip is-${item.status.toLowerCase()}`}>
-            {isRunning ? (
-              <>
-                <CircleNotch size={12} className="spin" />
-                <span>Running</span>
-              </>
-            ) : isQueued ? (
-              <>
-                <Clock size={12} />
-                <span>Queued</span>
-              </>
-            ) : isCompleted ? (
-              <>
-                <CheckCircle size={12} weight="fill" />
-                <span>Completed</span>
-              </>
-            ) : isFailed ? (
-              <>
-                <WarningCircle size={12} weight="fill" />
-                <span>Failed</span>
-              </>
-            ) : (
-              formatTaskStatus(item.status)
-            )}
-          </span>
+          )}
+          <TaskStatusChip status={item.status} />
         </div>
       </div>
 
-      {/* Main Title: Episode Topic Title */}
-      <div className="task-card-title-row" onClick={() => onInspect(item)} title="Click to view full details">
+      {/* Main Title & Type Subtext */}
+      <div className="task-card-title-row">
         <h3 className="task-card-topic-title">
           {item.episodeTitle || formatTaskType(targetTask.task_type)}
         </h3>
         <span className="task-card-type-subtext">{formatTaskType(targetTask.task_type)}</span>
       </div>
 
-      {/* Clean Progress Bar & Message */}
-      <div className="task-card-progress-section">
-        <div className="task-card-progress-info">
-          <span className="task-card-progress-msg">
-            {item.progressMessage ||
-              (isRunning
-                ? "Processing in progress..."
-                : isQueued
-                ? "Waiting for execution slot..."
-                : isCompleted
-                ? "Generation completed"
-                : "Execution stopped")}
+      {/* Dynamic Progress / Queue / Error Section */}
+      {isQueued ? (
+        <div className="task-card-queue-notice">
+          <Clock size={14} className="queue-notice-icon" />
+          <span>
+            Waiting in queue · Position #{item.queuePosition !== null ? item.queuePosition + 1 : "—"}
           </span>
-          <span className="task-card-progress-pct">{item.progressPercent}%</span>
         </div>
-        <div
-          className="task-card-progress-track"
-          role="progressbar"
-          aria-valuenow={item.progressPercent}
-          aria-valuemin={0}
-          aria-valuemax={100}
-        >
+      ) : isWaiting ? (
+        <div className="task-card-waiting-notice">
+          <Hourglass size={14} className="waiting-notice-icon" />
+          <span>{item.progressMessage || "Waiting for user approval to proceed"}</span>
+        </div>
+      ) : isRunning ? (
+        <div className="task-card-progress-section">
+          <div className="task-card-progress-info">
+            <span className="task-card-progress-msg">
+              {item.progressMessage || "Processing in progress..."}
+            </span>
+            <span className="task-card-progress-pct">{item.progressPercent}%</span>
+          </div>
           <div
-            className={`task-card-progress-fill is-${item.status.toLowerCase()}`}
-            style={{ width: `${Math.max(isRunning ? 6 : 0, Math.min(100, item.progressPercent))}%` }}
-          />
+            className="task-card-progress-track"
+            role="progressbar"
+            aria-valuenow={item.progressPercent}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`${formatTaskType(targetTask.task_type)} progress`}
+          >
+            <div
+              className="task-card-progress-fill is-running"
+              style={{ width: `${Math.max(6, Math.min(100, item.progressPercent))}%` }}
+            />
+          </div>
         </div>
-      </div>
-
-      {/* Error Callout Box (if Failed) */}
-      {isFailed && item.error && (
-        <div className="task-card-error-callout" onClick={() => onInspect(item)}>
+      ) : isFailed && item.error ? (
+        <div className="task-card-error-callout">
           <WarningCircle size={15} weight="fill" className="coral-icon" />
           <p className="task-card-error-text">{item.error}</p>
-          <span className="task-card-view-log-link">View Log &rarr;</span>
+          <span className="task-card-view-log-link">View details &rarr;</span>
+        </div>
+      ) : (
+        <div className="task-card-done-info">
+          <span className="task-card-done-msg">
+            {isCompleted
+              ? item.progressMessage || "Completed successfully"
+              : isCancelled
+              ? "Cancelled by user"
+              : "Execution finished"}
+          </span>
         </div>
       )}
 
@@ -490,32 +550,24 @@ function StreamlinedTaskCard({
           ) : null}
         </div>
 
-        <div className="task-card-actions">
-          <button
-            type="button"
-            className="quiet-button compact icon-only"
-            title="Inspect task details & logs"
-            aria-label="View task details"
-            onClick={() => onInspect(item)}
-          >
-            <Info size={15} />
-          </button>
-
+        <div className="task-card-actions" onClick={(e) => e.stopPropagation()}>
           {isTaskActive(targetTask) ? (
             <button
               type="button"
               className="quiet-button danger compact"
               title="Cancel execution"
+              aria-label="Cancel execution"
               onClick={() => onCancel(targetTask)}
             >
               <X size={14} />
               <span>Cancel</span>
             </button>
-          ) : isFailed ? (
+          ) : isFailed || isCancelled ? (
             <button
               type="button"
               className="primary-button compact"
               title="Retry task"
+              aria-label="Retry task"
               onClick={() => onRetry(targetTask)}
             >
               <ArrowClockwise size={14} />
@@ -528,6 +580,7 @@ function StreamlinedTaskCard({
               type="button"
               className="quiet-button compact ep-rail-btn"
               title="Open in Production Rail"
+              aria-label="Open in Production Rail"
               onClick={() => onOpenEpisode(item.channelId, item.episodeId!)}
             >
               <span>Rail</span>
@@ -537,162 +590,6 @@ function StreamlinedTaskCard({
         </div>
       </div>
     </article>
-  );
-}
-
-/* ==========================================================================
-   Compact Table View Component (Dense & High Efficiency)
-   ========================================================================== */
-function CompactTaskTable({
-  items,
-  now,
-  onOpenEpisode,
-  onCancel,
-  onRetry,
-  onInspect,
-}: {
-  items: ProductionItemSummary[];
-  now: number;
-  onOpenEpisode?: (channelId: string, episodeId: string) => void;
-  onCancel: (task: Task) => void;
-  onRetry: (task: Task) => void;
-  onInspect: (item: ProductionItemSummary) => void;
-}) {
-  return (
-    <div className="task-compact-table-wrap">
-      <table className="task-compact-table">
-        <thead>
-          <tr>
-            <th style={{ width: "120px" }}>Status</th>
-            <th>Topic / Episode</th>
-            <th style={{ width: "140px" }}>Channel</th>
-            <th style={{ width: "180px" }}>Task Type</th>
-            <th>Progress / Details</th>
-            <th style={{ width: "130px" }}>Duration</th>
-            <th style={{ width: "140px", textAlign: "right" }}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((item) => {
-            const targetTask = item.activeTask || item.latestTask;
-            const isRunning = item.status === "RUNNING";
-            const isQueued = item.status === "QUEUED";
-            const isFailed = item.status === "FAILED";
-            const isCompleted = item.status === "COMPLETED";
-
-            return (
-              <tr key={item.id} className={`task-table-row is-${item.status.toLowerCase()}`}>
-                {/* Status Column */}
-                <td>
-                  <span className={`task-status-chip compact is-${item.status.toLowerCase()}`}>
-                    {isRunning ? (
-                      <CircleNotch size={12} className="spin" />
-                    ) : isQueued ? (
-                      <Clock size={12} />
-                    ) : isCompleted ? (
-                      <CheckCircle size={12} weight="fill" />
-                    ) : isFailed ? (
-                      <WarningCircle size={12} weight="fill" />
-                    ) : null}
-                    <span>{formatTaskStatus(item.status)}</span>
-                  </span>
-                </td>
-
-                {/* Topic / Episode Column */}
-                <td>
-                  <div className="table-topic-cell" onClick={() => onInspect(item)}>
-                    <strong className="table-topic-title">
-                      {item.episodeTitle || (item.episodeId ? `EP · ${item.episodeId.slice(-4).toUpperCase()}` : "Channel Operation")}
-                    </strong>
-                    {item.episodeId && (
-                      <span className="table-topic-ep-code">EP · {item.episodeId.slice(-4).toUpperCase()}</span>
-                    )}
-                  </div>
-                </td>
-
-                {/* Channel Column */}
-                <td>
-                  <span className="table-channel-name">{item.channelName}</span>
-                </td>
-
-                {/* Task Type Column */}
-                <td>
-                  <span className="table-type-label">{formatTaskType(targetTask.task_type)}</span>
-                </td>
-
-                {/* Progress / Detail Column */}
-                <td>
-                  <div className="table-progress-cell">
-                    <div className="table-progress-bar-wrap">
-                      <div className="table-progress-track">
-                        <div
-                          className={`table-progress-fill is-${item.status.toLowerCase()}`}
-                          style={{ width: `${item.progressPercent}%` }}
-                        />
-                      </div>
-                      <span className="table-progress-pct">{item.progressPercent}%</span>
-                    </div>
-                    <span className="table-progress-msg">
-                      {item.error || item.progressMessage || (isCompleted ? "Finished" : "")}
-                    </span>
-                  </div>
-                </td>
-
-                {/* Duration Column */}
-                <td>
-                  <span className="table-duration-text">{formatTaskElapsed(targetTask, now)}</span>
-                </td>
-
-                {/* Actions Column */}
-                <td style={{ textAlign: "right" }}>
-                  <div className="table-actions-cell">
-                    <button
-                      type="button"
-                      className="quiet-button compact icon-only"
-                      title="Inspect details"
-                      onClick={() => onInspect(item)}
-                    >
-                      <Info size={14} />
-                    </button>
-
-                    {isTaskActive(targetTask) ? (
-                      <button
-                        type="button"
-                        className="quiet-button danger compact icon-only"
-                        title="Cancel task"
-                        onClick={() => onCancel(targetTask)}
-                      >
-                        <X size={14} />
-                      </button>
-                    ) : isFailed ? (
-                      <button
-                        type="button"
-                        className="quiet-button compact icon-only"
-                        title="Retry task"
-                        onClick={() => onRetry(targetTask)}
-                      >
-                        <ArrowClockwise size={14} />
-                      </button>
-                    ) : null}
-
-                    {item.episodeId && onOpenEpisode ? (
-                      <button
-                        type="button"
-                        className="quiet-button compact icon-only"
-                        title="Open Production Rail"
-                        onClick={() => onOpenEpisode(item.channelId, item.episodeId!)}
-                      >
-                        <ArrowUpRight size={14} />
-                      </button>
-                    ) : null}
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
   );
 }
 
@@ -717,17 +614,32 @@ export function TasksView({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [channelFilter, setChannelFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
-  const [viewMode, setViewMode] = useState<"cards" | "table">(() => {
-    return (window.localStorage.getItem("studio-tasks-view-mode") as "cards" | "table") || "cards";
-  });
   const [selectedInspectItem, setSelectedInspectItem] = useState<ProductionItemSummary | null>(null);
   const [dismissedTaskIds, setDismissedTaskIds] = useState<Set<string>>(new Set());
   const [episodeTitleMap, setEpisodeTitleMap] = useState<Map<string, string>>(new Map());
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
+  const [showAllDone, setShowAllDone] = useState(false);
 
+  const actionsMenuRef = useRef<HTMLDivElement>(null);
   const channelMap = useMemo(() => new Map(channels.map((c) => [c.channel_id, c.display_name])), [channels]);
 
-  // Load episode titles for channels to replace raw hash IDs with meaningful names
+  // Close actions dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (actionsMenuRef.current && !actionsMenuRef.current.contains(e.target as Node)) {
+        setActionsMenuOpen(false);
+      }
+    };
+    if (actionsMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [actionsMenuOpen]);
+
+  // Load episode titles for channels
   useEffect(() => {
     let isCancelled = false;
     const fetchEpisodeTitles = async () => {
@@ -760,11 +672,6 @@ export function TasksView({
       isCancelled = true;
     };
   }, [channels]);
-
-  const handleViewModeChange = (mode: "cards" | "table") => {
-    setViewMode(mode);
-    window.localStorage.setItem("studio-tasks-view-mode", mode);
-  };
 
   // Group and structure all production items (both episode-level and channel-level)
   const productionItems = useMemo(() => {
@@ -846,12 +753,37 @@ export function TasksView({
       });
     }
 
-    // Sorting: RUNNING first (0), QUEUED (1), WAITING_APPROVAL (2), FAILED (3), COMPLETED (4)
+    // Sorting: RUNNING (0), QUEUED (1 - by queuePosition ASC), WAITING_APPROVAL (2), FAILED (3), COMPLETED (4), CANCELLED (5)
     return list.sort((a, b) => {
-      const rank = (s: Task["status"]) =>
-        s === "RUNNING" ? 0 : s === "QUEUED" ? 1 : s === "WAITING_APPROVAL" ? 2 : s === "FAILED" ? 3 : 4;
+      const rank = (s: Task["status"]) => {
+        switch (s) {
+          case "RUNNING": return 0;
+          case "QUEUED": return 1;
+          case "WAITING_APPROVAL": return 2;
+          case "FAILED": return 3;
+          case "COMPLETED": return 4;
+          case "CANCELLED": return 5;
+          default: return 6;
+        }
+      };
       const rankDiff = rank(a.status) - rank(b.status);
       if (rankDiff !== 0) return rankDiff;
+
+      // Tie-break for QUEUED: sort by queuePosition ascending (earlier queue position runs first)
+      if (a.status === "QUEUED" && b.status === "QUEUED") {
+        const posA = a.queuePosition ?? 9999;
+        const posB = b.queuePosition ?? 9999;
+        if (posA !== posB) return posA - posB;
+      }
+
+      // Tie-break for terminal states: most recently completed first
+      if ((a.status === "COMPLETED" || a.status === "CANCELLED") && (b.status === "COMPLETED" || b.status === "CANCELLED")) {
+        const timeA = a.completedAt || a.startedAt;
+        const timeB = b.completedAt || b.startedAt;
+        return timeB.localeCompare(timeA);
+      }
+
+      // Default tie-break: newest started/created first
       return b.startedAt.localeCompare(a.startedAt);
     });
   }, [tasks, dismissedTaskIds, channelMap, episodeTitleMap]);
@@ -860,8 +792,10 @@ export function TasksView({
   const totalCount = productionItems.length;
   const runningCount = productionItems.filter((i) => i.status === "RUNNING").length;
   const queuedCount = productionItems.filter((i) => i.status === "QUEUED").length;
+  const waitingApprovalCount = productionItems.filter((i) => i.status === "WAITING_APPROVAL").length;
   const failedCount = productionItems.filter((i) => i.status === "FAILED").length;
   const completedCount = productionItems.filter((i) => i.status === "COMPLETED").length;
+  const cancelledCount = productionItems.filter((i) => i.status === "CANCELLED").length;
 
   // Filtered list based on Status, Channel, and Search Query
   const filteredItems = useMemo(() => {
@@ -869,8 +803,10 @@ export function TasksView({
       // Status filter
       if (statusFilter === "running" && item.status !== "RUNNING") return false;
       if (statusFilter === "queued" && item.status !== "QUEUED") return false;
+      if (statusFilter === "waiting_approval" && item.status !== "WAITING_APPROVAL") return false;
       if (statusFilter === "failed" && item.status !== "FAILED") return false;
       if (statusFilter === "completed" && item.status !== "COMPLETED") return false;
+      if (statusFilter === "cancelled" && item.status !== "CANCELLED") return false;
 
       // Channel filter
       if (channelFilter !== "all" && item.channelId !== channelFilter) return false;
@@ -890,6 +826,20 @@ export function TasksView({
       return true;
     });
   }, [productionItems, statusFilter, channelFilter, searchQuery]);
+
+  // Grouped priority subsets for default "all" view
+  const attentionItems = useMemo(
+    () => filteredItems.filter((i) => i.status === "FAILED" || i.status === "WAITING_APPROVAL"),
+    [filteredItems]
+  );
+  const inProgressItems = useMemo(
+    () => filteredItems.filter((i) => i.status === "RUNNING" || i.status === "QUEUED"),
+    [filteredItems]
+  );
+  const doneItems = useMemo(
+    () => filteredItems.filter((i) => i.status === "COMPLETED" || i.status === "CANCELLED"),
+    [filteredItems]
+  );
 
   // Actions
   const cancel = async (task: Task) => {
@@ -920,7 +870,7 @@ export function TasksView({
   const clearCompleted = () => {
     const completedIds = new Set<string>();
     productionItems
-      .filter((i) => i.status === "COMPLETED")
+      .filter((i) => i.status === "COMPLETED" || i.status === "CANCELLED")
       .forEach((item) => {
         item.tasks.forEach((t) => completedIds.add(t.task_id));
       });
@@ -930,7 +880,7 @@ export function TasksView({
       completedIds.forEach((id) => next.add(id));
       return next;
     });
-    onNotice({ tone: "good", message: "Cleared completed tasks from view" });
+    onNotice({ tone: "good", message: "Cleared finished tasks from view" });
   };
 
   const retryAllFailed = async () => {
@@ -975,122 +925,116 @@ export function TasksView({
     }
   };
 
+  const selectedChannelObj = channels.find((c) => c.channel_id === channelFilter);
+
   return (
     <section className="page-wrap task-manager-page">
-      {/* Top Header */}
+      {/* Row 1: Header with Refresh Action */}
       <PageTitle
         eyebrow="Operations & Jobs"
         title="Task Manager"
         action={
-          <div className="task-header-actions">
-            {/* View Mode Toggle (Cards vs Table) */}
-            <div className="task-view-toggle" role="tablist" aria-label="View Layout">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={viewMode === "cards"}
-                className={`task-view-toggle-btn ${viewMode === "cards" ? "is-active" : ""}`}
-                onClick={() => handleViewModeChange("cards")}
-                title="Streamlined Cards View"
-              >
-                <SquaresFour size={15} />
-                <span>Cards</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={viewMode === "table"}
-                className={`task-view-toggle-btn ${viewMode === "table" ? "is-active" : ""}`}
-                onClick={() => handleViewModeChange("table")}
-                title="Compact Table View"
-              >
-                <TableIcon size={15} />
-                <span>Table</span>
-              </button>
-            </div>
-
-            {/* Refresh Button */}
-            <button
-              type="button"
-              className="quiet-button"
-              onClick={() => void handleManualRefresh()}
-              disabled={isRefreshing}
-            >
-              <ArrowClockwise size={15} className={isRefreshing ? "spin" : ""} />
-              <span>Refresh</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            className="quiet-button"
+            onClick={() => void handleManualRefresh()}
+            disabled={isRefreshing}
+            aria-label="Refresh tasks"
+          >
+            <ArrowClockwise size={15} className={isRefreshing ? "spin" : ""} />
+            <span>Refresh</span>
+          </button>
         }
       />
 
-      {/* Interactive KPI Filter Bar */}
-      <div className="task-kpi-bar" role="tablist" aria-label="Task Status Filters">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={statusFilter === "all"}
-          className={`task-kpi-chip ${statusFilter === "all" ? "is-active" : ""}`}
-          onClick={() => setStatusFilter("all")}
-        >
-          <span className="kpi-label">All Tasks</span>
-          <span className="kpi-count">{totalCount}</span>
-        </button>
+      {/* Row 2: Consolidated Toolbar (Status Filter Chips + Search + Channel + Actions Menu) */}
+      <div className="task-toolbar-unified">
+        {/* Left: Status Filter Chips */}
+        <div className="task-kpi-bar" role="group" aria-label="Filter tasks by status">
+          <button
+            type="button"
+            aria-pressed={statusFilter === "all"}
+            className={`task-kpi-chip ${statusFilter === "all" ? "is-active" : ""}`}
+            onClick={() => setStatusFilter("all")}
+          >
+            <span className="kpi-label">All</span>
+            <span className="kpi-count">{totalCount}</span>
+          </button>
 
-        <button
-          type="button"
-          role="tab"
-          aria-selected={statusFilter === "running"}
-          className={`task-kpi-chip is-running ${statusFilter === "running" ? "is-active" : ""}`}
-          onClick={() => setStatusFilter("running")}
-        >
-          {runningCount > 0 && <span className="live-dot-pulse" />}
-          <span className="kpi-label">Running</span>
-          <span className="kpi-count">{runningCount}</span>
-        </button>
+          <button
+            type="button"
+            aria-pressed={statusFilter === "running"}
+            className={`task-kpi-chip is-running ${statusFilter === "running" ? "is-active" : ""}`}
+            onClick={() => setStatusFilter("running")}
+          >
+            {runningCount > 0 && <span className="live-dot-pulse" />}
+            <span className="kpi-label">Running</span>
+            <span className="kpi-count">{runningCount}</span>
+          </button>
 
-        <button
-          type="button"
-          role="tab"
-          aria-selected={statusFilter === "queued"}
-          className={`task-kpi-chip is-queued ${statusFilter === "queued" ? "is-active" : ""}`}
-          onClick={() => setStatusFilter("queued")}
-        >
-          <span className="kpi-label">Queued</span>
-          <span className="kpi-count">{queuedCount}</span>
-        </button>
+          <button
+            type="button"
+            aria-pressed={statusFilter === "queued"}
+            className={`task-kpi-chip is-queued ${statusFilter === "queued" ? "is-active" : ""}`}
+            onClick={() => setStatusFilter("queued")}
+          >
+            <span className="kpi-label">Queued</span>
+            <span className="kpi-count">{queuedCount}</span>
+          </button>
 
-        <button
-          type="button"
-          role="tab"
-          aria-selected={statusFilter === "failed"}
-          className={`task-kpi-chip is-failed ${statusFilter === "failed" ? "is-active" : ""}`}
-          onClick={() => setStatusFilter("failed")}
-        >
-          <span className="kpi-label">Failed</span>
-          <span className={`kpi-count ${failedCount > 0 ? "has-errors" : ""}`}>{failedCount}</span>
-        </button>
+          {waitingApprovalCount > 0 && (
+            <button
+              type="button"
+              aria-pressed={statusFilter === "waiting_approval"}
+              className={`task-kpi-chip is-waiting_approval ${statusFilter === "waiting_approval" ? "is-active" : ""}`}
+              onClick={() => setStatusFilter("waiting_approval")}
+            >
+              <span className="kpi-label">Waiting</span>
+              <span className="kpi-count">{waitingApprovalCount}</span>
+            </button>
+          )}
 
-        <button
-          type="button"
-          role="tab"
-          aria-selected={statusFilter === "completed"}
-          className={`task-kpi-chip is-completed ${statusFilter === "completed" ? "is-active" : ""}`}
-          onClick={() => setStatusFilter("completed")}
-        >
-          <span className="kpi-label">Completed</span>
-          <span className="kpi-count">{completedCount}</span>
-        </button>
-      </div>
+          <button
+            type="button"
+            aria-pressed={statusFilter === "failed"}
+            className={`task-kpi-chip is-failed ${statusFilter === "failed" ? "is-active" : ""}`}
+            onClick={() => setStatusFilter("failed")}
+          >
+            <span className="kpi-label">Failed</span>
+            <span className={`kpi-count ${failedCount > 0 ? "has-errors" : ""}`}>{failedCount}</span>
+          </button>
 
-      {/* Toolbar: Search, Channel Selector, Batch Actions */}
-      <div className="task-toolbar">
-        <div className="task-toolbar-left">
+          <button
+            type="button"
+            aria-pressed={statusFilter === "completed"}
+            className={`task-kpi-chip is-completed ${statusFilter === "completed" ? "is-active" : ""}`}
+            onClick={() => setStatusFilter("completed")}
+          >
+            <span className="kpi-label">Done</span>
+            <span className="kpi-count">{completedCount}</span>
+          </button>
+
+          {cancelledCount > 0 && (
+            <button
+              type="button"
+              aria-pressed={statusFilter === "cancelled"}
+              className={`task-kpi-chip is-cancelled ${statusFilter === "cancelled" ? "is-active" : ""}`}
+              onClick={() => setStatusFilter("cancelled")}
+            >
+              <span className="kpi-label">Cancelled</span>
+              <span className="kpi-count">{cancelledCount}</span>
+            </button>
+          )}
+        </div>
+
+        {/* Right: Search + Channel Selector + Actions Menu */}
+        <div className="task-toolbar-controls">
           {/* Search Box */}
           <div className="task-search-box">
             <MagnifyingGlass size={14} className="search-icon" />
             <input
               type="search"
-              placeholder="Search by topic, channel, task type..."
+              placeholder="Search tasks..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               aria-label="Search tasks"
@@ -1126,45 +1070,66 @@ export function TasksView({
               </select>
             </div>
           )}
-        </div>
 
-        {/* Batch Action Buttons */}
-        <div className="task-toolbar-right">
-          {failedCount > 0 && (
+          {/* Bulk Actions Dropdown */}
+          <div className="task-bulk-actions-wrap" ref={actionsMenuRef}>
             <button
               type="button"
-              className="quiet-button compact warn-btn"
-              onClick={() => void retryAllFailed()}
-              title="Retry all failed tasks"
+              className={`quiet-button compact task-actions-trigger ${actionsMenuOpen ? "is-active" : ""}`}
+              onClick={() => setActionsMenuOpen((prev) => !prev)}
+              aria-haspopup="true"
+              aria-expanded={actionsMenuOpen}
+              aria-label="Bulk actions menu"
             >
-              <ArrowsClockwise size={13} />
-              <span>Retry Failed ({failedCount})</span>
+              <ListChecks size={14} />
+              <span>Actions</span>
+              <CaretDown size={11} />
             </button>
-          )}
 
-          {queuedCount > 0 && (
-            <button
-              type="button"
-              className="quiet-button danger compact"
-              onClick={() => void cancelAllQueued()}
-              title="Cancel all queued tasks"
-            >
-              <X size={13} />
-              <span>Cancel Queue ({queuedCount})</span>
-            </button>
-          )}
-
-          {completedCount > 0 && (
-            <button
-              type="button"
-              className="quiet-button compact"
-              onClick={clearCompleted}
-              title="Clear completed tasks from this view"
-            >
-              <Trash size={13} />
-              <span>Clear Done</span>
-            </button>
-          )}
+            {actionsMenuOpen && (
+              <div className="task-actions-dropdown-menu" role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="task-dropdown-item"
+                  disabled={failedCount === 0}
+                  onClick={() => {
+                    setActionsMenuOpen(false);
+                    void retryAllFailed();
+                  }}
+                >
+                  <ArrowsClockwise size={14} />
+                  <span>Retry Failed ({failedCount})</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="task-dropdown-item danger-text"
+                  disabled={queuedCount === 0}
+                  onClick={() => {
+                    setActionsMenuOpen(false);
+                    void cancelAllQueued();
+                  }}
+                >
+                  <X size={14} />
+                  <span>Cancel Queue ({queuedCount})</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="task-dropdown-item"
+                  disabled={completedCount + cancelledCount === 0}
+                  onClick={() => {
+                    setActionsMenuOpen(false);
+                    clearCompleted();
+                  }}
+                >
+                  <Trash size={14} />
+                  <span>Clear Finished ({completedCount + cancelledCount})</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1173,21 +1138,170 @@ export function TasksView({
         <EmptyState
           icon={<FilmSlate size={32} />}
           title={
-            searchQuery
+            searchQuery && channelFilter !== "all"
+              ? "No matching tasks found"
+              : searchQuery
               ? "No tasks match your search"
+              : channelFilter !== "all"
+              ? `No tasks for "${selectedChannelObj?.display_name || "channel"}"`
               : statusFilter !== "all"
-              ? `No ${statusFilter} tasks`
+              ? `No ${formatTaskStatus(statusFilter.toUpperCase() as Task["status"])} tasks`
               : "No tasks found"
           }
           copy={
-            searchQuery
-              ? "Try adjusting your search terms or reset the channel filter."
-              : "When you generate videos, topics, or scripts, live operations will appear here."
+            searchQuery && channelFilter !== "all"
+              ? "Try adjusting your search query or reset your channel filter."
+              : searchQuery
+              ? "Try adjusting your search terms to find what you are looking for."
+              : channelFilter !== "all"
+              ? "This channel has no matching tasks. Switch to All Channels or generate a new task."
+              : "When you generate videos, topics, or scripts, operations will appear here in real-time."
           }
-          action={searchQuery ? "Clear Search" : "Refresh"}
-          onAction={searchQuery ? () => setSearchQuery("") : () => void handleManualRefresh()}
+          action={
+            searchQuery && channelFilter !== "all"
+              ? "Reset All Filters"
+              : searchQuery
+              ? "Clear Search"
+              : channelFilter !== "all"
+              ? "Reset Channel Filter"
+              : statusFilter !== "all"
+              ? "Show All Tasks"
+              : "Refresh"
+          }
+          onAction={
+            searchQuery && channelFilter !== "all"
+              ? () => {
+                  setSearchQuery("");
+                  setChannelFilter("all");
+                }
+              : searchQuery
+              ? () => setSearchQuery("")
+              : channelFilter !== "all"
+              ? () => setChannelFilter("all")
+              : statusFilter !== "all"
+              ? () => setStatusFilter("all")
+              : () => void handleManualRefresh()
+          }
         />
-      ) : viewMode === "cards" ? (
+      ) : statusFilter === "all" ? (
+        /* Grouped Priority Layout for Default View */
+        <div className="task-priority-groups">
+          {/* Group 1: Needs Attention (Failed / Waiting Approval) */}
+          {attentionItems.length > 0 && (
+            <section className="task-group-section is-attention" aria-label="Tasks needing attention">
+              <div className="task-group-header">
+                <div className="task-group-title-wrap">
+                  <span className="task-group-badge is-attention">Needs Attention</span>
+                  <span className="task-group-count">{attentionItems.length}</span>
+                </div>
+                {failedCount > 0 && (
+                  <button
+                    type="button"
+                    className="text-button compact warn-text"
+                    onClick={() => void retryAllFailed()}
+                  >
+                    <ArrowsClockwise size={13} />
+                    <span>Retry All Failed</span>
+                  </button>
+                )}
+              </div>
+              <div className="streamlined-task-grid">
+                {attentionItems.map((item) => (
+                  <StreamlinedTaskCard
+                    key={item.id}
+                    item={item}
+                    now={now}
+                    onOpenEpisode={onOpenEpisode}
+                    onCancel={cancel}
+                    onRetry={retry}
+                    onInspect={setSelectedInspectItem}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Group 2: In Progress & Queue (Running / Queued) */}
+          {inProgressItems.length > 0 && (
+            <section className="task-group-section is-in-progress" aria-label="Tasks in progress and queue">
+              <div className="task-group-header">
+                <div className="task-group-title-wrap">
+                  <span className="task-group-badge is-in-progress">In Progress & Queue</span>
+                  <span className="task-group-count">{inProgressItems.length}</span>
+                </div>
+                {queuedCount > 0 && (
+                  <button
+                    type="button"
+                    className="text-button compact"
+                    onClick={() => void cancelAllQueued()}
+                  >
+                    <X size={13} />
+                    <span>Cancel Queue</span>
+                  </button>
+                )}
+              </div>
+              <div className="streamlined-task-grid">
+                {inProgressItems.map((item) => (
+                  <StreamlinedTaskCard
+                    key={item.id}
+                    item={item}
+                    now={now}
+                    onOpenEpisode={onOpenEpisode}
+                    onCancel={cancel}
+                    onRetry={retry}
+                    onInspect={setSelectedInspectItem}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Group 3: Completed & Cancelled */}
+          {doneItems.length > 0 && (
+            <section className="task-group-section is-done" aria-label="Finished and cancelled tasks">
+              <div className="task-group-header">
+                <div className="task-group-title-wrap">
+                  <span className="task-group-badge is-done">Completed & Cancelled</span>
+                  <span className="task-group-count">{doneItems.length}</span>
+                </div>
+                <button
+                  type="button"
+                  className="text-button compact"
+                  onClick={clearCompleted}
+                >
+                  <Trash size={13} />
+                  <span>Clear List</span>
+                </button>
+              </div>
+              <div className="streamlined-task-grid">
+                {(showAllDone ? doneItems : doneItems.slice(0, 6)).map((item) => (
+                  <StreamlinedTaskCard
+                    key={item.id}
+                    item={item}
+                    now={now}
+                    onOpenEpisode={onOpenEpisode}
+                    onCancel={cancel}
+                    onRetry={retry}
+                    onInspect={setSelectedInspectItem}
+                  />
+                ))}
+              </div>
+              {doneItems.length > 6 && (
+                <div className="task-group-expand-row">
+                  <button
+                    type="button"
+                    className="quiet-button compact"
+                    onClick={() => setShowAllDone((prev) => !prev)}
+                  >
+                    <span>{showAllDone ? "Show Less" : `Show All ${doneItems.length} Finished Tasks`}</span>
+                  </button>
+                </div>
+              )}
+            </section>
+          )}
+        </div>
+      ) : (
+        /* Flat Filtered List View */
         <div className="streamlined-task-grid">
           {filteredItems.map((item) => (
             <StreamlinedTaskCard
@@ -1201,15 +1315,6 @@ export function TasksView({
             />
           ))}
         </div>
-      ) : (
-        <CompactTaskTable
-          items={filteredItems}
-          now={now}
-          onOpenEpisode={onOpenEpisode}
-          onCancel={cancel}
-          onRetry={retry}
-          onInspect={setSelectedInspectItem}
-        />
       )}
 
       {/* Slide-over Task Detail & Error Drawer */}
@@ -1225,5 +1330,3 @@ export function TasksView({
     </section>
   );
 }
-
-
