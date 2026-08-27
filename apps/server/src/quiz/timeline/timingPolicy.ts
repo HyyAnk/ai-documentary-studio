@@ -41,7 +41,7 @@ export function timingPolicyForAgeBand(ageBand: QuizAgeBand): QuizTimingPolicy {
     narration_gap_seconds: 0.08,
     question_to_choices_pause_seconds: 1.0,
     thinking_settle_seconds: 0.1,
-    post_prompt_thinking_seconds: 3,
+    post_prompt_thinking_seconds: 1.0,
     reveal_delay_seconds: 0.05,
     reveal_seconds: 0.58,
     reveal_voice_lead_seconds: 0.12,
@@ -55,7 +55,7 @@ export function timingPolicyForAgeBand(ageBand: QuizAgeBand): QuizTimingPolicy {
     outro_hold_seconds: 5.0,
     minimum_thinking_seconds: { "4-6": 7.2, "7-9": 6.8, "10-12": 6.5, family: 6.8 }[ageBand],
     maximum_thinking_seconds: { "4-6": 8.5, "7-9": 8, "10-12": 7.8, family: 8 }[ageBand],
-    countdown_seconds: 3,
+    countdown_seconds: 5,
     fallback_words_per_second: 2.05,
   };
 }

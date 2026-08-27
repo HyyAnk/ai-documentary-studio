@@ -47,6 +47,9 @@ describe("deterministic Quiz timeline compiler", () => {
       if (questionNarration && choiceNarration) {
         expect(Number((choiceNarration.at_seconds - (questionNarration.at_seconds + questionNarration.duration_seconds)).toFixed(3))).toBeGreaterThanOrEqual(1.0);
       }
+      const countdownTicks = timeline.events.filter((event) => event.type === "countdown.tick" && event.question_id === question.id);
+      expect(countdownTicks).toHaveLength(5);
+      expect(countdownTicks.map((t) => t.payload.value)).toEqual([5, 4, 3, 2, 1]);
     }
     expect(validateQuizTimeline(value, timeline)).toEqual([]);
   });
