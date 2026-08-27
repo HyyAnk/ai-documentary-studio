@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 import type { DirectorPlan, QuizConfig, QuizTimeline, QuizV2, Scene } from "@studio/shared";
 import { buildCandyArcadeComposition, buildCandyArcadeCompositionBundle, type CandyArcadeCompositionBundle } from "./candyArcadeComposition.js";
+import type { ResolveBgmOptions } from "../audio/bgmRegistry.js";
 
 export function buildQuizComposition(config: { question_count: number; quiz_format: string; age_band: string; visual_theme: string }, scenes: Scene[], audioPath: string, narrationDurationSeconds?: number): string {
   const sceneDuration = Math.max(0.1, scenes.reduce((sum, scene) => sum + scene.duration_seconds, 0));
@@ -38,6 +39,7 @@ type QuizV2CompositionInput = {
   audioPath: string;
   narrationDurationSeconds: number;
   assets?: Record<string, string>;
+  bgmOptions?: ResolveBgmOptions;
 };
 
 /**

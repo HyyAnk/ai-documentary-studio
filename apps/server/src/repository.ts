@@ -14,6 +14,7 @@ import {
   TopicConfirmInputSchema,
   QuestionHistoryEntrySchema,
   QuestionHistoryCheckResultSchema,
+  BgmHistoryEntrySchema,
   QUIZ_SECONDS_PER_QUESTION,
   VoicePlanSchema,
   VoiceProfileSchema,
@@ -25,6 +26,7 @@ import {
   type EpisodeSettingsInput,
   type QuestionHistoryEntry,
   type QuestionHistoryCheckResult,
+  type BgmHistoryEntry,
   type QuizAssessment,
   type QuizAssetPlan,
   type QuizAssetResolution,
@@ -568,6 +570,46 @@ export class RepositoryService {
 
     const combined = [...filteredExisting, ...newEntries];
     const pruned = pruneQuestionHistory(combined, ttlDays);
+    await mkdir(path.dirname(historyPath), { recursive: true });
+    await this.writeJsonAtomic(historyPath, pruned);
+  }
+
+  async readBgmHistory(channelId: string): Promise<BgmHistoryEntry[]> {
+    const channel = await this.getChannel(channelId);
+    const historyPath = this.resolvePath("channels", channel.slug, "bgm_history.json");
+    try {
+      const raw = JSON.parse(await readFile(historyPath, "utf8")) as unknown;
+      if (!Array.isArray(raw)) return [];
+      return raw.map((item) => BgmHistoryEntrySchema.parse(item));
+    } catch {
+      return [];
+    }
+  }
+
+  async appendBgmHistory(channelId: string, episodeId: string, trackId: string, filename: string, ttlDays = 30): Promise<void> {
+    const channel = await this.getChannel(channelId);
+    const episode = await this.getEpisode(channelId, episodeId).catch(() => null);
+    const episodeTitle = episode?.topic?.title || episodeId;
+    const historyPath = this.resolvePath("channels", channel.slug, "bgm_history.json");
+    const existing = await this.readBgmHistory(channelId);
+
+    const filteredExisting = existing.filter((e) => e.episode_id !== episodeId);
+    const newEntry: BgmHistoryEntry = {
+      track_id: trackId,
+      filename,
+      episode_id: episodeId,
+      episode_title: episodeTitle,
+      channel_id: channelId,
+      used_at: nowIso(),
+    };
+
+    const combined = [newEntry, ...filteredExisting];
+    const cutOff = Date.now() - ttlDays * 24 * 60 * 60 * 1000;
+    const pruned = combined.filter((entry) => {
+      const entryTime = new Date(entry.used_at).getTime();
+      return !Number.isNaN(entryTime) && entryTime >= cutOff;
+    });
+
     await mkdir(path.dirname(historyPath), { recursive: true });
     await this.writeJsonAtomic(historyPath, pruned);
   }

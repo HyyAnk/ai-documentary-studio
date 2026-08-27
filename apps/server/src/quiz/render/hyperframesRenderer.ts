@@ -11,6 +11,7 @@ export class HyperframesRenderer implements QuizRenderer {
       audioPath: input.audioPath,
       narrationDurationSeconds: input.narrationDurationSeconds ?? input.timeline.duration_seconds,
       assets: input.assets,
+      bgmOptions: input.bgmOptions,
     });
     return {
       html: composition.html,

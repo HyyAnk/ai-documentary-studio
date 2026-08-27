@@ -1,4 +1,5 @@
 import type { DirectorPlan, QuizConfig, QuizTimeline, QuizV2, Scene } from "@studio/shared";
+import type { ResolveBgmOptions } from "../audio/bgmRegistry.js";
 
 export type QuizRenderInput = {
   quiz: QuizV2;
@@ -9,6 +10,7 @@ export type QuizRenderInput = {
   theme: QuizConfig["visual_theme"];
   narrationDurationSeconds?: number;
   assets?: Record<string, string>;
+  bgmOptions?: ResolveBgmOptions;
 };
 
 export type PreparedQuizRender = { html: string; compositionFiles: Record<string, string>; durationSeconds: number; questionCount: number };

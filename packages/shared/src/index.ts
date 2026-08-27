@@ -704,6 +704,16 @@ export const QuestionHistoryEntrySchema = z.object({
 });
 export type QuestionHistoryEntry = z.infer<typeof QuestionHistoryEntrySchema>;
 
+export const BgmHistoryEntrySchema = z.object({
+  track_id: z.string().min(1),
+  filename: z.string().min(1),
+  episode_id: z.string().min(1),
+  episode_title: z.string().min(1),
+  channel_id: z.string().min(1),
+  used_at: IsoDate,
+});
+export type BgmHistoryEntry = z.infer<typeof BgmHistoryEntrySchema>;
+
 export const QuestionHistoryCheckItemSchema = z.object({
   current_question_id: z.string().min(1),
   current_question_text: z.string().min(1),

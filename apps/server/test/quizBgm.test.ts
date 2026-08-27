@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { QuizV2Schema } from "@studio/shared";
 import { BgmRegistry, defaultBgmRegistry } from "../src/quiz/audio/bgmRegistry.js";
@@ -5,6 +8,7 @@ import { buildQuizVoicePlan } from "../src/quiz/audio/voicePlan.js";
 import { createDefaultDirectorPlan } from "../src/quiz/director/parseDirectorPlan.js";
 import { buildCandyArcadeCompositionBundle } from "../src/quiz/render/candyArcadeComposition.js";
 import { compileQuizTimeline } from "../src/quiz/timeline/compileTimeline.js";
+import { RepositoryService } from "../src/repository.js";
 
 const quiz = QuizV2Schema.parse({
   schema_version: 2,
@@ -141,5 +145,123 @@ describe("BGM Registry and Audio Pipeline", () => {
     expect(bundle.html).toContain('data-track-index="2"');
     expect(bundle.html).toContain('class="clip sfx-clip"');
     expect(bundle.html).toContain('data-track-index="3"');
+  });
+
+  it("avoids recently used tracks and selects unused tracks (LRU policy)", () => {
+    const registry = defaultBgmRegistry;
+    const upbeatTracks = registry.getTracks("120_bpm_upbeat");
+    expect(upbeatTracks.length).toBeGreaterThanOrEqual(5);
+
+    // Initial pick without history
+    const initialSchedule = registry.resolveBgmSchedule(120, {
+      bpmPreference: "120_bpm_upbeat",
+      seed: "episode-01",
+    });
+    const firstTrackId = initialSchedule[0]!.trackId;
+
+    // Next episode with firstTrackId in recent history
+    const nextSchedule = registry.resolveBgmSchedule(120, {
+      bpmPreference: "120_bpm_upbeat",
+      recentTrackIds: [firstTrackId],
+      seed: "episode-02",
+    });
+    const secondTrackId = nextSchedule[0]!.trackId;
+
+    expect(secondTrackId).not.toBe(firstTrackId);
+  });
+
+  it("performs clean Round-Robin selection across multiple consecutive episodes", () => {
+    const registry = defaultBgmRegistry;
+    const history: string[] = [];
+    const chosenTracks: string[] = [];
+    const episodeCount = 10;
+
+    for (let i = 1; i <= episodeCount; i++) {
+      const schedule = registry.resolveBgmSchedule(120, {
+        bpmPreference: "120_bpm_upbeat",
+        recentTrackIds: history,
+        seed: `episode-series-${i}`,
+      });
+      const chosen = schedule[0]!.trackId;
+      chosenTracks.push(chosen);
+      history.unshift(chosen);
+    }
+
+    // All 10 episodes should have chosen unique BGM tracks
+    const uniqueChosen = new Set(chosenTracks);
+    expect(uniqueChosen.size).toBe(episodeCount);
+  });
+
+  it("produces deterministic BGM choice for the same episode ID and state", () => {
+    const registry = defaultBgmRegistry;
+    const run1 = registry.resolveBgmSchedule(150, {
+      bpmPreference: "120_bpm_upbeat",
+      recentTrackIds: ["track_a", "track_b"],
+      seed: "episode-deterministic-check",
+    });
+    const run2 = registry.resolveBgmSchedule(150, {
+      bpmPreference: "120_bpm_upbeat",
+      recentTrackIds: ["track_a", "track_b"],
+      seed: "episode-deterministic-check",
+    });
+
+    expect(run1[0]!.trackId).toBe(run2[0]!.trackId);
+    expect(run1[0]!.src).toBe(run2[0]!.src);
+  });
+
+  it("supports pinning an explicit track ID", () => {
+    const registry = defaultBgmRegistry;
+    const schedule = registry.resolveBgmSchedule(150, {
+      bpmPreference: "120_bpm_upbeat",
+      trackId: "Morning_in_the_Garden",
+    });
+
+    expect(schedule[0]!.trackId).toBe("Morning_in_the_Garden");
+  });
+
+  it("persists and prunes channel BGM history in repository", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "quiz-bgm-history-"));
+    try {
+      await mkdir(path.join(root, "templates"), { recursive: true });
+      await writeFile(path.join(root, "templates", "example_channel_dna.md"), "# DNA\n", "utf8");
+      await writeFile(path.join(root, "templates", "quiz_channel_dna.md"), "# Quiz DNA\n", "utf8");
+      await writeFile(path.join(root, "templates", "example_style_guide.md"), "# Style\n", "utf8");
+      const repository = new RepositoryService(root);
+      const channel = await repository.createChannel({
+        name: "BGM Channel",
+        description: "",
+        target_audience: "",
+        language: "English",
+        market: "",
+        dna_mode: "example",
+        group_id: "quiz",
+      });
+
+      // Initially empty
+      expect(await repository.readBgmHistory(channel.channel_id)).toEqual([]);
+
+      // Append first track
+      await repository.appendBgmHistory(channel.channel_id, "ep-1", "A_Pocketful_of_Marbles", "A_Pocketful_of_Marbles.mp3");
+      const history1 = await repository.readBgmHistory(channel.channel_id);
+      expect(history1).toHaveLength(1);
+      expect(history1[0]!.track_id).toBe("A_Pocketful_of_Marbles");
+      expect(history1[0]!.episode_id).toBe("ep-1");
+
+      // Append second track
+      await repository.appendBgmHistory(channel.channel_id, "ep-2", "Building_a_Paper_Castle", "Building_a_Paper_Castle.mp3");
+      const history2 = await repository.readBgmHistory(channel.channel_id);
+      expect(history2).toHaveLength(2);
+      expect(history2[0]!.track_id).toBe("Building_a_Paper_Castle");
+      expect(history2[1]!.track_id).toBe("A_Pocketful_of_Marbles");
+
+      // Re-appending same episode replaces previous entry for that episode
+      await repository.appendBgmHistory(channel.channel_id, "ep-2", "Chasing_Paper_Planes", "Chasing_Paper_Planes.mp3");
+      const history3 = await repository.readBgmHistory(channel.channel_id);
+      expect(history3).toHaveLength(2);
+      expect(history3[0]!.track_id).toBe("Chasing_Paper_Planes");
+      expect(history3[1]!.track_id).toBe("A_Pocketful_of_Marbles");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

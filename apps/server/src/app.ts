@@ -455,6 +455,7 @@ export async function buildApp(rootDirectory = process.env.STUDIO_ROOT ?? proces
     return reply.code(201).send({ episode: await repository.confirmTopic(params.channelId, input.topic_id, input.question_count, input.visual_style) });
   });
   server.get("/api/channels/:channelId/episodes", async (request) => ({ episodes: await repository.listEpisodes((request.params as { channelId: string }).channelId) }));
+  server.get("/api/channels/:channelId/bgm-history", async (request) => ({ history: await repository.readBgmHistory((request.params as { channelId: string }).channelId) }));
   server.delete("/api/channels/:channelId/episodes/:episodeId", async (request) => {
     const params = request.params as { channelId: string; episodeId: string };
     const query = request.query as { confirm?: string };

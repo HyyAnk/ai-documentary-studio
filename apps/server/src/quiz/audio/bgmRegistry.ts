@@ -1,4 +1,4 @@
-﻿import fs from "node:fs";
+import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -38,10 +38,24 @@ export type BgmPlacement = {
 export type ResolveBgmOptions = {
   bpmPreference?: BgmCategory | "auto";
   baseVolume?: number;
-  seed?: number;
+  seed?: number | string;
+  trackId?: string;
+  recentTrackIds?: string[];
   assets?: Record<string, string>;
   baseDirectory?: string;
 };
+
+export function hashStringToSeed(input?: string | number): number {
+  if (typeof input === "number") return Math.abs(Math.floor(input));
+  if (!input) return 0;
+  let hash = 0;
+  for (let i = 0; i < input.length; i++) {
+    const char = input.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
 
 export class BgmRegistry {
   private manifest: BgmManifest | null = null;
@@ -131,21 +145,59 @@ export class BgmRegistry {
     return this.tracks.get(id) ?? null;
   }
 
+  selectCandidateTrack(candidates: BgmTrack[], options?: ResolveBgmOptions): BgmTrack | null {
+    if (candidates.length === 0) return null;
+
+    if (options?.trackId) {
+      const explicit = candidates.find((t) => t.id === options.trackId || t.filename === options.trackId);
+      if (explicit) return explicit;
+    }
+
+    const seedNumber = hashStringToSeed(options?.seed);
+    const recent = options?.recentTrackIds ?? [];
+
+    if (recent.length === 0) {
+      return candidates[seedNumber % candidates.length]!;
+    }
+
+    // Rank candidates by recency: distance from recent usage.
+    // Index 0 in recent is the most recent (distance 0).
+    // An unused track has distance Infinity.
+    let maxDistance = -1;
+    const scored = candidates.map((track) => {
+      const idx = recent.indexOf(track.id);
+      const distance = idx === -1 ? Number.POSITIVE_INFINITY : idx;
+      if (distance > maxDistance) {
+        maxDistance = distance;
+      }
+      return { track, distance };
+    });
+
+    const bestPool = scored
+      .filter((item) => item.distance === maxDistance)
+      .map((item) => item.track);
+
+    return bestPool[seedNumber % bestPool.length]!;
+  }
+
   resolveBgmSchedule(totalDurationSeconds: number, options?: ResolveBgmOptions): BgmPlacement[] {
     const duration = Math.max(1, totalDurationSeconds);
     const categoryPref = options?.bpmPreference ?? "120_bpm_upbeat";
     const baseVolume = options?.baseVolume ?? 0.18;
-    const pool = this.getTracks(categoryPref === "auto" ? undefined : categoryPref);
+    const explicitTrack = options?.trackId
+      ? (this.getTrack(options.trackId) ?? this.getTracks().find((t) => t.id === options.trackId || t.filename === options.trackId) ?? null)
+      : null;
+    const pool = explicitTrack ? [explicitTrack] : this.getTracks(categoryPref === "auto" ? undefined : categoryPref);
     const available = pool.length > 0 ? pool : this.getTracks();
 
     if (available.length === 0) return [];
 
-    const seed = options?.seed ?? 0;
+    const seedNumber = hashStringToSeed(options?.seed);
 
     // If single track can cover the duration (standard <= 185s episode)
     const longEnoughTracks = available.filter((t) => t.duration_seconds >= duration - 1.0);
     if (longEnoughTracks.length > 0) {
-      const track = longEnoughTracks[seed % longEnoughTracks.length]!;
+      const track = this.selectCandidateTrack(longEnoughTracks, options)!;
       const customAsset = options?.assets?.[`bgm:${track.id}`] ?? options?.assets?.[track.filename];
       const src = customAsset ? formatAudioSource(customAsset) : `./bgm/${track.filename}`;
 
@@ -167,11 +219,17 @@ export class BgmRegistry {
     const placements: BgmPlacement[] = [];
     let cursor = 0;
     let index = 0;
+    const usedInSequence: string[] = [...(options?.recentTrackIds ?? [])];
 
     while (cursor < duration - 0.1) {
       const remaining = duration - cursor;
-      const trackIndex = (seed + index) % available.length;
-      const track = available[trackIndex]!;
+      const track = this.selectCandidateTrack(available, {
+        ...options,
+        recentTrackIds: usedInSequence,
+        seed: seedNumber + index,
+      }) ?? available[(seedNumber + index) % available.length]!;
+
+      usedInSequence.unshift(track.id);
       const segmentDuration = Math.min(remaining, track.duration_seconds);
 
       const customAsset = options?.assets?.[`bgm:${track.id}`] ?? options?.assets?.[track.filename];

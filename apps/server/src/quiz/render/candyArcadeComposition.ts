@@ -5,7 +5,7 @@ import type { DirectorPlan, QuizConfig, QuizTimeline, QuizV2 } from "@studio/sha
 import { getQuizVisualTemplate } from "../visual/registry.js";
 import { ambientPhaseSeconds, motionCssClass, textLayout, visualAnswerState } from "../visual/candyArcade.js";
 import type { QuizTemplateScene } from "../visual/types.js";
-import { defaultBgmRegistry } from "../audio/bgmRegistry.js";
+import { defaultBgmRegistry, type ResolveBgmOptions } from "../audio/bgmRegistry.js";
 
 
 export type CandyArcadeCompositionInput = {
@@ -16,6 +16,7 @@ export type CandyArcadeCompositionInput = {
   audioPath: string;
   narrationDurationSeconds: number;
   assets?: Record<string, string>;
+  bgmOptions?: ResolveBgmOptions;
 };
 
 export type CandyArcadeCompositionBundle = {
@@ -89,7 +90,10 @@ export function buildCandyArcadeCompositionBundle(input: CandyArcadeCompositionI
   const scenes = clips.filter(Boolean).map(toSubComposition);
   const audioSrc = source(input.audioPath);
   const narrationDuration = input.narrationDurationSeconds > 0 ? input.narrationDurationSeconds : duration;
-  const bgmClips = buildBgmClips(duration, input.assets, outroStart);
+  const bgmClips = buildBgmClips(duration, input.assets, outroStart, {
+    seed: input.quiz.episode_id,
+    ...input.bgmOptions,
+  });
   const sfxClips = buildSfxClips(events, input.assets);
   const audioTags = [
     `<audio id="quiz-narration" class="clip" data-start="0" data-duration="${narrationDuration.toFixed(3)}" data-track-index="2" data-volume="1" src="${audioSrc}"></audio>`,
@@ -259,8 +263,12 @@ function source(value: string): string {
   return pathToFileURL(value).href;
 }
 
-function buildBgmClips(duration: number, assets?: Record<string, string>, outroStart?: number): string[] {
-  const schedule = defaultBgmRegistry.resolveBgmSchedule(duration, { assets, bpmPreference: "120_bpm_upbeat" });
+function buildBgmClips(duration: number, assets?: Record<string, string>, outroStart?: number, bgmOptions?: ResolveBgmOptions): string[] {
+  const schedule = defaultBgmRegistry.resolveBgmSchedule(duration, {
+    assets,
+    bpmPreference: "120_bpm_upbeat",
+    ...bgmOptions,
+  });
   const totalClips = schedule.length;
 
   return schedule.map((item, index) => {

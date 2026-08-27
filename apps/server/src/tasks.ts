@@ -853,8 +853,22 @@ export class TaskManager extends EventEmitter {
           throw new RepositoryError("Quiz V2 preflight blocked render: " + (blocker?.message ?? "Resolve the reported QA blockers before rendering."), "QUIZ_PREFLIGHT_BLOCKED");
         }
       }
+      const bgmHistory = await this.repository.readBgmHistory(task.channel_id);
       const preparedQuizRender = completeQuizV2
-        ? await quizRenderer.prepare({ quiz: completeQuizV2.quiz, director: completeQuizV2.director, timeline: completeQuizV2.timeline, scenes, audioPath: "./narration.wav", theme: episode.quiz_config.visual_theme, narrationDurationSeconds: episode.narration_duration_seconds ?? undefined, assets: assetSources })
+        ? await quizRenderer.prepare({
+            quiz: completeQuizV2.quiz,
+            director: completeQuizV2.director,
+            timeline: completeQuizV2.timeline,
+            scenes,
+            audioPath: "./narration.wav",
+            theme: episode.quiz_config.visual_theme,
+            narrationDurationSeconds: episode.narration_duration_seconds ?? undefined,
+            assets: assetSources,
+            bgmOptions: {
+              recentTrackIds: bgmHistory.map((entry) => entry.track_id),
+              seed: episode.episode_id,
+            },
+          })
         : null;
       const html = preparedQuizRender?.html ?? buildQuizComposition(episode.quiz_config, scenes, "./narration.wav", episode.narration_duration_seconds ?? undefined);
       await writeFile(compositionPath, html, "utf8");
@@ -1033,6 +1047,9 @@ export class TaskManager extends EventEmitter {
       if (!Number.isFinite(duration) || duration <= 0) throw new Error("Rendered MP4 has no readable duration");
       const degradedAssets = (assetResolution?.assets ?? []).filter((a) => a.degraded || a.fallback_tier === 3 || a.source === "fallback");
       const hasDegradedFallback = degradedAssets.length > 0;
+      const bgmMatch = html.match(/src=["']\.\/bgm\/([^"']+)["']/);
+      const selectedBgmFilename = bgmMatch ? bgmMatch[1] : null;
+      const selectedBgmTrackId = selectedBgmFilename ? selectedBgmFilename.replace(/\.mp3$/i, "") : null;
       const manifestPath = await this.repository.writeRenderManifest(task.channel_id, task.episode_id, JSON.stringify({
         engine: "hyperframes",
         quiz_engine_version: completeQuizV2 ? 2 : 1,
@@ -1044,6 +1061,8 @@ export class TaskManager extends EventEmitter {
         duration_seconds: Number(duration.toFixed(3)),
         resolution: { width: 1920, height: 1080 },
         fps: this.videoConfig.fps,
+        bgm_track_id: selectedBgmTrackId ?? undefined,
+        bgm_filename: selectedBgmFilename ?? undefined,
         degraded: hasDegradedFallback,
         fallback_tier: hasDegradedFallback ? 3 : undefined,
         degraded_assets: hasDegradedFallback ? degradedAssets.map((a) => a.asset_id) : undefined,
@@ -1060,6 +1079,13 @@ export class TaskManager extends EventEmitter {
           await this.repository.appendQuestionHistory(task.channel_id, task.episode_id, completeQuizV2.quiz.questions);
         } catch {
           // Ignore non-fatal question history save error
+        }
+      }
+      if (selectedBgmTrackId && selectedBgmFilename) {
+        try {
+          await this.repository.appendBgmHistory(task.channel_id, task.episode_id, selectedBgmTrackId, selectedBgmFilename);
+        } catch {
+          // Ignore non-fatal BGM history save error
         }
       }
       await this.update(task.task_id, { progress_message: "Quiz video ready", progress_percent: 100 });
